@@ -46,6 +46,8 @@ The contract is set after Node research and design, before implementation. If im
 
 ## Product and Architecture Guardrails
 
+- Carry's design philosophy is restraint and freedom: constrain truth, authority, privacy, commitments, and external consequences; preserve freedom in goals, natural language, methods, concrete adapters, and future redesign. Responsibility is definite; the path is free.
+- Every new constraint must name the current invariant or user harm it prevents. Every freedom stops at the current authority, privacy, and consequence boundary. Fewer lines are not restraint if truth becomes weaker; more extension points are not freedom if no consumer exists.
 - Users need to understand only Space, Carry, and Work. Needs You is a query.
 - An explicit delegation creates Work directly; do not create a Work Offer entity.
 - Current persistent owners are Identity, Space, Work, Machine, and Run. Conversation, Delivery, Action, Artifact, Plugin, Event, Result, Question, Timer, and other candidates appear only when a current journey proves an independent lifecycle and authority boundary.

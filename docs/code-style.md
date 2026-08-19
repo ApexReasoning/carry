@@ -17,6 +17,15 @@ Carry 的代码必须让读者快速看清：
 
 > 用最少的概念，完整表达当前真实行为。
 
+这条标准服从 Carry 的“克制与自由”：
+
+- 对 identity、authority、causality、time、outcome 和 invalid state 保持克制，用准确类型、事务和失败路径限制它们；
+- 对自然语言、目标、解释方法和 concrete adapter 保持自由，不用 enum、通用接口和提前抽象缩窄它们；
+- 少代码不是独立目标。删除证明真实或权限所需的代码不是克制，而是缺陷；
+- 多扩展点也不是自由。没有消费者的 option、interface、registry 和 compatibility path 只会限制未来重新设计。
+
+代码 review 因此同时问两个问题：这段约束保护了什么真实不变量？这段结构是否无必要地排除了合法路径？
+
 格式交给工具。Review 时间用于判断 ownership、authority、failure 和 unnecessary code。
 
 ## 2. 代码首先服从架构
@@ -77,9 +86,9 @@ Agent prompt 代替服务端规则
 推荐：
 
 ```go
-works.Revise(ctx, command)
+works.Create(ctx, command)
 runs.Claim(ctx, machineID)
-deliveries.MarkUnknown(ctx, claim)
+machines.Revoke(ctx, command)
 ```
 
 避免：

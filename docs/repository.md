@@ -12,6 +12,17 @@
 
 本文件约束目录、文档、Makefile、scripts、tests、generated code 和 CI。它不定义产品或领域架构；这些分别由 `docs/product.md` 和 `docs/architecture.md` 决定。
 
+仓库层面对“克制与自由”的职责是：克制当前树中的永久结构，保留开发与演化的自由。
+
+- 只有当前产品、真实工具链、已发布协议和持续有效证据进入长期导航；
+- 临时研究、review、生成 artifact 和被替代实现不获得永久目录；
+- stable command 只承诺可验证结果，不冻结底层工具组合；
+- boundary check 表达少量禁止方向，不维护中央 package allowlist；
+- experiment 可以自由回答问题，但不能悄悄成为生产依赖或永久 CI；
+- Git 历史负责保留过去，当前工作树负责给出一个清楚答案。
+
+仓库整洁不是把文件数降到最低。真实 consumer、可重建 source、失败证据和发布合同必须保留；没有当前消费者的结构则应删除，让未来需求可以从当时事实重新设计。
+
 ## 2. 仓库为什么会失控
 
 代码库通常不是因为某一个大错误变乱，而是因为临时方案不断变成永久结构。
@@ -461,8 +472,8 @@ Go/TS test 证明产品规则
 - 全量 race；
 - reachable dependency vulnerability scan；
 - 较长浏览器矩阵；
-- Plugin fixture 全组合；
-- Pi/Codex 真实 Runtime canary；
+- 已经实现的第三方能力 fixture 矩阵；
+- Pi/Codex 真实 native canary；
 - container build 与扫描。
 
 ### Release

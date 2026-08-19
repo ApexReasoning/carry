@@ -27,7 +27,54 @@ Web / carry CLI
 
 PostgreSQL 拥有事务、唯一 winner、lease、fence、幂等和恢复裁决。第一版不引入 Kafka、Redis queue、Temporal、微服务或 Object Storage。
 
-## 2. 概念准入
+## 2. 架构哲学：可信内核，自由边缘
+
+`docs/product.md` 定义的“克制与自由”在架构上不是平均分配复杂度，而是把不同事实放在不同强度的边界中。
+
+### 2.1 内核克制
+
+越接近团队事实和真实后果，表示必须越窄、越明确：
+
+- owner 唯一，持久事实不在多层复制；
+- identity、authority、causality、time、sequence、fence、idempotency 和 outcome 强类型；
+- 并发决定由 PostgreSQL transaction、constraint 和 conditional write 裁决；
+- public protocol 只包含真实消费者需要的承诺；
+- privacy 与 external consequence 默认 fail closed；
+- 没有独立生命周期和权限边界的角色不获得表、API、package 或 identity。
+
+这里的克制不是机械减少行数。删除一项约束如果会让事实可伪造、authority 可竞争或 Unknown 被猜测，就是破坏架构；必要复杂度必须留在能够证明它的 owner 中。
+
+架构可以机械证明系统拥有的 identity、authority、causality、time、sequence 和 external outcome，不能机械证明开放自然语言的全部语义真伪。Work 当前理解因此是 Carry 产生并明确归属于 Carry 的可见、可纠正解释；结构验证和 fenced commit 只能证明它由谁在什么 authority 下写入，不能把其中内容自动认证为外部事实。这个边界不能通过 Evidence entity、通用 semantic validator 或模型自我声明替代。
+
+### 2.2 边缘自由
+
+越接近目标、自然语言、推理和具体执行方法，架构越少预设：
+
+- Work core 不按领域、Git、内容、provider、model、Host 或 Runtime 分类；
+- 开放内容保持开放，不用核心 enum 模拟人的全部表达；
+- concrete adapter 保留 native protocol、终态和资源管理；
+- capability 只绑定获得它的准确 Attempt，不反向改变 Work identity；
+- 尚未发布的内部路径可以直接删除和重建，不维护假兼容；
+- 未来 owner 从真实旅程 promotion，不从预想的完整平台向下填空。
+
+这里的自由不是绕过核心。任何路径一旦要读取私人事实、提交团队事实或产生外部后果，就必须重新进入当前 authority owner 的窄入口。
+
+### 2.3 决策分界
+
+架构评审先判断一个变化位于哪一侧：
+
+| 问题 | 默认设计 |
+| --- | --- |
+| 谁、对什么、何时有权写入？ | 克制：准确 owner、credential、transaction、fence |
+| 什么已经发生，结果是否确定？ | 克制：typed fact、constraint、Success/Failed/Unknown |
+| 用户可以委托什么？ | 自由：自然语言 Work，不建领域分类 |
+| Carry 可以怎样完成？ | 自由：边界内选择方法，concrete adapter 原生实现 |
+| 未来是否可能有第二种能力？ | 自由：暂不冻结共同抽象 |
+| 当前消费者是否需要稳定协议？ | 克制：只发布最小真实合同 |
+
+新增约束必须指出它保护的当前不变量或用户伤害；新增自由必须证明它没有越过 authority、privacy 和 consequence。不能回答其中一项的设计不进入核心。
+
+## 3. 概念准入
 
 新增名词、表、状态、接口、API audience 或 package 前必须同时回答：
 
@@ -41,7 +88,7 @@ PostgreSQL 拥有事务、唯一 winner、lease、fence、幂等和恢复裁决�
 
 尤其禁止把角色提升成实体：Evidence、Contribution、Completion、Observation、Draft 等词只有在独立生命周期真正出现时才获得 identity。Artifact 是 bytes；Artifact 被用于支持判断时仍然只是 Artifact。
 
-## 3. 当前事实 owner
+## 4. 当前事实 owner
 
 当前只有这些 owner：
 
@@ -51,7 +98,7 @@ PostgreSQL 拥有事务、唯一 winner、lease、fence、幂等和恢复裁决�
 | Space | Membership、Machine enrollment 权限 | User API、Host enrollment |
 | Work | 目标、负责人、消息、当前理解 | 成员、执行路径 |
 | Machine | 独立执行身份、证书、撤销 | Host API |
-| Run | 一次固定 Work 推进及其 Attempts | Host、Pi、Codex |
+| Run | 一次固定 Work 推进及其 Attempts | Host API、Host worker |
 
 以下不是 owner：
 
@@ -63,15 +110,15 @@ PostgreSQL 拥有事务、唯一 winner、lease、fence、幂等和恢复裁决�
 - Coordinator：当前只有一种 Work Run，不需要 subtype；
 - Result、Question、Timer、Event、Delivery、Plugin、Artifact：等第一条无法由当前 owner 表达的真实旅程再 promotion。
 
-## 4. Identity、Space 与 Machine
+## 5. Identity、Space 与 Machine
 
-### 4.1 User
+### 5.1 User
 
 成员 CLI 使用 User token。Web 用 User token 换取短期 HttpOnly Browser Session，避免 JavaScript 保存长期 bearer。
 
 User token 和 Browser Session 是两种 credential 表示，但都映射到同一成员身份。它们不能作为 Machine credential。
 
-### 4.2 Machine
+### 5.2 Machine
 
 `carry host enroll` 由已登录成员发起。服务端在同一事务中验证 Membership 与 enrollment 权限，并签发独立 Machine certificate。
 
@@ -79,7 +126,7 @@ User token 和 Browser Session 是两种 credential 表示，但都映射到同�
 
 Machine 只保存 durable identity、Space、显示名、证书 serial、enrollment 与 revocation。服务端不保存 Runtime report、binary path、版本、availability 或 Machine status projection。
 
-### 4.3 Host 与本地 executor
+### 5.3 Host 与本地 executor
 
 Host 启动时在本地只读 Diagnose Pi 和 Codex，并选择一个可用的 concrete executor。选择发生在 claim 前并在 worker 生命周期内保持稳定；claim 后不切换 provider 或自动 fallback。
 
@@ -94,7 +141,7 @@ Execute(ctx, immutable Work context) (UnderstandingUpdate, error)
 
 取消由 `context` 表达。进程、RPC/app-server、临时目录、协议终态和 cleanup 由具体 adapter 拥有。共同合同不包含 Resume、Discard、Session identity、provider event 或 checkpoint。
 
-## 5. Work
+## 6. Work
 
 Work 是连续性的事实源。它保存：
 
@@ -109,7 +156,7 @@ Work 是连续性的事实源。它保存：
 
 内部进度字段用于准确区分“消息已记录”和“已经反映到当前理解”，但不进入 User API。
 
-### 5.1 输入
+### 6.1 输入
 
 目标是 Work 的稳定字段。第一轮执行读取目标，但不再把目标复制成一条 tagged Agent input。
 
@@ -121,7 +168,7 @@ Work Messages 按准确顺序追加。Run 固定本次要应用到哪里的输�
 
 模型不需要 input sequence、base version、Run ID、Attempt ID、fence 或 Machine identity。这些物理字段由 Host 保留并只用于提交。
 
-### 5.2 当前理解
+### 6.2 当前理解
 
 当前 understanding 和 next step 直接属于 Work。第一版不保存独立 understanding revision rows，因为没有历史浏览、回滚或审计消费者。
 
@@ -137,13 +184,13 @@ Work 保留内部 `understanding_version` 作为 CAS，不把 version 提升成�
 
 成功后同一事务更新 Work 当前理解、推进 applied input、终结 Attempt 与 Run。
 
-## 6. Run 与 Attempt
+## 7. Run 与 Attempt
 
 Run 是一次固定的 Work 推进。Attempt 是这次推进的一次物理执行。
 
 这个区别保留，因为它们拥有不同生命周期：Run 可以在 Host 失败后继续；旧 Attempt 必须永久失去 authority。
 
-### 6.1 没有 coordinator queue
+### 7.1 没有 coordinator queue
 
 第一版没有后台 coordinator、pending Run 或 coordinator subtype。
 
@@ -158,7 +205,7 @@ Machine claim 在一个 PostgreSQL 事务中：
 
 如果没有可领取 Work，返回 empty claim。服务端不需要每秒扫描 Work，也不需要独立 goroutine 预先制造 pending rows。
 
-### 6.2 Claim descriptor
+### 7.2 Claim descriptor
 
 Claim 只包含当前 Host 真正需要的字段：
 
@@ -171,7 +218,7 @@ Claim 只包含当前 Host 真正需要的字段：
 
 它不包含 writer token、Agent credential、provider、Runtime、model、Session、repository 或 future capability fields。
 
-### 6.3 Authority
+### 7.3 Authority
 
 当前执行 authority 由以下事实共同组成：
 
@@ -188,7 +235,7 @@ Machine mTLS
 
 将来只有原生 Agent 或本地 bridge 需要直接调用服务端能力时，才引入 Attempt-scoped credential。那时 credential 必须绑定准确 Attempt/fence/capability，并与 Machine mTLS 分离。
 
-### 6.4 Host API
+### 7.4 Host API
 
 Host API 使用 Machine mTLS，只提供当前 worker 需要的行为：
 
@@ -203,7 +250,7 @@ Claim 直接返回执行上下文，不再增加独立 LoadContext round trip。
 
 每个 mutation 都重新验证 Machine、Run、Attempt、fence 和 lease。协议 response 不泄漏 provider state。
 
-### 6.5 失败与恢复
+### 7.5 失败与恢复
 
 lease 过期只撤销旧 Attempt 的提交权，不证明旧进程停止或失败。
 
@@ -221,7 +268,7 @@ lease 过期只撤销旧 Attempt 的提交权，不证明旧进程停止或失�
 
 如果未来模型成本或时延证明原生终态重取有产品价值，优先让同一 Machine 的 concrete adapter 用本地、Run-keyed 状态自然优化；只有跨 Machine 持久化成为真实需求时才重新设计服务端合同。
 
-## 7. Native Agent adapters
+## 8. Native Agent adapters
 
 Pi adapter 直接使用 Pi documented RPC；Codex adapter 直接使用 Codex app-server。两者通过同一产品 conformance suite，但不共享虚构 provider protocol。
 
@@ -238,7 +285,7 @@ next_step
 
 Codex 缓冲结束但缺少准确 terminal notification 时，只可有界只读核对；不能证明完成则 Finish Unknown。Host 不在 claim 后切换到另一 adapter。
 
-## 8. User API
+## 9. User API
 
 User API 只表达成员旅程：
 
@@ -260,7 +307,7 @@ User Work response 包含：
 
 Web 使用 `protocol/user/v1/openapi.yaml` 生成 client。CLI 与 Web 不复制权限规则。
 
-## 9. 必须原子的事务
+## 10. 必须原子的事务
 
 | 行为 | 同一事务中完成 |
 | --- | --- |
@@ -275,7 +322,7 @@ Web 使用 `protocol/user/v1/openapi.yaml` 生成 client。CLI 与 Web 不复制
 
 所有网络和 native Agent I/O 都在数据库事务外发生。
 
-## 10. 数据形态
+## 11. 数据形态
 
 当前持久表应收敛为：
 
@@ -309,7 +356,7 @@ provider/runtime/model/session columns
 
 Carry 不使用 Event Sourcing，也不建立开放 JSON operation/evidence/event 表。
 
-## 11. 代码边界
+## 12. 代码边界
 
 当前结构：
 
@@ -344,7 +391,7 @@ protocol/
 - 不建立 common、utils、platform、integration、registry、resource、runtime、orchestrator 或 readmodel；
 - 删除最后一个消费者时同时删除 package、route、query、generated code、test 和文档。
 
-## 12. Promotion contracts
+## 13. Promotion contracts
 
 未来能力只保存最小退出条件，不在当前架构冻结表、API 或 package。
 
@@ -376,7 +423,7 @@ protocol/
 
 第一条 Skill/MCP journey 只选择一种 transport 和一个 fixture。没有真实 credential-bearing consumer 前不建立 marketplace、tool registry 或通用 Plugin runtime。
 
-## 13. 正确性证据
+## 14. 正确性证据
 
 当前架构必须由以下测试证明：
 
@@ -392,7 +439,7 @@ protocol/
 - User API 不暴露内部 sequence/version/Run/Attempt；
 - PostgreSQL focused tests 使用真实隔离数据库，缺失数据库不是 pass。
 
-## 14. 明确不采用
+## 15. 明确不采用
 
 第一版不采用：
 
@@ -408,7 +455,7 @@ protocol/
 - workflow DSL 和通用 Plugin marketplace；
 - 为未发布合同保留 compatibility branch。
 
-## 15. 判断架构是否仍然简单
+## 16. 用克制与自由检查架构
 
 一次改动完成前回答：
 
@@ -418,5 +465,6 @@ protocol/
 4. 是否让 public API 传输了只有内部 CAS 需要的字段？
 5. 是否能删除一个 goroutine、endpoint、interface、row type 或转换层？
 6. 是否为一个尚不存在的第二消费者建立了抽象？
+7. 是否无必要地禁止了某个仍在当前 authority 内的合法目标、表达或执行方法？
 
-只要删除后用户旅程仍然完整，就删除。
+只有删除后当前用户旅程及其真实、authority、privacy、失败恢复和 external consequence 证据仍然完整，并且合法路径没有被缩窄，才删除。

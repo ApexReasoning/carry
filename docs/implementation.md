@@ -12,7 +12,28 @@
 - Pi/Codex 解释开放内容，系统不建立 Plan/Step/Role/Workflow；
 - 删除与新增同等重要；
 - 一个事实的用途不是新实体；
+- 以克制固定真实、authority 和后果，以自由保留目标表达、执行方法和未来演化；
 - review 不能为未来便利扩大已经冻结的关闭证据。
+
+### 克制与自由 gate
+
+每条 Node 在研究、合同、实现和 review 四个阶段都回答两组问题。
+
+克制：
+
+- 新 owner、状态、credential、协议或抽象保护哪个当前不变量？
+- 它是否把推测、角色或本地物理状态错误提升成产品事实？
+- 它是否扩大了权限、隐私可见性或外部后果？
+- 删除后如果真实与用户承诺不受损，为什么还要保留？
+
+自由：
+
+- 是否把 Work 按领域、工具、provider、Runtime 或完成方法提前分类？
+- 是否用统一框架抹平 concrete adapter 已经有价值的原生能力？
+- 是否让未发布兼容、未来 flags 或中央 registry 限制后续重新设计？
+- 在准确 authority 内，成员和 Carry 是否仍可选择合法的表达与推进路径？
+
+克制 gate 失败时不能实现；自由 gate 失败时先删除不必要约束。自由不得绕过真实、隐私、成员授权或 external consequence。
 
 ## 2. 来源与研究
 
@@ -241,7 +262,7 @@ Host 启动时选择一个可用 executor。claim 后不自动 fallback。Pi/Cod
 - core/schema/claim 没有 provider/runtime/model/session 字段；
 - Pi/Codex live canary 继续有效。
 
-## 11. Node 3：Runtime recovery
+## 11. Node 3：Host interruption recovery
 
 ### 用户结果
 
