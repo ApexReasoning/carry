@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: carry
+      POSTGRES_USER: carry
+      POSTGRES_PASSWORD: carry
+    ports:
+      - "127.0.0.1:${CARRY_POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U carry -d carry"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+    volumes:
+      - carry-postgres:/var/lib/postgresql/data
+
+volumes:
+  carry-postgres:

@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+packages=("$@")
+if ((${#packages[@]} == 0)); then
+  packages=(./internal/postgres/...)
+fi
+
+if [[ -n "${CARRY_TEST_DATABASE_URL:-}" ]]; then
+  go run ./scripts/check_test_database.go "$CARRY_TEST_DATABASE_URL"
+  exec go test -count=1 -tags=integration "${packages[@]}"
+fi
+
+if ! command -v docker >/dev/null 2>&1; then
+  echo 'Docker or CARRY_TEST_DATABASE_URL is required for PostgreSQL tests' >&2
+  exit 1
+fi
+
+suffix="$(openssl rand -hex 6)"
+container="carry-test-$(date -u +%Y%m%d%H%M%S)-$suffix"
+database="carry_test_$(date -u +%Y%m%d%H%M%S)_${suffix}_postgres"
+cleanup() {
+  docker rm -f "$container" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT INT TERM
+
+docker run --detach --rm \
+  --name "$container" \
+  --env POSTGRES_DB="$database" \
+  --env POSTGRES_PASSWORD=carry_test \
+  --publish 127.0.0.1::5432 \
+  postgres:17-alpine >/dev/null
+
+for _ in $(seq 1 60); do
+  if docker exec "$container" pg_isready --username postgres --dbname "$database" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 0.25
+done
+
+if ! docker exec "$container" pg_isready --username postgres --dbname "$database" >/dev/null 2>&1; then
+  echo 'PostgreSQL test container did not become ready' >&2
+  exit 1
+fi
+
+port="$(docker port "$container" 5432/tcp | awk -F: 'NR == 1 {print $NF}')"
+export CARRY_TEST_DATABASE_URL="postgres://postgres:carry_test@127.0.0.1:${port}/${database}?sslmode=disable"
+go run ./scripts/check_test_database.go "$CARRY_TEST_DATABASE_URL"
+go test -count=1 -tags=integration "${packages[@]}"

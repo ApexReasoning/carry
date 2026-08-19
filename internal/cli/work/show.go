@@ -1,0 +1,52 @@
+package work
+
+import (
+	"fmt"
+	"io"
+
+	"github.com/spf13/cobra"
+)
+
+func newShowCommand(configDirectory string, output io.Writer) *cobra.Command {
+	var spaceID string
+	command := &cobra.Command{
+		Use:   "show <work-id>",
+		Short: "Show Work and its messages",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(command *cobra.Command, arguments []string) error {
+			workID := arguments[0]
+			if err := validateWorkID(workID); err != nil {
+				return err
+			}
+			client, selectedSpaceID, err := connect(configDirectory, spaceID)
+			if err != nil {
+				return err
+			}
+			details, err := client.load(command.Context(), selectedSpaceID, workID)
+			if err != nil {
+				return err
+			}
+			if _, err := fmt.Fprintf(
+				output, "Work %s\nGoal: %s\nStatus: %s\nOwner: %s\n",
+				details.Work.WorkID, details.Work.Goal, details.Work.Lifecycle, details.Work.OwnerUserID,
+			); err != nil {
+				return err
+			}
+			if len(details.Messages) == 0 {
+				_, err = fmt.Fprintln(output, "Messages: none")
+				return err
+			}
+			if _, err := fmt.Fprintln(output, "Messages:"); err != nil {
+				return err
+			}
+			for _, message := range details.Messages {
+				if _, err := fmt.Fprintf(output, "  %d  %s: %s\n", message.InputSeq, message.AuthorUserID, message.Text); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	}
+	command.Flags().StringVar(&spaceID, "space", "", "Space UUID (required only with multiple Spaces)")
+	return command
+}

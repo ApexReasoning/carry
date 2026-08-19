@@ -1,0 +1,22 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+
+# Go
+bin/
+coverage.out
+
+# Web
+apps/web/node_modules/
+apps/web/dist/
+apps/web/coverage/
+apps/web/playwright-report/
+apps/web/test-results/
+
+# Local Carry state
+.carry/
+
+# Editors
+.idea/
+.vscode/

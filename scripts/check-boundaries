@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+module_path="$(go list -m)"
+forbidden_names='common|utils|helpers|platform|integration|provider|registry|resource|tool|runtime|manager|orchestrator|models|readmodel|workview'
+
+while IFS= read -r directory; do
+  name="$(basename "$directory")"
+  if [[ "$name" =~ ^($forbidden_names)$ ]]; then
+    printf 'forbidden ownership directory: %s\n' "$directory" >&2
+    exit 1
+  fi
+done < <(find internal -type d -mindepth 1 2>/dev/null)
+
+while IFS='|' read -r package imports; do
+  case "$package" in
+    "$module_path"/internal/server*|"$module_path"/internal/postgres*|"$module_path"/internal/agent*|"$module_path"/internal/connector*|"$module_path"/internal/cli*)
+      continue
+      ;;
+    "$module_path"/internal/*)
+      if [[ ",$imports," =~ ,$module_path/internal/(server|postgres|agent|connector|cli)(/[^,]*)?, ]]; then
+        printf 'domain package %s imports an adapter package\n' "$package" >&2
+        exit 1
+      fi
+      ;;
+  esac
+done < <(go list -f '{{.ImportPath}}|{{join .Imports ","}}' ./internal/...)
+
+if go list -deps ./cmd/carry-server | grep -q "^$module_path/internal/agent/"; then
+  echo 'carry-server must not import local Agent process implementations' >&2
+  exit 1
+fi
+
+while IFS='|' read -r package imports; do
+  if [[ "$imports" =~ github.com/spf13/(cobra|pflag) && "$package" != "$module_path/internal/cli"* ]]; then
+    printf 'Cobra and pflag are restricted to the Carry CLI adapter: %s\n' "$package" >&2
+    exit 1
+  fi
+done < <(go list -f '{{.ImportPath}}|{{join .Imports ","}}' ./...)
+
+if go list -deps ./cmd/carry-server | grep -q '^github.com/spf13/cobra$'; then
+  echo 'carry-server must keep its shallow standard-library flag interface' >&2
+  exit 1
+fi

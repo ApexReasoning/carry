@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+temporary="$(mktemp -d)"
+trap 'rm -rf "$temporary"' EXIT
+
+cd "$repository_root/apps/web"
+CARRY_WEB_GENERATED_OUTPUT="$temporary/generated" pnpm generate >/dev/null
+if ! diff -ru app/generated "$temporary/generated"; then
+  echo 'Web API client is stale; run make generate' >&2
+  exit 1
+fi

@@ -1,0 +1,287 @@
+openapi: 3.1.0
+info:
+  title: Carry Node 1 User API
+  version: 0.1.0
+servers:
+  - url: /
+security:
+  - memberToken: []
+  - browserSession: []
+paths:
+  /v1/browser/sessions:
+    post:
+      operationId: createBrowserSession
+      security:
+        - memberToken: []
+      responses:
+        "204":
+          description: Browser session created
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/browser/sessions/current:
+    delete:
+      operationId: revokeCurrentBrowserSession
+      security:
+        - browserSession: []
+      responses:
+        "204":
+          description: Browser session revoked
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/me:
+    get:
+      operationId: loadCurrentMember
+      responses:
+        "200":
+          description: Current member and Spaces
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Member"
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/spaces/{spaceID}/works:
+    parameters:
+      - $ref: "#/components/parameters/SpaceID"
+    get:
+      operationId: listWorks
+      responses:
+        "200":
+          description: Work visible in the Space
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [works]
+                properties:
+                  works:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Work"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+    post:
+      operationId: createWork
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [goal]
+              properties:
+                goal:
+                  type: string
+                  minLength: 1
+                  maxLength: 2000
+      responses:
+        "200":
+          description: Created or idempotently replayed Work
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Work"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+  /v1/spaces/{spaceID}/works/{workID}:
+    parameters:
+      - $ref: "#/components/parameters/SpaceID"
+      - $ref: "#/components/parameters/WorkID"
+    get:
+      operationId: loadWork
+      responses:
+        "200":
+          description: Work and its ordered member messages
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [work, messages]
+                properties:
+                  work:
+                    $ref: "#/components/schemas/Work"
+                  messages:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/WorkMessage"
+        "401":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+  /v1/spaces/{spaceID}/works/{workID}/messages:
+    parameters:
+      - $ref: "#/components/parameters/SpaceID"
+      - $ref: "#/components/parameters/WorkID"
+    post:
+      operationId: appendWorkMessage
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [text]
+              properties:
+                text:
+                  type: string
+                  minLength: 1
+                  maxLength: 61440
+      responses:
+        "200":
+          description: Appended or idempotently replayed Work Message
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkMessage"
+        "401":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+components:
+  securitySchemes:
+    memberToken:
+      type: http
+      scheme: bearer
+    browserSession:
+      type: apiKey
+      in: cookie
+      name: __Host-carry_session
+  parameters:
+    SpaceID:
+      name: spaceID
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    WorkID:
+      name: workID
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 255
+  responses:
+    Error:
+      description: Request rejected
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/APIError"
+  schemas:
+    APIError:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: string
+    Membership:
+      type: object
+      additionalProperties: false
+      required: [space_id, name, can_enroll_machines]
+      properties:
+        space_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        can_enroll_machines:
+          type: boolean
+    Member:
+      type: object
+      additionalProperties: false
+      required: [user_id, spaces]
+      properties:
+        user_id:
+          type: string
+        spaces:
+          type: array
+          items:
+            $ref: "#/components/schemas/Membership"
+    Work:
+      type: object
+      additionalProperties: false
+      required:
+        - work_id
+        - space_id
+        - goal
+        - lifecycle
+        - owner_user_id
+        - creator_user_id
+        - input_head_seq
+        - created_at
+      properties:
+        work_id:
+          type: string
+          format: uuid
+        space_id:
+          type: string
+          format: uuid
+        goal:
+          type: string
+        lifecycle:
+          type: string
+          enum: [open]
+        owner_user_id:
+          type: string
+        creator_user_id:
+          type: string
+        input_head_seq:
+          type: integer
+          format: int64
+          minimum: 1
+        created_at:
+          type: string
+          format: date-time
+    WorkMessage:
+      type: object
+      additionalProperties: false
+      required:
+        - message_id
+        - work_id
+        - author_user_id
+        - text
+        - input_seq
+        - created_at
+      properties:
+        message_id:
+          type: string
+          format: uuid
+        work_id:
+          type: string
+          format: uuid
+        author_user_id:
+          type: string
+        text:
+          type: string
+        input_seq:
+          type: integer
+          format: int64
+          minimum: 2
+        created_at:
+          type: string
+          format: date-time

@@ -1,0 +1,9 @@
+package identity
+
+import "errors"
+
+var ErrUnauthenticated = errors.New("user token is not active")
+
+type AuthenticatedUser struct {
+	UserID string
+}
