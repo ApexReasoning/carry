@@ -6,34 +6,31 @@ import (
 	"testing"
 )
 
-func TestAgentCredentialIsOpaqueAndDigestVerifiesOnlyExactSecret(t *testing.T) {
-	credential, err := NewAgentCredential()
+func TestValidateUnderstandingUpdateTrimsAndRejectsInvalidFields(t *testing.T) {
+	understanding, nextStep, err := ValidateUnderstandingUpdate("  Current facts  ", "  Ask the owner  ")
 	if err != nil {
-		t.Fatalf("create Agent credential: %v", err)
+		t.Fatalf("validate update: %v", err)
 	}
-	if !strings.HasPrefix(credential.Secret, agentCredentialPrefix) {
-		t.Fatalf("credential prefix = %q", credential.Secret)
+	if understanding != "Current facts" || nextStep != "Ask the owner" {
+		t.Fatalf("normalized update = %q, %q", understanding, nextStep)
 	}
-	if got := DigestAgentCredential(credential.Secret); got != credential.Digest {
-		t.Fatal("credential digest does not match its secret")
+	if _, _, err := ValidateUnderstandingUpdate("", "Continue"); !errors.Is(err, ErrInvalidUpdate) {
+		t.Fatalf("missing understanding error = %v", err)
 	}
-	if got := DigestAgentCredential(credential.Secret + "changed"); got == credential.Digest {
-		t.Fatal("changed credential retained the same digest")
+	if _, _, err := ValidateUnderstandingUpdate("Known", strings.Repeat("n", MaxNextStepBytes+1)); !errors.Is(err, ErrInvalidUpdate) {
+		t.Fatalf("oversized next step error = %v", err)
 	}
 }
 
-func TestValidateDraftTrimsContentAndRejectsMissingFields(t *testing.T) {
-	understanding, nextStep, err := ValidateDraft("  Current evidence  ", "  Ask the owner  ")
-	if err != nil {
-		t.Fatalf("validate draft: %v", err)
+func TestValidateUnresolvedOutcomeAcceptsOnlyFailedAndUnknown(t *testing.T) {
+	for _, outcome := range []State{StateFailed, StateUnknown} {
+		if err := ValidateUnresolvedOutcome(outcome); err != nil {
+			t.Fatalf("validate %s: %v", outcome, err)
+		}
 	}
-	if understanding != "Current evidence" || nextStep != "Ask the owner" {
-		t.Fatalf("normalized draft = %q / %q", understanding, nextStep)
-	}
-	if _, _, err := ValidateDraft("", "Continue"); !errors.Is(err, ErrInvalidDraft) {
-		t.Fatalf("missing understanding error = %v", err)
-	}
-	if _, _, err := ValidateDraft("Known", strings.Repeat("n", MaxNextStepBytes+1)); !errors.Is(err, ErrInvalidDraft) {
-		t.Fatalf("oversized next step error = %v", err)
+	for _, outcome := range []State{"", StateActive, StateSucceeded} {
+		if err := ValidateUnresolvedOutcome(outcome); !errors.Is(err, ErrInvalidOutcome) {
+			t.Fatalf("invalid outcome %q error = %v", outcome, err)
+		}
 	}
 }

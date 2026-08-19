@@ -178,7 +178,7 @@ func TestMachineRouteRejectsMemberCredentialsEvenWithValidCertificate(t *testing
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			runtimeStore := &recordingMachineRuntime{}
+			runStore := &recordingMachineRuns{}
 			member, err := NewMemberRoutes(
 				&recordingUserTokens{}, unavailableBrowserSessions{}, emptyMemberships{},
 				&recordingMachineEnrollments{}, unavailableWorkCommands{}, unavailableWorkQueries{}, authority,
@@ -186,12 +186,12 @@ func TestMachineRouteRejectsMemberCredentialsEvenWithValidCertificate(t *testing
 			if err != nil {
 				t.Fatalf("compose member routes: %v", err)
 			}
-			machine, err := NewMachineRoutes(runtimeStore, runtimeStore)
+			machine, err := NewMachineRoutes(runStore)
 			if err != nil {
 				t.Fatalf("compose Machine routes: %v", err)
 			}
 			handler := mustAPI(t, member, machine)
-			request := httptest.NewRequest(http.MethodPost, "/v1/host/runtime-report", strings.NewReader(`{"runtimes":[]}`))
+			request := httptest.NewRequest(http.MethodPost, "/v1/host/runs/claim", strings.NewReader(`{}`))
 			test.addMember(request)
 			request.TLS = &tls.ConnectionState{
 				PeerCertificates: []*x509.Certificate{certificate},
@@ -204,8 +204,8 @@ func TestMachineRouteRejectsMemberCredentialsEvenWithValidCertificate(t *testing
 			if response.Code != http.StatusUnauthorized {
 				t.Fatalf("status = %d, want %d; body = %s", response.Code, http.StatusUnauthorized, response.Body.String())
 			}
-			if runtimeStore.reportMachineID != "" {
-				t.Fatal("member credential reached Machine runtime store")
+			if runStore.claimMachineID != "" {
+				t.Fatal("member credential reached Machine Run store")
 			}
 		})
 	}
@@ -225,8 +225,8 @@ func memberSurfaceTestAPI(
 	if err != nil {
 		t.Fatalf("compose member routes: %v", err)
 	}
-	runtimeStore := &recordingMachineRuntime{}
-	machine, err := NewMachineRoutes(runtimeStore, runtimeStore)
+	runStore := &recordingMachineRuns{}
+	machine, err := NewMachineRoutes(runStore)
 	if err != nil {
 		t.Fatalf("compose Machine routes: %v", err)
 	}
@@ -243,8 +243,8 @@ func browserTestAPI(t *testing.T, sessions BrowserSessionStore) http.Handler {
 	if err != nil {
 		t.Fatalf("compose member routes: %v", err)
 	}
-	runtimeStore := &recordingMachineRuntime{}
-	machine, err := NewMachineRoutes(runtimeStore, runtimeStore)
+	runStore := &recordingMachineRuns{}
+	machine, err := NewMachineRoutes(runStore)
 	if err != nil {
 		t.Fatalf("compose Machine routes: %v", err)
 	}
@@ -284,5 +284,4 @@ func (s *recordingBrowserSessions) RevokeBrowserSession(_ context.Context, secre
 	return nil
 }
 
-var _ MachineRuntimeStore = (*recordingMachineRuntime)(nil)
-var _ = host.MachineStatus{}
+var _ MachineRunStore = (*recordingMachineRuns)(nil)

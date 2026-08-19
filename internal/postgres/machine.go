@@ -11,7 +11,6 @@ import (
 	"github.com/ApexReasoning/carry/internal/postgres/dbsqlc"
 	"github.com/ApexReasoning/carry/internal/space"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 func (s *Store) EnrollMachine(ctx context.Context, command host.EnrollMachineCommand) (host.MachineEnrollment, error) {
@@ -138,98 +137,4 @@ func (s *Store) RevokeMachine(ctx context.Context, userID string, spaceID string
 		return fmt.Errorf("commit Machine revocation: %w", err)
 	}
 	return nil
-}
-
-func (s *Store) ReplaceRuntimeObservations(ctx context.Context, machineID string, observations []host.RuntimeObservation) error {
-	if err := host.ValidateRuntimeReport(observations); err != nil {
-		return err
-	}
-	transaction, err := s.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin Runtime report: %w", err)
-	}
-	defer func() {
-		_ = transaction.Rollback(context.Background())
-	}()
-	queries := s.queries.WithTx(transaction)
-
-	// mTLS proves possession of an enrolled certificate; the current database
-	// row remains authoritative for revocation on every Host write.
-	machine, err := queries.LoadMachineStatus(ctx, machineID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return host.ErrMachineNotFound
-	}
-	if err != nil {
-		return fmt.Errorf("load Machine for Runtime report: %w", err)
-	}
-	if machine.RevokedAt.Valid {
-		return host.ErrMachineRevoked
-	}
-	if err := queries.DeleteRuntimeObservations(ctx, machineID); err != nil {
-		return fmt.Errorf("replace Runtime observations: %w", err)
-	}
-	for _, observation := range observations {
-		if err := queries.CreateRuntimeObservation(ctx, dbsqlc.CreateRuntimeObservationParams{
-			MachineID: machineID, RuntimeKind: string(observation.Kind), Detection: string(observation.Detection),
-			Executable: nullableString(observation.Executable), Version: nullableString(observation.Version),
-			DiagnosticCode:   nullableString(observation.DiagnosticCode),
-			DiagnosticDetail: nullableString(observation.DiagnosticDetail),
-			ObservedAt:       pgtype.Timestamptz{Time: observation.ObservedAt.UTC(), Valid: true},
-		}); err != nil {
-			return fmt.Errorf("insert %s Runtime observation: %w", observation.Kind, err)
-		}
-	}
-	if err := transaction.Commit(ctx); err != nil {
-		return fmt.Errorf("commit Runtime report: %w", err)
-	}
-	return nil
-}
-
-func (s *Store) LoadMachineStatus(ctx context.Context, machineID string) (host.MachineStatus, error) {
-	row, err := s.queries.LoadMachineStatus(ctx, machineID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return host.MachineStatus{}, host.ErrMachineNotFound
-	}
-	if err != nil {
-		return host.MachineStatus{}, fmt.Errorf("load Machine: %w", err)
-	}
-	status := host.MachineStatus{
-		MachineID: row.MachineID, SpaceID: row.SpaceID, DisplayName: row.DisplayName,
-		EnrolledAt: row.EnrolledAt.Time,
-	}
-	if row.RevokedAt.Valid {
-		revokedAt := row.RevokedAt.Time
-		status.RevokedAt = &revokedAt
-	}
-
-	runtimeRows, err := s.queries.ListRuntimeObservations(ctx, machineID)
-	if err != nil {
-		return host.MachineStatus{}, fmt.Errorf("load Runtime observations: %w", err)
-	}
-	status.Runtimes = make([]host.RuntimeObservation, 0, len(runtimeRows))
-	for _, runtimeRow := range runtimeRows {
-		status.Runtimes = append(status.Runtimes, host.RuntimeObservation{
-			Kind:       host.RuntimeKind(runtimeRow.RuntimeKind),
-			Detection:  host.RuntimeDetection(runtimeRow.Detection),
-			Executable: valueOrEmpty(runtimeRow.Executable), Version: valueOrEmpty(runtimeRow.Version),
-			DiagnosticCode:   valueOrEmpty(runtimeRow.DiagnosticCode),
-			DiagnosticDetail: valueOrEmpty(runtimeRow.DiagnosticDetail),
-			ObservedAt:       runtimeRow.ObservedAt.Time,
-		})
-	}
-	return status, nil
-}
-
-func nullableString(value string) *string {
-	if value == "" {
-		return nil
-	}
-	return &value
-}
-
-func valueOrEmpty(value *string) string {
-	if value == nil {
-		return ""
-	}
-	return *value
 }

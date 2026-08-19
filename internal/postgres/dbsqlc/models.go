@@ -23,19 +23,6 @@ type CarryUser struct {
 	CreatedAt   pgtype.Timestamptz
 }
 
-type CoordinatorRun struct {
-	RunID         string
-	WorkID        string
-	InputStartSeq int64
-	InputEndSeq   int64
-	BaseRevision  int64
-	WriterToken   string
-	State         string
-	CurrentFence  int64
-	CreatedAt     pgtype.Timestamptz
-	CompletedAt   pgtype.Timestamptz
-}
-
 type Machine struct {
 	MachineID                string
 	SpaceID                  string
@@ -49,27 +36,27 @@ type Machine struct {
 	RevokedAt                pgtype.Timestamptz
 }
 
-type MachineRuntimeObservation struct {
-	MachineID        string
-	RuntimeKind      string
-	Detection        string
-	Executable       *string
-	Version          *string
-	DiagnosticCode   *string
-	DiagnosticDetail *string
-	ObservedAt       pgtype.Timestamptz
+type Run struct {
+	RunID                    string
+	WorkID                   string
+	InputStartSeq            int64
+	InputEndSeq              int64
+	BaseUnderstandingVersion int64
+	State                    string
+	CurrentFence             int64
+	CreatedAt                pgtype.Timestamptz
+	CompletedAt              pgtype.Timestamptz
 }
 
 type RunAttempt struct {
-	AttemptID             string
-	RunID                 string
-	MachineID             string
-	Fence                 int64
-	AgentCredentialDigest []byte
-	State                 string
-	LeaseExpiresAt        pgtype.Timestamptz
-	ClaimedAt             pgtype.Timestamptz
-	CompletedAt           pgtype.Timestamptz
+	AttemptID      string
+	RunID          string
+	MachineID      string
+	Fence          int64
+	State          string
+	LeaseExpiresAt pgtype.Timestamptz
+	ClaimedAt      pgtype.Timestamptz
+	CompletedAt    pgtype.Timestamptz
 }
 
 type Space struct {
@@ -108,7 +95,9 @@ type Work struct {
 	CreateRequestDigest  []byte
 	CreatedAt            pgtype.Timestamptz
 	AppliedInputSeq      int64
-	CurrentRevision      int64
+	UnderstandingVersion int64
+	Understanding        *string
+	NextStep             *string
 }
 
 type WorkMessage struct {
@@ -120,14 +109,4 @@ type WorkMessage struct {
 	IdempotencyKey string
 	RequestDigest  []byte
 	CreatedAt      pgtype.Timestamptz
-}
-
-type WorkUnderstandingRevision struct {
-	WorkID          string
-	Revision        int64
-	SourceRunID     string
-	Understanding   string
-	NextStep        string
-	AppliedInputSeq int64
-	CreatedAt       pgtype.Timestamptz
 }

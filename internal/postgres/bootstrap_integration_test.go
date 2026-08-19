@@ -107,9 +107,8 @@ func openMigratedTestPool(t *testing.T, ctx context.Context) *pgxpool.Pool {
 		t.Fatalf("migrate PostgreSQL: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `
-		truncate work_messages, works, browser_sessions,
-		machine_runtime_observations, machines, user_tokens,
-		space_memberships, spaces, carry_users cascade
+		truncate run_attempts, runs, work_messages, works, browser_sessions,
+		machines, user_tokens, space_memberships, spaces, carry_users cascade
 	`); err != nil {
 		t.Fatalf("reset PostgreSQL facts: %v", err)
 	}

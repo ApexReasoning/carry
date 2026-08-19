@@ -21,7 +21,7 @@ Carry 的代码必须让读者快速看清：
 
 ## 2. 代码首先服从架构
 
-目录、package、文件和类型都不能自行创造架构。新边界只使用 `docs/architecture.md` 定义的四个审查问题，本文件不建立第二套准入标准。
+目录、package、文件和类型都不能自行创造架构。新边界只使用 `docs/architecture.md` 的概念准入问题，本文件不建立第二套准入标准。
 
 边界一旦成立，代码仍应让它拥有的事实、不变量和当前消费者清晰可见。名词、文件长度、表结构、UI 视图、语法相似或目录对称都不能单独证明一个 package。
 
@@ -98,8 +98,7 @@ utils.Normalize(value)
 | `Record` | 保存已经发生的事实 |
 | `Claim` | 原子取得有限期处理权 |
 | `Renew` | 延长当前有效 claim |
-| `Commit` | 原子提交已经验证的结果 |
-| `Revise` | 基于准确 base revision 更新当前理解 |
+| `Commit` | 基于准确 version/fence 原子提交已经验证的结果 |
 | `Find` | 查找可能不存在的单个值 |
 | `Load` | 读取必须存在的值 |
 | `List` | 读取集合 |
@@ -113,10 +112,11 @@ utils.Normalize(value)
 
 ### 名词规则
 
-- 使用产品已经确认的词：Space、Conversation、Work、Run、Delivery、Action、Plugin、Artifact；
+- 当前已经确认的 owner 是 Identity、Space、Work、Machine 和 Run；Pi/Codex 是具体 adapter；
 - 不为同一概念创造缩写、别名或“更技术”的第二套名字；
+- Evidence、Completion、Observation、Draft 等行为角色不能仅凭用途获得 ID、表、package 或 API；
 - ID 在代码中保留 owner：`workID`、`runID`，不要只写 `id`；
-- 布尔值表达肯定命题：`isOpen`、`hasEvidence`、`canSubmit`；
+- 布尔值表达肯定命题：`isOpen`、`hasUnappliedInput`、`canSubmit`；
 - 避免双重否定和布尔参数组合。
 
 ## 5. Package 只暴露最小合同
@@ -136,9 +136,10 @@ utils.Normalize(value)
 接口示例：
 
 ```go
-// work package owns this consumer need.
-type Store interface {
-    Revise(context.Context, ReviseCommand) (Revision, error)
+// Host owns this exact consumer need.
+type RunClient interface {
+    Claim(context.Context) (run.Claim, error)
+    Renew(context.Context, run.Claim) (time.Time, error)
 }
 ```
 
@@ -162,11 +163,11 @@ type Repository[T any] interface {
 推荐：
 
 ```text
-work_revision.go
-owner_transfer.go
+work_message.go
+machine_enrollment.go
 run_claim.go
-agent_access.go
-delivery_submit.go
+run_commit.go
+browser_session.go
 ```
 
 避免：
@@ -236,16 +237,20 @@ return store.Revise(ctx, command)
 - credential；
 - Work lifecycle；
 - Run fence；
-- Delivery/Action outcome。
+- 已经真实出现的外部 outcome。
 
 不值得独立类型的例子：
 
 - 没有验证规则的普通字符串 wrapper；
 - 只为了少写参数创建的 `Options`；
 - 同一 package 内字段完全相同的重复 DTO；
-- 用泛型重命名普通集合。
+- 用泛型重命名普通集合；
+- 既有事实在一次判断中的角色，例如 Evidence；
+- 只在一个函数调用之间短暂存在、没有独立 lifecycle 的 Completion 或 Observation。
 
-已知物理事实必须强类型。自然语言和 Plugin 内容可以保持开放，但开放内容不能替代：
+一个候选类型如果没有独立 identity、lifecycle 或 invalid state，应优先使用准确字段、返回值或相邻 owner 的 command。
+
+已知物理事实必须强类型。自然语言和第三方内容可以保持开放，但开放内容不能替代：
 
 - authority；
 - lifecycle；
@@ -298,7 +303,7 @@ return fmt.Errorf("claim Run %s: %w", runID, err)
 - 只有安全幂等或只读证据存在时才重试；
 - 不静默切换 Runtime、credential、Host 或 provider。
 
-错误类型只在调用方确实需要稳定分支时建立。不要把所有错误都变成复杂 Result union。
+错误类型只在调用方确实需要稳定分支时建立。不要把所有错误都变成复杂 response union。
 
 ## 11. 并发和资源必须有 owner
 
@@ -533,6 +538,7 @@ focused PostgreSQL test 必须使用真实数据库。数据库缺失导致的 s
 - Cobra 只能出现在 `internal/cli/` 的具体 CLI adapter；domain owner 不导入 CLI framework；
 - root command 每次构造，不使用 package global、`init()` 注册或动态 command registry；
 - 顶层命令组获得各自的窄依赖，成员 token 和 Machine mTLS client 不放入同一个万能 Factory；
+- Host 命令不把本地 Runtime 探测提升成服务端 report/status 产品面；
 - 叶子命令只负责参数转换、调用具体行为和终端展示；权限与持久事实仍由 owner 裁决；
 - `context`、stdin、stdout 和 stderr 从进程入口显式注入；`os.Exit` 只出现在 `main`；
 - 注释解释 principal separation、Unknown 和本地密钥等非显然不变量，不逐行复述 flag binding。

@@ -52,342 +52,318 @@ func newRunFixture(t *testing.T, ctx context.Context) runFixture {
 	return runFixture{store: store, bootstrap: bootstrap, work: created, machineID: machineID}
 }
 
-func TestCoordinatorAndClaimHaveOneConcurrentWinnerAndFixedInputRange(t *testing.T) {
+func TestConcurrentClaimCreatesOneRunAttemptWithFixedMessages(t *testing.T) {
 	ctx := context.Background()
 	fixture := newRunFixture(t, ctx)
 	message, err := fixture.store.AppendWorkMessage(ctx, work.AppendMessageCommand{
 		WorkID: fixture.work.WorkID, SpaceID: fixture.bootstrap.SpaceID,
 		AuthorUserID: fixture.bootstrap.UserID, Text: "Finance approved a twelve month term",
-		IdempotencyKey: "renewal-finance-input",
+		IdempotencyKey: "finance-term",
 	})
 	if err != nil {
-		t.Fatalf("append fixed input: %v", err)
+		t.Fatalf("append message: %v", err)
 	}
 
 	const callers = 8
-	createdRuns := make(chan run.Coordinator, callers)
-	creationErrors := make(chan error, callers)
-	var wait sync.WaitGroup
-	wait.Add(callers)
-	for range callers {
-		go func() {
-			defer wait.Done()
-			created, createErr := fixture.store.CreateCoordinatorRun(ctx)
-			if createErr != nil {
-				creationErrors <- createErr
-				return
-			}
-			createdRuns <- created
-		}()
-	}
-	wait.Wait()
-	close(createdRuns)
-	close(creationErrors)
-	if len(createdRuns) != 1 {
-		t.Fatalf("coordinator winners = %d, want 1", len(createdRuns))
-	}
-	for createErr := range creationErrors {
-		if !errors.Is(createErr, run.ErrNoCoordinatorNeeded) {
-			t.Fatalf("concurrent coordinator error = %v", createErr)
-		}
-	}
-	coordinator := <-createdRuns
-	if coordinator.InputStartSeq != 1 || coordinator.InputEndSeq != message.InputSeq || coordinator.BaseRevision != 0 {
-		t.Fatalf("fixed coordinator range = %#v", coordinator)
-	}
-
 	claims := make(chan run.Claim, callers)
-	claimErrors := make(chan error, callers)
-	wait.Add(callers)
+	errorsSeen := make(chan error, callers)
+	var wait sync.WaitGroup
 	for range callers {
+		wait.Add(1)
 		go func() {
 			defer wait.Done()
-			claim, claimErr := fixture.store.ClaimCoordinatorRun(ctx, fixture.machineID)
-			if claimErr != nil {
-				claimErrors <- claimErr
+			claim, claimErr := fixture.store.ClaimRun(ctx, fixture.machineID)
+			if claimErr == nil {
+				claims <- claim
 				return
 			}
-			claims <- claim
+			errorsSeen <- claimErr
 		}()
 	}
 	wait.Wait()
 	close(claims)
-	close(claimErrors)
+	close(errorsSeen)
 	if len(claims) != 1 {
-		t.Fatalf("claim winners = %d, want 1", len(claims))
+		t.Fatalf("successful claims = %d, want 1", len(claims))
 	}
-	for claimErr := range claimErrors {
-		if !errors.Is(claimErr, run.ErrNoPendingRun) {
-			t.Fatalf("concurrent claim error = %v", claimErr)
+	for claimErr := range errorsSeen {
+		if !errors.Is(claimErr, run.ErrNoRunAvailable) {
+			t.Fatalf("losing claim error = %v", claimErr)
 		}
 	}
 	claim := <-claims
-	if claim.Fence != 1 || claim.AgentCredential == "" || claim.WriterToken == "" {
-		t.Fatalf("claim authority = %#v", claim)
+	if claim.Fence != 1 || claim.Goal != fixture.work.Goal || claim.InputEndSeq != message.InputSeq {
+		t.Fatalf("claim = %#v", claim)
 	}
-
-	lateMessage, err := fixture.store.AppendWorkMessage(ctx, work.AppendMessageCommand{
-		WorkID: fixture.work.WorkID, SpaceID: fixture.bootstrap.SpaceID,
-		AuthorUserID: fixture.bootstrap.UserID, Text: "Legal requested one wording change",
-		IdempotencyKey: "renewal-late-input",
-	})
-	if err != nil {
-		t.Fatalf("append input after claim: %v", err)
-	}
-	attemptContext, err := fixture.store.LoadAttemptContext(ctx, claim.RunID, claim.AttemptID, claim.Fence, claim.AgentCredential)
-	if err != nil {
-		t.Fatalf("load fixed Attempt context: %v", err)
-	}
-	if len(attemptContext.Inputs) != 2 || attemptContext.Inputs[0].Kind != run.InputGoal ||
-		attemptContext.Inputs[1].Sequence != message.InputSeq || attemptContext.InputEndSeq >= lateMessage.InputSeq {
-		t.Fatalf("Attempt inputs are not fixed: %#v", attemptContext)
-	}
-
-	var storedDigest []byte
-	if err := fixture.store.pool.QueryRow(ctx,
-		`select agent_credential_digest from run_attempts where attempt_id = $1`, claim.AttemptID,
-	).Scan(&storedDigest); err != nil {
-		t.Fatalf("load stored Agent credential digest: %v", err)
-	}
-	if string(storedDigest) == claim.AgentCredential || len(storedDigest) != 32 {
-		t.Fatalf("stored credential is not a 32 byte digest: %x", storedDigest)
+	if len(claim.Messages) != 1 || claim.Messages[0].Text != "Finance approved a twelve month term" {
+		t.Fatalf("claim messages = %#v", claim.Messages)
 	}
 }
 
-func TestWorkUnderstandingCommitRejectsEveryStaleAuthorityAndAdvancesExactRange(t *testing.T) {
+func TestCommitUpdatesWorkDirectlyAndLeavesLateMessageForNextRun(t *testing.T) {
 	ctx := context.Background()
 	fixture := newRunFixture(t, ctx)
-	if _, err := fixture.store.AppendWorkMessage(ctx, work.AppendMessageCommand{
-		WorkID: fixture.work.WorkID, SpaceID: fixture.bootstrap.SpaceID,
-		AuthorUserID: fixture.bootstrap.UserID, Text: "The renewal owner prefers option B",
-		IdempotencyKey: "renewal-option-input",
-	}); err != nil {
-		t.Fatalf("append commit input: %v", err)
-	}
-	coordinator, err := fixture.store.CreateCoordinatorRun(ctx)
+	claim, err := fixture.store.ClaimRun(ctx, fixture.machineID)
 	if err != nil {
-		t.Fatalf("create coordinator: %v", err)
+		t.Fatalf("claim first Run: %v", err)
 	}
-	claim, err := fixture.store.ClaimCoordinatorRun(ctx, fixture.machineID)
-	if err != nil {
-		t.Fatalf("claim coordinator: %v", err)
-	}
-	if _, err := fixture.store.AppendWorkMessage(ctx, work.AppendMessageCommand{
+	late, err := fixture.store.AppendWorkMessage(ctx, work.AppendMessageCommand{
 		WorkID: fixture.work.WorkID, SpaceID: fixture.bootstrap.SpaceID,
-		AuthorUserID: fixture.bootstrap.UserID, Text: "A later pricing note must remain pending",
-		IdempotencyKey: "renewal-pending-input",
-	}); err != nil {
-		t.Fatalf("append later input: %v", err)
+		AuthorUserID: fixture.bootstrap.UserID, Text: "Legal supplied final wording",
+		IdempotencyKey: "legal-wording",
+	})
+	if err != nil {
+		t.Fatalf("append late message: %v", err)
 	}
 
-	valid := run.CommitCommand{
-		RunID: claim.RunID, AttemptID: claim.AttemptID, Fence: claim.Fence,
-		WriterToken: claim.WriterToken, AgentCredential: claim.AgentCredential,
-		BaseRevision: coordinator.BaseRevision, InputEndSeq: coordinator.InputEndSeq,
-		Understanding: "The owner selected option B after finance approval.",
-		NextStep:      "Incorporate legal wording and preserve the later pricing note for the next pass.",
+	command := run.CommitCommand{
+		MachineID: fixture.machineID, RunID: claim.RunID, AttemptID: claim.AttemptID,
+		Fence: claim.Fence, BaseUnderstandingVersion: claim.BaseUnderstandingVersion,
+		InputEndSeq:   claim.InputEndSeq,
+		Understanding: "The renewal goal is understood.", NextStep: "Apply legal wording.",
 	}
-	staleCases := []struct {
+	for _, testCase := range []struct {
 		name   string
 		change func(*run.CommitCommand)
 	}{
-		{name: "credential", change: func(command *run.CommitCommand) { command.AgentCredential += "stale" }},
-		{name: "fence", change: func(command *run.CommitCommand) { command.Fence++ }},
-		{name: "writer", change: func(command *run.CommitCommand) { command.WriterToken = uuid.NewString() }},
-		{name: "base revision", change: func(command *run.CommitCommand) { command.BaseRevision++ }},
-		{name: "input bound", change: func(command *run.CommitCommand) { command.InputEndSeq++ }},
-	}
-	for _, testCase := range staleCases {
+		{name: "Machine", change: func(value *run.CommitCommand) { value.MachineID = uuid.NewString() }},
+		{name: "fence", change: func(value *run.CommitCommand) { value.Fence++ }},
+		{name: "base version", change: func(value *run.CommitCommand) { value.BaseUnderstandingVersion++ }},
+		{name: "input end", change: func(value *run.CommitCommand) { value.InputEndSeq++ }},
+	} {
 		t.Run(testCase.name, func(t *testing.T) {
-			command := valid
-			testCase.change(&command)
-			if err := fixture.store.CommitWorkUnderstanding(ctx, command); !errors.Is(err, run.ErrStaleAttempt) {
+			stale := command
+			testCase.change(&stale)
+			if err := fixture.store.CommitWorkUnderstanding(ctx, stale); !errors.Is(err, run.ErrStaleAttempt) {
 				t.Fatalf("stale commit error = %v", err)
 			}
 		})
 	}
-	if err := fixture.store.CommitWorkUnderstanding(ctx, valid); err != nil {
-		t.Fatalf("commit current understanding: %v", err)
+	if err := fixture.store.CommitWorkUnderstanding(ctx, command); err != nil {
+		t.Fatalf("commit understanding: %v", err)
 	}
-	if err := fixture.store.CommitWorkUnderstanding(ctx, valid); !errors.Is(err, run.ErrStaleAttempt) {
-		t.Fatalf("late repeat commit error = %v", err)
+	if err := fixture.store.CommitWorkUnderstanding(ctx, command); !errors.Is(err, run.ErrStaleAttempt) {
+		t.Fatalf("second commit error = %v", err)
 	}
 
 	details, err := fixture.store.LoadWork(ctx, fixture.bootstrap.UserID, fixture.bootstrap.SpaceID, fixture.work.WorkID)
 	if err != nil {
-		t.Fatalf("load revised Work: %v", err)
+		t.Fatalf("load committed Work: %v", err)
 	}
-	if details.Work.AppliedInputSeq != coordinator.InputEndSeq || details.Work.InputHeadSeq != coordinator.InputEndSeq+1 ||
-		details.Work.CurrentRevision != 1 || details.Work.Understanding != valid.Understanding || details.Work.NextStep != valid.NextStep {
-		t.Fatalf("revised Work = %#v", details.Work)
+	if details.Work.Understanding != command.Understanding || details.Work.NextStep != command.NextStep ||
+		!details.Work.HasUnappliedInput {
+		t.Fatalf("committed Work = %#v", details.Work)
 	}
-	var revisions int
-	if err := fixture.store.pool.QueryRow(ctx,
-		`select count(*) from work_understanding_revisions where work_id = $1`, fixture.work.WorkID,
-	).Scan(&revisions); err != nil {
-		t.Fatalf("count Work revisions: %v", err)
-	}
-	if revisions != 1 {
-		t.Fatalf("Work revisions = %d, want 1", revisions)
-	}
-
-	next, err := fixture.store.CreateCoordinatorRun(ctx)
+	next, err := fixture.store.ClaimRun(ctx, fixture.machineID)
 	if err != nil {
-		t.Fatalf("create coordinator for later input: %v", err)
+		t.Fatalf("claim late message Run: %v", err)
 	}
-	if next.InputStartSeq != coordinator.InputEndSeq+1 || next.InputEndSeq != details.Work.InputHeadSeq || next.BaseRevision != 1 {
-		t.Fatalf("next coordinator range = %#v", next)
-	}
-	nextClaim, err := fixture.store.ClaimCoordinatorRun(ctx, fixture.machineID)
-	if err != nil {
-		t.Fatalf("claim next coordinator: %v", err)
-	}
-	nextContext, err := fixture.store.LoadAttemptContext(
-		ctx,
-		nextClaim.RunID,
-		nextClaim.AttemptID,
-		nextClaim.Fence,
-		nextClaim.AgentCredential,
-	)
-	if err != nil {
-		t.Fatalf("load next Attempt context: %v", err)
-	}
-	if nextContext.CurrentUnderstanding != valid.Understanding || nextContext.CurrentNextStep != valid.NextStep {
-		t.Fatalf("next Attempt base understanding = %q / %q", nextContext.CurrentUnderstanding, nextContext.CurrentNextStep)
+	if next.RunID == claim.RunID || next.BaseUnderstandingVersion != 1 || next.InputEndSeq != late.InputSeq ||
+		len(next.Messages) != 1 || next.Messages[0].Text != late.Text {
+		t.Fatalf("next claim = %#v", next)
 	}
 }
 
-func TestFailedAndUnknownRunsBlockDuplicateCoordination(t *testing.T) {
+func TestFailedAndUnknownRunsBlockAutomaticReplay(t *testing.T) {
 	for _, outcome := range []run.State{run.StateFailed, run.StateUnknown} {
 		t.Run(string(outcome), func(t *testing.T) {
 			ctx := context.Background()
 			fixture := newRunFixture(t, ctx)
-			coordinator, err := fixture.store.CreateCoordinatorRun(ctx)
+			claim, err := fixture.store.ClaimRun(ctx, fixture.machineID)
 			if err != nil {
-				t.Fatalf("create coordinator: %v", err)
-			}
-			claim, err := fixture.store.ClaimCoordinatorRun(ctx, fixture.machineID)
-			if err != nil {
-				t.Fatalf("claim coordinator: %v", err)
+				t.Fatalf("claim Run: %v", err)
 			}
 			if err := fixture.store.FinishUnresolvedAttempt(ctx, run.FinishCommand{
-				RunID: claim.RunID, AttemptID: claim.AttemptID, Fence: claim.Fence,
-				WriterToken: claim.WriterToken, AgentCredential: claim.AgentCredential, Outcome: outcome,
+				MachineID: fixture.machineID, RunID: claim.RunID,
+				AttemptID: claim.AttemptID, Fence: claim.Fence, Outcome: outcome,
 			}); err != nil {
-				t.Fatalf("finish %s Attempt: %v", outcome, err)
+				t.Fatalf("finish %s Run: %v", outcome, err)
 			}
-			if _, err := fixture.store.CreateCoordinatorRun(ctx); !errors.Is(err, run.ErrNoCoordinatorNeeded) {
-				t.Fatalf("duplicate coordinator after %s = %v", outcome, err)
-			}
-			if _, err := fixture.store.ClaimCoordinatorRun(ctx, fixture.machineID); !errors.Is(err, run.ErrNoPendingRun) {
-				t.Fatalf("claim after %s = %v", outcome, err)
-			}
-			var state string
-			if err := fixture.store.pool.QueryRow(ctx,
-				`select state from coordinator_runs where run_id = $1`, coordinator.RunID,
-			).Scan(&state); err != nil {
-				t.Fatalf("load unresolved Run state: %v", err)
-			}
-			if state != string(outcome) {
-				t.Fatalf("Run state = %q, want %q", state, outcome)
+			if _, err := fixture.store.ClaimRun(ctx, fixture.machineID); !errors.Is(err, run.ErrNoRunAvailable) {
+				t.Fatalf("claim after %s error = %v", outcome, err)
 			}
 		})
 	}
 }
 
-func TestRunAttemptRenewalRequiresCurrentMachineAndFence(t *testing.T) {
+func TestExpiredAttemptRecoversOnceAndRejectsOldAuthority(t *testing.T) {
 	ctx := context.Background()
 	fixture := newRunFixture(t, ctx)
-	if _, err := fixture.store.CreateCoordinatorRun(ctx); err != nil {
-		t.Fatalf("create coordinator: %v", err)
-	}
-	claim, err := fixture.store.ClaimCoordinatorRun(ctx, fixture.machineID)
+	old, err := fixture.store.ClaimRun(ctx, fixture.machineID)
 	if err != nil {
-		t.Fatalf("claim coordinator: %v", err)
+		t.Fatalf("claim initial Run: %v", err)
 	}
-	leaseExpiresAt, err := fixture.store.RenewRunAttempt(
-		ctx,
-		fixture.machineID,
-		claim.RunID,
-		claim.AttemptID,
-		claim.Fence,
-	)
-	if err != nil {
-		t.Fatalf("renew current Attempt: %v", err)
+	if _, err := fixture.store.pool.Exec(ctx, `
+		update run_attempts
+		set claimed_at = transaction_timestamp() - interval '2 minutes',
+		    lease_expires_at = transaction_timestamp() - interval '1 minute'
+		where attempt_id = $1
+	`, old.AttemptID); err != nil {
+		t.Fatalf("expire Attempt: %v", err)
 	}
-	if !leaseExpiresAt.After(claim.LeaseExpiresAt) {
-		t.Fatalf("renewed lease = %s, initial = %s", leaseExpiresAt, claim.LeaseExpiresAt)
-	}
-	if _, err := fixture.store.RenewRunAttempt(
-		ctx,
-		fixture.machineID,
-		claim.RunID,
-		claim.AttemptID,
-		claim.Fence+1,
-	); !errors.Is(err, run.ErrStaleAttempt) {
-		t.Fatalf("wrong fence renewal error = %v", err)
+	if _, err := fixture.store.RenewRunAttempt(ctx, fixture.machineID, old.RunID, old.AttemptID, old.Fence); !errors.Is(err, run.ErrStaleAttempt) {
+		t.Fatalf("expired renew error = %v", err)
 	}
 
-	otherMachineID := uuid.NewString()
-	if _, err := fixture.store.EnrollMachine(ctx, host.EnrollMachineCommand{
-		MachineID: otherMachineID, SpaceID: fixture.bootstrap.SpaceID, DisplayName: "Other Run Host",
-		PublicKeyDER: []byte("other-run-public-key"), CertificatePEM: []byte("other-run-certificate"),
-		CertificateSerial: uuid.NewString(), EnrolledByUserID: fixture.bootstrap.UserID,
-		IdempotencyKey: "enroll-other-run-host",
-	}); err != nil {
-		t.Fatalf("enroll other Machine: %v", err)
+	const callers = 6
+	claims := make(chan run.Claim, callers)
+	errorsSeen := make(chan error, callers)
+	var wait sync.WaitGroup
+	for range callers {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			claim, claimErr := fixture.store.ClaimRun(ctx, fixture.machineID)
+			if claimErr == nil {
+				claims <- claim
+				return
+			}
+			errorsSeen <- claimErr
+		}()
 	}
-	if _, err := fixture.store.RenewRunAttempt(
-		ctx,
-		otherMachineID,
-		claim.RunID,
-		claim.AttemptID,
-		claim.Fence,
-	); !errors.Is(err, run.ErrStaleAttempt) {
-		t.Fatalf("wrong Machine renewal error = %v", err)
+	wait.Wait()
+	close(claims)
+	close(errorsSeen)
+	if len(claims) != 1 {
+		t.Fatalf("recovery winners = %d, want 1", len(claims))
+	}
+	for claimErr := range errorsSeen {
+		if !errors.Is(claimErr, run.ErrNoRunAvailable) {
+			t.Fatalf("losing recovery error = %v", claimErr)
+		}
+	}
+	recovered := <-claims
+	if recovered.RunID != old.RunID || recovered.AttemptID == old.AttemptID || recovered.Fence != old.Fence+1 {
+		t.Fatalf("recovered claim = %#v; old = %#v", recovered, old)
+	}
+	oldCommit := run.CommitCommand{
+		MachineID: fixture.machineID, RunID: old.RunID, AttemptID: old.AttemptID,
+		Fence: old.Fence, BaseUnderstandingVersion: old.BaseUnderstandingVersion,
+		InputEndSeq: old.InputEndSeq, Understanding: "Late", NextStep: "Do not commit",
+	}
+	if err := fixture.store.CommitWorkUnderstanding(ctx, oldCommit); !errors.Is(err, run.ErrStaleAttempt) {
+		t.Fatalf("late commit error = %v", err)
+	}
+	if err := fixture.store.FinishUnresolvedAttempt(ctx, run.FinishCommand{
+		MachineID: fixture.machineID, RunID: old.RunID, AttemptID: old.AttemptID,
+		Fence: old.Fence, Outcome: run.StateUnknown,
+	}); !errors.Is(err, run.ErrStaleAttempt) {
+		t.Fatalf("late finish error = %v", err)
 	}
 }
 
-func TestMachineRevocationRejectsClaimAndActiveAttemptCommit(t *testing.T) {
+func TestAttemptAuthorityCannotCrossLeaseExpiryWhileWaitingForLock(t *testing.T) {
+	operations := []struct {
+		name string
+		run  func(context.Context, runFixture, run.Claim) error
+	}{
+		{
+			name: "renew",
+			run: func(ctx context.Context, fixture runFixture, claim run.Claim) error {
+				_, err := fixture.store.RenewRunAttempt(
+					ctx, fixture.machineID, claim.RunID, claim.AttemptID, claim.Fence,
+				)
+				return err
+			},
+		},
+		{
+			name: "commit",
+			run: func(ctx context.Context, fixture runFixture, claim run.Claim) error {
+				return fixture.store.CommitWorkUnderstanding(ctx, run.CommitCommand{
+					MachineID: fixture.machineID, RunID: claim.RunID, AttemptID: claim.AttemptID,
+					Fence: claim.Fence, BaseUnderstandingVersion: claim.BaseUnderstandingVersion,
+					InputEndSeq: claim.InputEndSeq, Understanding: "An expired update.",
+					NextStep: "This must not commit.",
+				})
+			},
+		},
+		{
+			name: "finish",
+			run: func(ctx context.Context, fixture runFixture, claim run.Claim) error {
+				return fixture.store.FinishUnresolvedAttempt(ctx, run.FinishCommand{
+					MachineID: fixture.machineID, RunID: claim.RunID, AttemptID: claim.AttemptID,
+					Fence: claim.Fence, Outcome: run.StateFailed,
+				})
+			},
+		},
+	}
+	for _, operation := range operations {
+		t.Run(operation.name, func(t *testing.T) {
+			ctx := context.Background()
+			fixture := newRunFixture(t, ctx)
+			claim, err := fixture.store.ClaimRun(ctx, fixture.machineID)
+			if err != nil {
+				t.Fatalf("claim Run: %v", err)
+			}
+			if _, err := fixture.store.pool.Exec(ctx, `
+				update run_attempts
+				set lease_expires_at = clock_timestamp() + interval '100 milliseconds'
+				where attempt_id = $1
+			`, claim.AttemptID); err != nil {
+				t.Fatalf("shorten Attempt lease: %v", err)
+			}
+			blocker, err := fixture.store.pool.Begin(ctx)
+			if err != nil {
+				t.Fatalf("begin blocking transaction: %v", err)
+			}
+			if _, err := blocker.Exec(ctx, `
+				select attempt_id from run_attempts where attempt_id = $1 for update
+			`, claim.AttemptID); err != nil {
+				_ = blocker.Rollback(ctx)
+				t.Fatalf("lock Attempt: %v", err)
+			}
+
+			result := make(chan error, 1)
+			go func() { result <- operation.run(ctx, fixture, claim) }()
+			select {
+			case actionErr := <-result:
+				_ = blocker.Rollback(ctx)
+				t.Fatalf("authority action did not wait for lock: %v", actionErr)
+			case <-time.After(200 * time.Millisecond):
+			}
+			if err := blocker.Rollback(ctx); err != nil {
+				t.Fatalf("release Attempt lock: %v", err)
+			}
+			select {
+			case actionErr := <-result:
+				if !errors.Is(actionErr, run.ErrStaleAttempt) {
+					t.Fatalf("authority after lease expiry = %v, want %v", actionErr, run.ErrStaleAttempt)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("authority action remained blocked")
+			}
+		})
+	}
+}
+
+func TestMachineRevocationRejectsClaimAndCommit(t *testing.T) {
 	t.Run("before claim", func(t *testing.T) {
 		ctx := context.Background()
 		fixture := newRunFixture(t, ctx)
-		if _, err := fixture.store.CreateCoordinatorRun(ctx); err != nil {
-			t.Fatalf("create coordinator: %v", err)
-		}
-		if _, err := fixture.store.pool.Exec(ctx,
-			`update machines set revoked_at = transaction_timestamp() where machine_id = $1`, fixture.machineID,
-		); err != nil {
+		if err := fixture.store.RevokeMachine(ctx, fixture.bootstrap.UserID, fixture.bootstrap.SpaceID, fixture.machineID); err != nil {
 			t.Fatalf("revoke Machine: %v", err)
 		}
-		if _, err := fixture.store.ClaimCoordinatorRun(ctx, fixture.machineID); !errors.Is(err, host.ErrMachineRevoked) {
-			t.Fatalf("revoked Machine claim error = %v", err)
+		if _, err := fixture.store.ClaimRun(ctx, fixture.machineID); !errors.Is(err, host.ErrMachineRevoked) {
+			t.Fatalf("revoked claim error = %v", err)
 		}
 	})
 
-	t.Run("after claim", func(t *testing.T) {
+	t.Run("active Attempt", func(t *testing.T) {
 		ctx := context.Background()
 		fixture := newRunFixture(t, ctx)
-		coordinator, err := fixture.store.CreateCoordinatorRun(ctx)
+		claim, err := fixture.store.ClaimRun(ctx, fixture.machineID)
 		if err != nil {
-			t.Fatalf("create coordinator: %v", err)
+			t.Fatalf("claim Run: %v", err)
 		}
-		claim, err := fixture.store.ClaimCoordinatorRun(ctx, fixture.machineID)
-		if err != nil {
-			t.Fatalf("claim coordinator: %v", err)
-		}
-		if _, err := fixture.store.pool.Exec(ctx,
-			`update machines set revoked_at = transaction_timestamp() where machine_id = $1`, fixture.machineID,
-		); err != nil {
-			t.Fatalf("revoke active Machine: %v", err)
+		if err := fixture.store.RevokeMachine(ctx, fixture.bootstrap.UserID, fixture.bootstrap.SpaceID, fixture.machineID); err != nil {
+			t.Fatalf("revoke Machine: %v", err)
 		}
 		if err := fixture.store.CommitWorkUnderstanding(ctx, run.CommitCommand{
-			RunID: claim.RunID, AttemptID: claim.AttemptID, Fence: claim.Fence,
-			WriterToken: claim.WriterToken, AgentCredential: claim.AgentCredential,
-			BaseRevision: coordinator.BaseRevision, InputEndSeq: coordinator.InputEndSeq,
-			Understanding: "This must not commit.", NextStep: "This must remain pending.",
+			MachineID: fixture.machineID, RunID: claim.RunID, AttemptID: claim.AttemptID,
+			Fence: claim.Fence, BaseUnderstandingVersion: claim.BaseUnderstandingVersion,
+			InputEndSeq: claim.InputEndSeq, Understanding: "Known", NextStep: "Continue",
 		}); !errors.Is(err, run.ErrStaleAttempt) {
-			t.Fatalf("revoked Machine commit error = %v", err)
+			t.Fatalf("revoked commit error = %v", err)
 		}
 	})
 }

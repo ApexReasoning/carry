@@ -1,20 +1,16 @@
 package host
 
 import (
-	"context"
 	"io"
 
 	hostdomain "github.com/ApexReasoning/carry/internal/host"
 	"github.com/spf13/cobra"
 )
 
-type runtimeDetector func(context.Context) []hostdomain.RuntimeObservation
-
-// NewCommand constructs the Host subtree with separate member and Machine paths and two explicit native executors.
+// NewCommand constructs the Host subtree with separate member and Machine paths.
 func NewCommand(
 	configDirectory string,
 	output io.Writer,
-	detectRuntimes runtimeDetector,
 	piExecutor hostdomain.Executor,
 	codexExecutor hostdomain.Executor,
 ) *cobra.Command {
@@ -28,8 +24,7 @@ func NewCommand(
 	}
 	command.AddCommand(
 		newEnrollCommand(configDirectory, output),
-		newStartCommand(configDirectory, output, detectRuntimes, piExecutor, codexExecutor),
-		newStatusCommand(configDirectory, output, detectRuntimes),
+		newStartCommand(configDirectory, output, piExecutor, codexExecutor),
 		newRevokeCommand(configDirectory, output),
 	)
 	return command

@@ -56,7 +56,7 @@ func TestMutationRetriesResponseLossWithSameIdentityAndBytes(t *testing.T) {
 			StatusCode: http.StatusOK,
 			Header:     make(http.Header),
 			Body: io.NopCloser(bytes.NewBufferString(
-				`{"work_id":"11111111-1111-4111-8111-111111111111","space_id":"22222222-2222-4222-8222-222222222222","goal":"Review renewals","lifecycle":"open","owner_user_id":"member-1","creator_user_id":"member-1","input_head_seq":1,"created_at":"2026-08-18T16:00:00Z"}`,
+				`{"work_id":"11111111-1111-4111-8111-111111111111","space_id":"22222222-2222-4222-8222-222222222222","goal":"Review renewals","lifecycle":"open","owner_user_id":"member-1","creator_user_id":"member-1","understanding":"","next_step":"","has_unapplied_input":true,"created_at":"2026-08-18T16:00:00Z"}`,
 			)),
 			Request: request,
 		}, nil

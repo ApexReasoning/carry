@@ -32,7 +32,7 @@ func newShowCommand(configDirectory string, output io.Writer) *cobra.Command {
 			); err != nil {
 				return err
 			}
-			if details.Work.CurrentRevision == 0 {
+			if details.Work.Understanding == "" {
 				if _, err := fmt.Fprintln(output, "Current understanding: not applied yet"); err != nil {
 					return err
 				}
@@ -44,6 +44,11 @@ func newShowCommand(configDirectory string, output io.Writer) *cobra.Command {
 			); err != nil {
 				return err
 			}
+			if details.Work.HasUnappliedInput && details.Work.Understanding != "" {
+				if _, err := fmt.Fprintln(output, "New information: not applied yet"); err != nil {
+					return err
+				}
+			}
 			if len(details.Messages) == 0 {
 				_, err = fmt.Fprintln(output, "Messages: none")
 				return err
@@ -52,7 +57,7 @@ func newShowCommand(configDirectory string, output io.Writer) *cobra.Command {
 				return err
 			}
 			for _, message := range details.Messages {
-				if _, err := fmt.Fprintf(output, "  %d  %s: %s\n", message.InputSeq, message.AuthorUserID, message.Text); err != nil {
+				if _, err := fmt.Fprintf(output, "  %s: %s\n", message.AuthorUserID, message.Text); err != nil {
 					return err
 				}
 			}

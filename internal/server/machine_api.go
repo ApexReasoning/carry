@@ -12,48 +12,56 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// MachineRuntimeStore handles only Machine-authenticated runtime reporting and
-// status; it cannot use member enrollment authority.
-type MachineRuntimeStore interface {
-	ReplaceRuntimeObservations(context.Context, string, []host.RuntimeObservation) error
-	LoadMachineStatus(context.Context, string) (host.MachineStatus, error)
-}
-
-// MachineRunStore claims generic pending Runs without selecting an Agent.
+// MachineRunStore owns the exact transactions used by one mTLS-authenticated Host.
 type MachineRunStore interface {
-	ClaimCoordinatorRun(context.Context, string) (run.Claim, error)
+	ClaimRun(context.Context, string) (run.Claim, error)
 	RenewRunAttempt(context.Context, string, string, string, int64) (time.Time, error)
+	CommitWorkUnderstanding(context.Context, run.CommitCommand) error
+	FinishUnresolvedAttempt(context.Context, run.FinishCommand) error
 }
 
 type machineAPI struct {
-	runtimeStore MachineRuntimeStore
-	runStore     MachineRunStore
+	store MachineRunStore
 }
 
 type machineContextKey struct{}
-
-type runtimeReportRequest struct {
-	Runtimes []runtimeObservationWire `json:"runtimes"`
-}
 
 type renewRunAttemptRequest struct {
 	Fence int64 `json:"fence"`
 }
 
-type runtimeObservationWire struct {
-	Kind             host.RuntimeKind      `json:"kind"`
-	Detection        host.RuntimeDetection `json:"detection"`
-	Executable       string                `json:"executable,omitempty"`
-	Version          string                `json:"version,omitempty"`
-	DiagnosticCode   string                `json:"diagnostic_code,omitempty"`
-	DiagnosticDetail string                `json:"diagnostic_detail,omitempty"`
-	ObservedAt       time.Time             `json:"observed_at"`
+type commitUnderstandingRequest struct {
+	Fence                    int64  `json:"fence"`
+	BaseUnderstandingVersion int64  `json:"base_understanding_version"`
+	InputEndSeq              int64  `json:"input_end_seq"`
+	Understanding            string `json:"understanding"`
+	NextStep                 string `json:"next_step"`
+}
+
+type finishAttemptRequest struct {
+	Fence   int64     `json:"fence"`
+	Outcome run.State `json:"outcome"`
+}
+
+type runClaimWire struct {
+	RunID                    string        `json:"run_id"`
+	AttemptID                string        `json:"attempt_id"`
+	WorkID                   string        `json:"work_id"`
+	SpaceID                  string        `json:"space_id"`
+	Fence                    int64         `json:"fence"`
+	LeaseExpiresAt           time.Time     `json:"lease_expires_at"`
+	Goal                     string        `json:"goal"`
+	CurrentUnderstanding     string        `json:"current_understanding"`
+	CurrentNextStep          string        `json:"current_next_step"`
+	BaseUnderstandingVersion int64         `json:"base_understanding_version"`
+	InputEndSeq              int64         `json:"input_end_seq"`
+	Messages                 []run.Message `json:"messages"`
 }
 
 func requireMachine(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		// A member bearer is never accepted as an additional or fallback Machine
-		// authority on the Host-only surface.
+		// Member authentication is never accepted as additional or fallback
+		// authority on the Machine surface.
 		_, browserCookieErr := request.Cookie(browserSessionCookie)
 		if strings.TrimSpace(request.Header.Get("Authorization")) != "" || browserCookieErr == nil {
 			writeAPIError(response, http.StatusUnauthorized, "Machine route does not accept member authentication")
@@ -82,63 +90,28 @@ func currentMachine(response http.ResponseWriter, request *http.Request) (string
 	return machineID, true
 }
 
-func (api machineAPI) reportRuntimes(response http.ResponseWriter, request *http.Request) {
+func (api machineAPI) claimRun(response http.ResponseWriter, request *http.Request) {
 	machineID, ok := currentMachine(response, request)
 	if !ok {
 		return
 	}
-	var body runtimeReportRequest
-	if !decodeJSON(response, request, &body) {
+	claim, err := api.store.ClaimRun(request.Context(), machineID)
+	if errors.Is(err, run.ErrNoRunAvailable) {
+		response.WriteHeader(http.StatusNoContent)
 		return
 	}
-	observations := make([]host.RuntimeObservation, 0, len(body.Runtimes))
-	for _, runtime := range body.Runtimes {
-		observations = append(observations, host.RuntimeObservation{
-			Kind: runtime.Kind, Detection: runtime.Detection, Executable: runtime.Executable,
-			Version: runtime.Version, DiagnosticCode: runtime.DiagnosticCode,
-			DiagnosticDetail: runtime.DiagnosticDetail, ObservedAt: runtime.ObservedAt,
-		})
-	}
-	if err := api.runtimeStore.ReplaceRuntimeObservations(request.Context(), machineID, observations); err != nil {
-		writeStoreError(response, err)
-		return
-	}
-	writeJSON(response, http.StatusOK, struct {
-		Status string `json:"status"`
-	}{Status: "reported"})
-}
-
-func (api machineAPI) status(response http.ResponseWriter, request *http.Request) {
-	machineID, ok := currentMachine(response, request)
-	if !ok {
-		return
-	}
-	status, err := api.runtimeStore.LoadMachineStatus(request.Context(), machineID)
 	if err != nil {
 		writeStoreError(response, err)
 		return
 	}
-	if status.RevokedAt != nil {
-		writeAPIError(response, http.StatusForbidden, "Machine is revoked")
-		return
-	}
-	runtimes := make([]runtimeObservationWire, 0, len(status.Runtimes))
-	for _, runtime := range status.Runtimes {
-		runtimes = append(runtimes, runtimeObservationWire{
-			Kind: runtime.Kind, Detection: runtime.Detection, Executable: runtime.Executable,
-			Version: runtime.Version, DiagnosticCode: runtime.DiagnosticCode,
-			DiagnosticDetail: runtime.DiagnosticDetail, ObservedAt: runtime.ObservedAt,
-		})
-	}
-	writeJSON(response, http.StatusOK, struct {
-		MachineID   string                   `json:"machine_id"`
-		SpaceID     string                   `json:"space_id"`
-		DisplayName string                   `json:"display_name"`
-		EnrolledAt  time.Time                `json:"enrolled_at"`
-		Runtimes    []runtimeObservationWire `json:"runtimes"`
-	}{
-		MachineID: status.MachineID, SpaceID: status.SpaceID, DisplayName: status.DisplayName,
-		EnrolledAt: status.EnrolledAt, Runtimes: runtimes,
+	response.Header().Set("Cache-Control", "no-store")
+	writeJSON(response, http.StatusOK, runClaimWire{
+		RunID: claim.RunID, AttemptID: claim.AttemptID, WorkID: claim.WorkID,
+		SpaceID: claim.SpaceID, Fence: claim.Fence, LeaseExpiresAt: claim.LeaseExpiresAt,
+		Goal: claim.Goal, CurrentUnderstanding: claim.CurrentUnderstanding,
+		CurrentNextStep:          claim.CurrentNextStep,
+		BaseUnderstandingVersion: claim.BaseUnderstandingVersion,
+		InputEndSeq:              claim.InputEndSeq, Messages: claim.Messages,
 	})
 }
 
@@ -151,12 +124,9 @@ func (api machineAPI) renewRun(response http.ResponseWriter, request *http.Reque
 	if !decodeJSON(response, request, &body) {
 		return
 	}
-	leaseExpiresAt, err := api.runStore.RenewRunAttempt(
-		request.Context(),
-		machineID,
-		chi.URLParam(request, "run_id"),
-		chi.URLParam(request, "attempt_id"),
-		body.Fence,
+	leaseExpiresAt, err := api.store.RenewRunAttempt(
+		request.Context(), machineID,
+		chi.URLParam(request, "run_id"), chi.URLParam(request, "attempt_id"), body.Fence,
 	)
 	if err != nil {
 		writeStoreError(response, err)
@@ -167,34 +137,42 @@ func (api machineAPI) renewRun(response http.ResponseWriter, request *http.Reque
 	}{LeaseExpiresAt: leaseExpiresAt})
 }
 
-func (api machineAPI) claimRun(response http.ResponseWriter, request *http.Request) {
+func (api machineAPI) commitUnderstanding(response http.ResponseWriter, request *http.Request) {
 	machineID, ok := currentMachine(response, request)
 	if !ok {
 		return
 	}
-	claim, err := api.runStore.ClaimCoordinatorRun(request.Context(), machineID)
-	if errors.Is(err, run.ErrNoPendingRun) {
-		response.WriteHeader(http.StatusNoContent)
+	var body commitUnderstandingRequest
+	if !decodeJSON(response, request, &body) {
 		return
 	}
-	if err != nil {
+	if err := api.store.CommitWorkUnderstanding(request.Context(), run.CommitCommand{
+		MachineID: machineID, RunID: chi.URLParam(request, "run_id"),
+		AttemptID: chi.URLParam(request, "attempt_id"), Fence: body.Fence,
+		BaseUnderstandingVersion: body.BaseUnderstandingVersion,
+		InputEndSeq:              body.InputEndSeq, Understanding: body.Understanding, NextStep: body.NextStep,
+	}); err != nil {
 		writeStoreError(response, err)
 		return
 	}
-	response.Header().Set("Cache-Control", "no-store")
-	writeJSON(response, http.StatusOK, struct {
-		RunID           string    `json:"run_id"`
-		AttemptID       string    `json:"attempt_id"`
-		Fence           int64     `json:"fence"`
-		BaseRevision    int64     `json:"base_revision"`
-		InputEndSeq     int64     `json:"input_end_seq"`
-		WriterToken     string    `json:"writer_token"`
-		AgentCredential string    `json:"agent_credential"`
-		LeaseExpiresAt  time.Time `json:"lease_expires_at"`
-	}{
-		RunID: claim.RunID, AttemptID: claim.AttemptID, Fence: claim.Fence,
-		BaseRevision: claim.BaseRevision, InputEndSeq: claim.InputEndSeq,
-		WriterToken: claim.WriterToken, AgentCredential: claim.AgentCredential,
-		LeaseExpiresAt: claim.LeaseExpiresAt,
-	})
+	response.WriteHeader(http.StatusNoContent)
+}
+
+func (api machineAPI) finishAttempt(response http.ResponseWriter, request *http.Request) {
+	machineID, ok := currentMachine(response, request)
+	if !ok {
+		return
+	}
+	var body finishAttemptRequest
+	if !decodeJSON(response, request, &body) {
+		return
+	}
+	if err := api.store.FinishUnresolvedAttempt(request.Context(), run.FinishCommand{
+		MachineID: machineID, RunID: chi.URLParam(request, "run_id"),
+		AttemptID: chi.URLParam(request, "attempt_id"), Fence: body.Fence, Outcome: body.Outcome,
+	}); err != nil {
+		writeStoreError(response, err)
+		return
+	}
+	response.WriteHeader(http.StatusNoContent)
 }

@@ -7,8 +7,6 @@ package dbsqlc
 
 import (
 	"context"
-
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const createMachine = `-- name: CreateMachine :one
@@ -65,52 +63,6 @@ func (q *Queries) CreateMachine(ctx context.Context, arg CreateMachineParams) (C
 	return i, err
 }
 
-const createRuntimeObservation = `-- name: CreateRuntimeObservation :exec
-INSERT INTO machine_runtime_observations (
-    machine_id, runtime_kind, detection, executable, version,
-    diagnostic_code, diagnostic_detail, observed_at
-) VALUES (
-    $1, $2, $3,
-    $4, $5, $6,
-    $7, $8
-)
-`
-
-type CreateRuntimeObservationParams struct {
-	MachineID        string
-	RuntimeKind      string
-	Detection        string
-	Executable       *string
-	Version          *string
-	DiagnosticCode   *string
-	DiagnosticDetail *string
-	ObservedAt       pgtype.Timestamptz
-}
-
-func (q *Queries) CreateRuntimeObservation(ctx context.Context, arg CreateRuntimeObservationParams) error {
-	_, err := q.db.Exec(ctx, createRuntimeObservation,
-		arg.MachineID,
-		arg.RuntimeKind,
-		arg.Detection,
-		arg.Executable,
-		arg.Version,
-		arg.DiagnosticCode,
-		arg.DiagnosticDetail,
-		arg.ObservedAt,
-	)
-	return err
-}
-
-const deleteRuntimeObservations = `-- name: DeleteRuntimeObservations :exec
-DELETE FROM machine_runtime_observations
-WHERE machine_id = $1
-`
-
-func (q *Queries) DeleteRuntimeObservations(ctx context.Context, machineID string) error {
-	_, err := q.db.Exec(ctx, deleteRuntimeObservations, machineID)
-	return err
-}
-
 const findEnrollmentByIdempotency = `-- name: FindEnrollmentByIdempotency :one
 SELECT machine_id, space_id, display_name, certificate_pem, public_key_der
 FROM machines
@@ -142,80 +94,6 @@ func (q *Queries) FindEnrollmentByIdempotency(ctx context.Context, arg FindEnrol
 		&i.DisplayName,
 		&i.CertificatePem,
 		&i.PublicKeyDer,
-	)
-	return i, err
-}
-
-const listRuntimeObservations = `-- name: ListRuntimeObservations :many
-SELECT runtime_kind, detection, executable, version,
-       diagnostic_code, diagnostic_detail, observed_at
-FROM machine_runtime_observations
-WHERE machine_id = $1
-ORDER BY runtime_kind
-`
-
-type ListRuntimeObservationsRow struct {
-	RuntimeKind      string
-	Detection        string
-	Executable       *string
-	Version          *string
-	DiagnosticCode   *string
-	DiagnosticDetail *string
-	ObservedAt       pgtype.Timestamptz
-}
-
-func (q *Queries) ListRuntimeObservations(ctx context.Context, machineID string) ([]ListRuntimeObservationsRow, error) {
-	rows, err := q.db.Query(ctx, listRuntimeObservations, machineID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListRuntimeObservationsRow
-	for rows.Next() {
-		var i ListRuntimeObservationsRow
-		if err := rows.Scan(
-			&i.RuntimeKind,
-			&i.Detection,
-			&i.Executable,
-			&i.Version,
-			&i.DiagnosticCode,
-			&i.DiagnosticDetail,
-			&i.ObservedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const loadMachineStatus = `-- name: LoadMachineStatus :one
-SELECT machine_id, space_id, display_name, enrolled_at, revoked_at
-FROM machines
-WHERE machine_id = $1
-FOR UPDATE
-`
-
-type LoadMachineStatusRow struct {
-	MachineID   string
-	SpaceID     string
-	DisplayName string
-	EnrolledAt  pgtype.Timestamptz
-	RevokedAt   pgtype.Timestamptz
-}
-
-func (q *Queries) LoadMachineStatus(ctx context.Context, machineID string) (LoadMachineStatusRow, error) {
-	row := q.db.QueryRow(ctx, loadMachineStatus, machineID)
-	var i LoadMachineStatusRow
-	err := row.Scan(
-		&i.MachineID,
-		&i.SpaceID,
-		&i.DisplayName,
-		&i.EnrolledAt,
-		&i.RevokedAt,
 	)
 	return i, err
 }

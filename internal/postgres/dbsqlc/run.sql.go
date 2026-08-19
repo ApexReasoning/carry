@@ -11,48 +11,38 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const activateCoordinatorRun = `-- name: ActivateCoordinatorRun :one
-UPDATE coordinator_runs
-SET state = 'active', current_fence = current_fence + 1
-WHERE run_id = $1 AND state = 'pending'
-RETURNING current_fence
-`
-
-func (q *Queries) ActivateCoordinatorRun(ctx context.Context, runID string) (int64, error) {
-	row := q.db.QueryRow(ctx, activateCoordinatorRun, runID)
-	var current_fence int64
-	err := row.Scan(&current_fence)
-	return current_fence, err
-}
-
-const commitWorkRevision = `-- name: CommitWorkRevision :execrows
+const commitCurrentUnderstanding = `-- name: CommitCurrentUnderstanding :execrows
 UPDATE works
 SET
-    applied_input_seq = $1,
-    current_revision = $2
+    understanding = $1,
+    next_step = $2,
+    applied_input_seq = $3,
+    understanding_version = understanding_version + 1
 WHERE
-    work_id = $3
+    work_id = $4
     AND lifecycle = 'open'
-    AND applied_input_seq = $4
-    AND current_revision = $5
-    AND input_head_seq >= $1
+    AND applied_input_seq = $5
+    AND understanding_version = $6
+    AND input_head_seq >= $3
 `
 
-type CommitWorkRevisionParams struct {
-	AppliedInputSeq         int64
-	CurrentRevision         int64
-	WorkID                  string
-	ExpectedAppliedInputSeq int64
-	ExpectedCurrentRevision int64
+type CommitCurrentUnderstandingParams struct {
+	Understanding                *string
+	NextStep                     *string
+	AppliedInputSeq              int64
+	WorkID                       string
+	ExpectedAppliedInputSeq      int64
+	ExpectedUnderstandingVersion int64
 }
 
-func (q *Queries) CommitWorkRevision(ctx context.Context, arg CommitWorkRevisionParams) (int64, error) {
-	result, err := q.db.Exec(ctx, commitWorkRevision,
+func (q *Queries) CommitCurrentUnderstanding(ctx context.Context, arg CommitCurrentUnderstandingParams) (int64, error) {
+	result, err := q.db.Exec(ctx, commitCurrentUnderstanding,
+		arg.Understanding,
+		arg.NextStep,
 		arg.AppliedInputSeq,
-		arg.CurrentRevision,
 		arg.WorkID,
 		arg.ExpectedAppliedInputSeq,
-		arg.ExpectedCurrentRevision,
+		arg.ExpectedUnderstandingVersion,
 	)
 	if err != nil {
 		return 0, err
@@ -60,65 +50,46 @@ func (q *Queries) CommitWorkRevision(ctx context.Context, arg CommitWorkRevision
 	return result.RowsAffected(), nil
 }
 
-const createCoordinatorRun = `-- name: CreateCoordinatorRun :one
-INSERT INTO coordinator_runs (
+const createRun = `-- name: CreateRun :one
+INSERT INTO runs (
     run_id,
     work_id,
     input_start_seq,
     input_end_seq,
-    base_revision,
-    writer_token
+    base_understanding_version,
+    state,
+    current_fence
 ) VALUES (
     $1,
     $2,
     $3,
     $4,
     $5,
-    $6
+    'active',
+    1
 )
-RETURNING run_id, work_id, input_start_seq, input_end_seq,
-    base_revision, state, created_at
+RETURNING created_at
 `
 
-type CreateCoordinatorRunParams struct {
-	RunID         string
-	WorkID        string
-	InputStartSeq int64
-	InputEndSeq   int64
-	BaseRevision  int64
-	WriterToken   string
+type CreateRunParams struct {
+	RunID                    string
+	WorkID                   string
+	InputStartSeq            int64
+	InputEndSeq              int64
+	BaseUnderstandingVersion int64
 }
 
-type CreateCoordinatorRunRow struct {
-	RunID         string
-	WorkID        string
-	InputStartSeq int64
-	InputEndSeq   int64
-	BaseRevision  int64
-	State         string
-	CreatedAt     pgtype.Timestamptz
-}
-
-func (q *Queries) CreateCoordinatorRun(ctx context.Context, arg CreateCoordinatorRunParams) (CreateCoordinatorRunRow, error) {
-	row := q.db.QueryRow(ctx, createCoordinatorRun,
+func (q *Queries) CreateRun(ctx context.Context, arg CreateRunParams) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, createRun,
 		arg.RunID,
 		arg.WorkID,
 		arg.InputStartSeq,
 		arg.InputEndSeq,
-		arg.BaseRevision,
-		arg.WriterToken,
+		arg.BaseUnderstandingVersion,
 	)
-	var i CreateCoordinatorRunRow
-	err := row.Scan(
-		&i.RunID,
-		&i.WorkID,
-		&i.InputStartSeq,
-		&i.InputEndSeq,
-		&i.BaseRevision,
-		&i.State,
-		&i.CreatedAt,
-	)
-	return i, err
+	var created_at pgtype.Timestamptz
+	err := row.Scan(&created_at)
+	return created_at, err
 }
 
 const createRunAttempt = `-- name: CreateRunAttempt :one
@@ -127,83 +98,59 @@ INSERT INTO run_attempts (
     run_id,
     machine_id,
     fence,
-    agent_credential_digest,
     lease_expires_at
 ) VALUES (
     $1,
     $2,
     $3,
     $4,
-    $5,
-    transaction_timestamp() + interval '5 minutes'
+    clock_timestamp() + interval '5 minutes'
 )
-RETURNING attempt_id, fence, lease_expires_at
+RETURNING lease_expires_at
 `
 
 type CreateRunAttemptParams struct {
-	AttemptID             string
-	RunID                 string
-	MachineID             string
-	Fence                 int64
-	AgentCredentialDigest []byte
+	AttemptID string
+	RunID     string
+	MachineID string
+	Fence     int64
 }
 
-type CreateRunAttemptRow struct {
-	AttemptID      string
-	Fence          int64
-	LeaseExpiresAt pgtype.Timestamptz
-}
-
-func (q *Queries) CreateRunAttempt(ctx context.Context, arg CreateRunAttemptParams) (CreateRunAttemptRow, error) {
+func (q *Queries) CreateRunAttempt(ctx context.Context, arg CreateRunAttemptParams) (pgtype.Timestamptz, error) {
 	row := q.db.QueryRow(ctx, createRunAttempt,
 		arg.AttemptID,
 		arg.RunID,
 		arg.MachineID,
 		arg.Fence,
-		arg.AgentCredentialDigest,
 	)
-	var i CreateRunAttemptRow
-	err := row.Scan(&i.AttemptID, &i.Fence, &i.LeaseExpiresAt)
-	return i, err
+	var lease_expires_at pgtype.Timestamptz
+	err := row.Scan(&lease_expires_at)
+	return lease_expires_at, err
 }
 
-const createWorkUnderstandingRevision = `-- name: CreateWorkUnderstandingRevision :exec
-INSERT INTO work_understanding_revisions (
-    work_id,
-    revision,
-    source_run_id,
-    understanding,
-    next_step,
-    applied_input_seq
-) VALUES (
-    $1,
-    $2,
-    $3,
-    $4,
-    $5,
-    $6
-)
+const expireRunAttempt = `-- name: ExpireRunAttempt :execrows
+UPDATE run_attempts
+SET state = 'expired', completed_at = clock_timestamp()
+WHERE
+    attempt_id = $1
+    AND run_id = $2
+    AND fence = $3
+    AND state = 'active'
+    AND lease_expires_at <= clock_timestamp()
 `
 
-type CreateWorkUnderstandingRevisionParams struct {
-	WorkID          string
-	Revision        int64
-	SourceRunID     string
-	Understanding   string
-	NextStep        string
-	AppliedInputSeq int64
+type ExpireRunAttemptParams struct {
+	AttemptID string
+	RunID     string
+	Fence     int64
 }
 
-func (q *Queries) CreateWorkUnderstandingRevision(ctx context.Context, arg CreateWorkUnderstandingRevisionParams) error {
-	_, err := q.db.Exec(ctx, createWorkUnderstandingRevision,
-		arg.WorkID,
-		arg.Revision,
-		arg.SourceRunID,
-		arg.Understanding,
-		arg.NextStep,
-		arg.AppliedInputSeq,
-	)
-	return err
+func (q *Queries) ExpireRunAttempt(ctx context.Context, arg ExpireRunAttemptParams) (int64, error) {
+	result, err := q.db.Exec(ctx, expireRunAttempt, arg.AttemptID, arg.RunID, arg.Fence)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const extendRunAttemptLease = `-- name: ExtendRunAttemptLease :one
@@ -211,20 +158,21 @@ WITH current_machine AS (
     SELECT machines.machine_id
     FROM machines
     WHERE machines.machine_id = $4 AND machines.revoked_at IS NULL
-    FOR SHARE OF machines
+    FOR SHARE
 )
 UPDATE run_attempts AS attempt
-SET lease_expires_at = transaction_timestamp() + interval '5 minutes'
-FROM coordinator_runs AS coordinator, current_machine
+SET lease_expires_at = clock_timestamp() + interval '5 minutes'
+FROM runs AS run, current_machine
 WHERE
     attempt.attempt_id = $1
     AND attempt.run_id = $2
     AND attempt.machine_id = current_machine.machine_id
     AND attempt.fence = $3
     AND attempt.state = 'active'
-    AND coordinator.run_id = attempt.run_id
-    AND coordinator.current_fence = attempt.fence
-    AND coordinator.state = 'active'
+    AND attempt.lease_expires_at > clock_timestamp()
+    AND run.run_id = attempt.run_id
+    AND run.current_fence = attempt.fence
+    AND run.state = 'active'
 RETURNING attempt.lease_expires_at
 `
 
@@ -247,38 +195,38 @@ func (q *Queries) ExtendRunAttemptLease(ctx context.Context, arg ExtendRunAttemp
 	return lease_expires_at, err
 }
 
-const finishUnresolvedCoordinatorRun = `-- name: FinishUnresolvedCoordinatorRun :execrows
-UPDATE coordinator_runs
-SET state = $1
+const finishRun = `-- name: FinishRun :execrows
+UPDATE runs
+SET state = $1, completed_at = clock_timestamp()
 WHERE run_id = $2 AND state = 'active'
 `
 
-type FinishUnresolvedCoordinatorRunParams struct {
+type FinishRunParams struct {
 	Outcome string
 	RunID   string
 }
 
-func (q *Queries) FinishUnresolvedCoordinatorRun(ctx context.Context, arg FinishUnresolvedCoordinatorRunParams) (int64, error) {
-	result, err := q.db.Exec(ctx, finishUnresolvedCoordinatorRun, arg.Outcome, arg.RunID)
+func (q *Queries) FinishRun(ctx context.Context, arg FinishRunParams) (int64, error) {
+	result, err := q.db.Exec(ctx, finishRun, arg.Outcome, arg.RunID)
 	if err != nil {
 		return 0, err
 	}
 	return result.RowsAffected(), nil
 }
 
-const finishUnresolvedRunAttempt = `-- name: FinishUnresolvedRunAttempt :execrows
+const finishRunAttempt = `-- name: FinishRunAttempt :execrows
 UPDATE run_attempts
-SET state = $1, completed_at = transaction_timestamp()
+SET state = $1, completed_at = clock_timestamp()
 WHERE attempt_id = $2 AND state = 'active'
 `
 
-type FinishUnresolvedRunAttemptParams struct {
+type FinishRunAttemptParams struct {
 	Outcome   string
 	AttemptID string
 }
 
-func (q *Queries) FinishUnresolvedRunAttempt(ctx context.Context, arg FinishUnresolvedRunAttemptParams) (int64, error) {
-	result, err := q.db.Exec(ctx, finishUnresolvedRunAttempt, arg.Outcome, arg.AttemptID)
+func (q *Queries) FinishRunAttempt(ctx context.Context, arg FinishRunAttemptParams) (int64, error) {
+	result, err := q.db.Exec(ctx, finishRunAttempt, arg.Outcome, arg.AttemptID)
 	if err != nil {
 		return 0, err
 	}
@@ -286,7 +234,7 @@ func (q *Queries) FinishUnresolvedRunAttempt(ctx context.Context, arg FinishUnre
 }
 
 const listRunInputMessages = `-- name: ListRunInputMessages :many
-SELECT message_id, author_user_id, text, input_seq, created_at
+SELECT author_user_id, text
 FROM work_messages
 WHERE
     work_id = $1
@@ -302,11 +250,8 @@ type ListRunInputMessagesParams struct {
 }
 
 type ListRunInputMessagesRow struct {
-	MessageID    string
 	AuthorUserID string
 	Text         string
-	InputSeq     int64
-	CreatedAt    pgtype.Timestamptz
 }
 
 func (q *Queries) ListRunInputMessages(ctx context.Context, arg ListRunInputMessagesParams) ([]ListRunInputMessagesRow, error) {
@@ -318,13 +263,7 @@ func (q *Queries) ListRunInputMessages(ctx context.Context, arg ListRunInputMess
 	var items []ListRunInputMessagesRow
 	for rows.Next() {
 		var i ListRunInputMessagesRow
-		if err := rows.Scan(
-			&i.MessageID,
-			&i.AuthorUserID,
-			&i.Text,
-			&i.InputSeq,
-			&i.CreatedAt,
-		); err != nil {
+		if err := rows.Scan(&i.AuthorUserID, &i.Text); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -335,147 +274,144 @@ func (q *Queries) ListRunInputMessages(ctx context.Context, arg ListRunInputMess
 	return items, nil
 }
 
-const loadActiveAttemptContext = `-- name: LoadActiveAttemptContext :one
-SELECT
-    r.run_id,
-    a.attempt_id,
-    r.work_id,
-    w.space_id,
-    w.goal,
-    revision.understanding AS current_understanding,
-    revision.next_step AS current_next_step,
-    r.input_start_seq,
-    r.input_end_seq,
-    r.base_revision,
-    a.fence
-FROM coordinator_runs AS r
-JOIN run_attempts AS a ON a.run_id = r.run_id
-JOIN works AS w ON w.work_id = r.work_id
-LEFT JOIN work_understanding_revisions AS revision
-    ON revision.work_id = r.work_id AND revision.revision = r.base_revision
-JOIN machines AS m ON m.machine_id = a.machine_id AND m.revoked_at IS NULL
-WHERE
-    r.run_id = $1
-    AND a.attempt_id = $2
-    AND a.fence = $3
-    AND a.agent_credential_digest = $4
-    AND r.state = 'active'
-    AND a.state = 'active'
-    AND a.lease_expires_at > transaction_timestamp()
-`
-
-type LoadActiveAttemptContextParams struct {
-	RunID                 string
-	AttemptID             string
-	Fence                 int64
-	AgentCredentialDigest []byte
-}
-
-type LoadActiveAttemptContextRow struct {
-	RunID                string
-	AttemptID            string
-	WorkID               string
-	SpaceID              string
-	Goal                 string
-	CurrentUnderstanding *string
-	CurrentNextStep      *string
-	InputStartSeq        int64
-	InputEndSeq          int64
-	BaseRevision         int64
-	Fence                int64
-}
-
-func (q *Queries) LoadActiveAttemptContext(ctx context.Context, arg LoadActiveAttemptContextParams) (LoadActiveAttemptContextRow, error) {
-	row := q.db.QueryRow(ctx, loadActiveAttemptContext,
-		arg.RunID,
-		arg.AttemptID,
-		arg.Fence,
-		arg.AgentCredentialDigest,
-	)
-	var i LoadActiveAttemptContextRow
-	err := row.Scan(
-		&i.RunID,
-		&i.AttemptID,
-		&i.WorkID,
-		&i.SpaceID,
-		&i.Goal,
-		&i.CurrentUnderstanding,
-		&i.CurrentNextStep,
-		&i.InputStartSeq,
-		&i.InputEndSeq,
-		&i.BaseRevision,
-		&i.Fence,
-	)
-	return i, err
-}
-
 const lockAttemptForCommit = `-- name: LockAttemptForCommit :one
 SELECT
-    r.work_id,
-    r.input_start_seq,
-    r.input_end_seq,
-    r.base_revision,
-    w.applied_input_seq,
-    w.input_head_seq,
-    w.current_revision,
-    w.lifecycle
-FROM coordinator_runs AS r
-JOIN run_attempts AS a ON a.run_id = r.run_id
-JOIN works AS w ON w.work_id = r.work_id
-JOIN machines AS m ON m.machine_id = a.machine_id AND m.revoked_at IS NULL
+    run.work_id,
+    run.input_start_seq,
+    run.input_end_seq,
+    run.base_understanding_version,
+    work.applied_input_seq,
+    work.input_head_seq,
+    work.understanding_version,
+    work.lifecycle
+FROM runs AS run
+JOIN run_attempts AS attempt ON attempt.run_id = run.run_id
+JOIN works AS work ON work.work_id = run.work_id
+JOIN machines AS machine ON machine.machine_id = attempt.machine_id
 WHERE
-    r.run_id = $1
-    AND a.attempt_id = $2
-    AND a.fence = $3
-    AND r.current_fence = $3
-    AND r.writer_token = $4
-    AND a.agent_credential_digest = $5
-    AND r.state = 'active'
-    AND a.state = 'active'
-    AND a.lease_expires_at > transaction_timestamp()
-FOR UPDATE OF r, a, w
-FOR SHARE OF m
+    run.run_id = $1
+    AND attempt.attempt_id = $2
+    AND attempt.machine_id = $3
+    AND attempt.fence = $4
+    AND run.current_fence = attempt.fence
+    AND run.state = 'active'
+    AND attempt.state = 'active'
+    AND machine.revoked_at IS NULL
+FOR UPDATE OF run, attempt, work
+FOR SHARE OF machine
 `
 
 type LockAttemptForCommitParams struct {
-	RunID                 string
-	AttemptID             string
-	Fence                 int64
-	WriterToken           string
-	AgentCredentialDigest []byte
+	RunID             string
+	AttemptID         string
+	ClaimingMachineID string
+	Fence             int64
 }
 
 type LockAttemptForCommitRow struct {
-	WorkID          string
-	InputStartSeq   int64
-	InputEndSeq     int64
-	BaseRevision    int64
-	AppliedInputSeq int64
-	InputHeadSeq    int64
-	CurrentRevision int64
-	Lifecycle       string
+	WorkID                   string
+	InputStartSeq            int64
+	InputEndSeq              int64
+	BaseUnderstandingVersion int64
+	AppliedInputSeq          int64
+	InputHeadSeq             int64
+	UnderstandingVersion     int64
+	Lifecycle                string
 }
 
 func (q *Queries) LockAttemptForCommit(ctx context.Context, arg LockAttemptForCommitParams) (LockAttemptForCommitRow, error) {
 	row := q.db.QueryRow(ctx, lockAttemptForCommit,
 		arg.RunID,
 		arg.AttemptID,
+		arg.ClaimingMachineID,
 		arg.Fence,
-		arg.WriterToken,
-		arg.AgentCredentialDigest,
 	)
 	var i LockAttemptForCommitRow
 	err := row.Scan(
 		&i.WorkID,
 		&i.InputStartSeq,
 		&i.InputEndSeq,
-		&i.BaseRevision,
+		&i.BaseUnderstandingVersion,
 		&i.AppliedInputSeq,
 		&i.InputHeadSeq,
-		&i.CurrentRevision,
+		&i.UnderstandingVersion,
 		&i.Lifecycle,
 	)
 	return i, err
+}
+
+const lockAttemptForFinish = `-- name: LockAttemptForFinish :one
+SELECT run.run_id
+FROM runs AS run
+JOIN run_attempts AS attempt ON attempt.run_id = run.run_id
+JOIN machines AS machine ON machine.machine_id = attempt.machine_id
+WHERE
+    run.run_id = $1
+    AND attempt.attempt_id = $2
+    AND attempt.machine_id = $3
+    AND attempt.fence = $4
+    AND run.current_fence = attempt.fence
+    AND run.state = 'active'
+    AND attempt.state = 'active'
+    AND machine.revoked_at IS NULL
+FOR UPDATE OF run, attempt
+FOR SHARE OF machine
+`
+
+type LockAttemptForFinishParams struct {
+	RunID             string
+	AttemptID         string
+	ClaimingMachineID string
+	Fence             int64
+}
+
+func (q *Queries) LockAttemptForFinish(ctx context.Context, arg LockAttemptForFinishParams) (string, error) {
+	row := q.db.QueryRow(ctx, lockAttemptForFinish,
+		arg.RunID,
+		arg.AttemptID,
+		arg.ClaimingMachineID,
+		arg.Fence,
+	)
+	var run_id string
+	err := row.Scan(&run_id)
+	return run_id, err
+}
+
+const lockAttemptForRenew = `-- name: LockAttemptForRenew :one
+SELECT attempt.attempt_id
+FROM run_attempts AS attempt
+JOIN runs AS run ON run.run_id = attempt.run_id
+JOIN machines AS machine ON machine.machine_id = attempt.machine_id
+WHERE
+    run.run_id = $1
+    AND attempt.attempt_id = $2
+    AND attempt.machine_id = $3
+    AND attempt.fence = $4
+    AND run.current_fence = attempt.fence
+    AND run.state = 'active'
+    AND attempt.state = 'active'
+    AND machine.revoked_at IS NULL
+FOR UPDATE OF run, attempt
+FOR SHARE OF machine
+`
+
+type LockAttemptForRenewParams struct {
+	RunID             string
+	AttemptID         string
+	ClaimingMachineID string
+	Fence             int64
+}
+
+func (q *Queries) LockAttemptForRenew(ctx context.Context, arg LockAttemptForRenewParams) (string, error) {
+	row := q.db.QueryRow(ctx, lockAttemptForRenew,
+		arg.RunID,
+		arg.AttemptID,
+		arg.ClaimingMachineID,
+		arg.Fence,
+	)
+	var attempt_id string
+	err := row.Scan(&attempt_id)
+	return attempt_id, err
 }
 
 const lockClaimingMachine = `-- name: LockClaimingMachine :one
@@ -497,97 +433,163 @@ func (q *Queries) LockClaimingMachine(ctx context.Context, machineID string) (Lo
 	return i, err
 }
 
-const lockPendingCoordinatorRun = `-- name: LockPendingCoordinatorRun :one
-SELECT r.run_id, r.work_id, w.space_id, r.input_start_seq, r.input_end_seq,
-    r.base_revision, r.writer_token, r.current_fence, r.created_at
-FROM coordinator_runs AS r
-JOIN works AS w ON w.work_id = r.work_id
-WHERE w.space_id = $1 AND r.state = 'pending'
-ORDER BY r.created_at, r.run_id
+const lockExpiredRunForClaim = `-- name: LockExpiredRunForClaim :one
+SELECT
+    run.run_id,
+    run.work_id,
+    work.space_id,
+    work.goal,
+    work.understanding,
+    work.next_step,
+    run.input_start_seq,
+    run.input_end_seq,
+    run.base_understanding_version,
+    run.current_fence,
+    attempt.attempt_id AS expired_attempt_id
+FROM runs AS run
+JOIN works AS work ON work.work_id = run.work_id
+JOIN run_attempts AS attempt
+    ON attempt.run_id = run.run_id AND attempt.fence = run.current_fence
+WHERE
+    work.space_id = $1
+    AND work.lifecycle = 'open'
+    AND run.state = 'active'
+    AND attempt.state = 'active'
+    AND attempt.lease_expires_at <= clock_timestamp()
+ORDER BY attempt.lease_expires_at, run.created_at, run.run_id
 LIMIT 1
-FOR UPDATE OF r SKIP LOCKED
+FOR UPDATE OF run, attempt, work SKIP LOCKED
 `
 
-type LockPendingCoordinatorRunRow struct {
-	RunID         string
-	WorkID        string
-	SpaceID       string
-	InputStartSeq int64
-	InputEndSeq   int64
-	BaseRevision  int64
-	WriterToken   string
-	CurrentFence  int64
-	CreatedAt     pgtype.Timestamptz
+type LockExpiredRunForClaimRow struct {
+	RunID                    string
+	WorkID                   string
+	SpaceID                  string
+	Goal                     string
+	Understanding            *string
+	NextStep                 *string
+	InputStartSeq            int64
+	InputEndSeq              int64
+	BaseUnderstandingVersion int64
+	CurrentFence             int64
+	ExpiredAttemptID         string
 }
 
-func (q *Queries) LockPendingCoordinatorRun(ctx context.Context, spaceID string) (LockPendingCoordinatorRunRow, error) {
-	row := q.db.QueryRow(ctx, lockPendingCoordinatorRun, spaceID)
-	var i LockPendingCoordinatorRunRow
+func (q *Queries) LockExpiredRunForClaim(ctx context.Context, spaceID string) (LockExpiredRunForClaimRow, error) {
+	row := q.db.QueryRow(ctx, lockExpiredRunForClaim, spaceID)
+	var i LockExpiredRunForClaimRow
 	err := row.Scan(
 		&i.RunID,
 		&i.WorkID,
 		&i.SpaceID,
+		&i.Goal,
+		&i.Understanding,
+		&i.NextStep,
 		&i.InputStartSeq,
 		&i.InputEndSeq,
-		&i.BaseRevision,
-		&i.WriterToken,
+		&i.BaseUnderstandingVersion,
 		&i.CurrentFence,
-		&i.CreatedAt,
+		&i.ExpiredAttemptID,
 	)
 	return i, err
 }
 
-const lockWorkForCoordination = `-- name: LockWorkForCoordination :one
+const lockWorkForRunClaim = `-- name: LockWorkForRunClaim :one
 SELECT
-    w.work_id,
-    w.space_id,
-    w.applied_input_seq,
-    w.input_head_seq,
-    w.current_revision
-FROM works AS w
+    work.work_id,
+    work.space_id,
+    work.goal,
+    work.understanding,
+    work.next_step,
+    work.applied_input_seq,
+    work.input_head_seq,
+    work.understanding_version
+FROM works AS work
 WHERE
-    w.lifecycle = 'open'
-    AND w.applied_input_seq < w.input_head_seq
+    work.space_id = $1
+    AND work.lifecycle = 'open'
+    AND work.applied_input_seq < work.input_head_seq
     AND NOT EXISTS (
         SELECT 1
-        FROM coordinator_runs AS r
-        WHERE r.work_id = w.work_id
-          AND r.state IN ('pending', 'active', 'failed', 'unknown')
+        FROM runs AS run
+        WHERE run.work_id = work.work_id
+          AND run.state IN ('active', 'failed', 'unknown')
     )
-ORDER BY w.created_at, w.work_id
+ORDER BY work.created_at, work.work_id
 LIMIT 1
-FOR UPDATE OF w SKIP LOCKED
+FOR UPDATE OF work SKIP LOCKED
 `
 
-type LockWorkForCoordinationRow struct {
-	WorkID          string
-	SpaceID         string
-	AppliedInputSeq int64
-	InputHeadSeq    int64
-	CurrentRevision int64
+type LockWorkForRunClaimRow struct {
+	WorkID               string
+	SpaceID              string
+	Goal                 string
+	Understanding        *string
+	NextStep             *string
+	AppliedInputSeq      int64
+	InputHeadSeq         int64
+	UnderstandingVersion int64
 }
 
-func (q *Queries) LockWorkForCoordination(ctx context.Context) (LockWorkForCoordinationRow, error) {
-	row := q.db.QueryRow(ctx, lockWorkForCoordination)
-	var i LockWorkForCoordinationRow
+func (q *Queries) LockWorkForRunClaim(ctx context.Context, spaceID string) (LockWorkForRunClaimRow, error) {
+	row := q.db.QueryRow(ctx, lockWorkForRunClaim, spaceID)
+	var i LockWorkForRunClaimRow
 	err := row.Scan(
 		&i.WorkID,
 		&i.SpaceID,
+		&i.Goal,
+		&i.Understanding,
+		&i.NextStep,
 		&i.AppliedInputSeq,
 		&i.InputHeadSeq,
-		&i.CurrentRevision,
+		&i.UnderstandingVersion,
 	)
 	return i, err
 }
 
-const succeedCoordinatorRun = `-- name: SucceedCoordinatorRun :execrows
-UPDATE coordinator_runs
-SET state = 'succeeded', completed_at = transaction_timestamp()
+const rotateRunFence = `-- name: RotateRunFence :one
+UPDATE runs
+SET current_fence = current_fence + 1
+WHERE
+    run_id = $1
+    AND state = 'active'
+    AND current_fence = $2
+RETURNING current_fence
+`
+
+type RotateRunFenceParams struct {
+	RunID        string
+	CurrentFence int64
+}
+
+func (q *Queries) RotateRunFence(ctx context.Context, arg RotateRunFenceParams) (int64, error) {
+	row := q.db.QueryRow(ctx, rotateRunFence, arg.RunID, arg.CurrentFence)
+	var current_fence int64
+	err := row.Scan(&current_fence)
+	return current_fence, err
+}
+
+const runAttemptLeaseIsCurrent = `-- name: RunAttemptLeaseIsCurrent :one
+SELECT lease_expires_at > clock_timestamp()
+FROM run_attempts
+WHERE attempt_id = $1
+`
+
+func (q *Queries) RunAttemptLeaseIsCurrent(ctx context.Context, attemptID string) (bool, error) {
+	row := q.db.QueryRow(ctx, runAttemptLeaseIsCurrent, attemptID)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const succeedRun = `-- name: SucceedRun :execrows
+UPDATE runs
+SET state = 'succeeded', completed_at = clock_timestamp()
 WHERE run_id = $1 AND state = 'active'
 `
 
-func (q *Queries) SucceedCoordinatorRun(ctx context.Context, runID string) (int64, error) {
-	result, err := q.db.Exec(ctx, succeedCoordinatorRun, runID)
+func (q *Queries) SucceedRun(ctx context.Context, runID string) (int64, error) {
+	result, err := q.db.Exec(ctx, succeedRun, runID)
 	if err != nil {
 		return 0, err
 	}
@@ -596,7 +598,7 @@ func (q *Queries) SucceedCoordinatorRun(ctx context.Context, runID string) (int6
 
 const succeedRunAttempt = `-- name: SucceedRunAttempt :execrows
 UPDATE run_attempts
-SET state = 'succeeded', completed_at = transaction_timestamp()
+SET state = 'succeeded', completed_at = clock_timestamp()
 WHERE attempt_id = $1 AND state = 'active'
 `
 

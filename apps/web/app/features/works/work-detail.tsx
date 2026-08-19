@@ -66,9 +66,9 @@ export function WorkDetail({
         aria-live="polite"
       >
         <h3 id="current-understanding-title">Current understanding</h3>
-        {details.work.current_revision === 0 ? (
+        {!details.work.understanding ? (
           <p className="empty-copy">
-            Carry has not applied this Work’s information yet.
+            This Work’s information has not been applied yet.
           </p>
         ) : (
           <>
@@ -79,6 +79,11 @@ export function WorkDetail({
             </div>
           </>
         )}
+        {details.work.understanding && details.work.has_unapplied_input ? (
+          <p className="empty-copy">
+            New information has not been applied yet.
+          </p>
+        ) : null}
       </section>
 
       <section className="message-section" aria-labelledby="messages-title">

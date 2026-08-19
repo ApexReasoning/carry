@@ -26,11 +26,9 @@ export type Work = {
   lifecycle: "open";
   owner_user_id: string;
   creator_user_id: string;
-  input_head_seq: number;
-  applied_input_seq: number;
-  current_revision: number;
   understanding: string;
   next_step: string;
+  has_unapplied_input: boolean;
   created_at: string;
 };
 
@@ -39,7 +37,6 @@ export type WorkMessage = {
   work_id: string;
   author_user_id: string;
   text: string;
-  input_seq: number;
   created_at: string;
 };
 

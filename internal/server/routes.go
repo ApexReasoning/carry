@@ -62,42 +62,20 @@ type MachineRoutes struct {
 	machine machineAPI
 }
 
-// NewMachineRoutes constructs the Machine principal surface from independent runtime-report and Run-claim contracts.
-func NewMachineRoutes(runtimeStore MachineRuntimeStore, runStore MachineRunStore) (*MachineRoutes, error) {
-	if runtimeStore == nil || runStore == nil {
-		return nil, errors.New("Machine route dependencies are required")
+// NewMachineRoutes constructs the narrow mTLS-authenticated Run surface.
+func NewMachineRoutes(store MachineRunStore) (*MachineRoutes, error) {
+	if store == nil {
+		return nil, errors.New("Machine route dependency is required")
 	}
-	return &MachineRoutes{machine: machineAPI{runtimeStore: runtimeStore, runStore: runStore}}, nil
+	return &MachineRoutes{machine: machineAPI{store: store}}, nil
 }
 
 func (routes *MachineRoutes) mount(router chi.Router) {
 	router.Group(func(machine chi.Router) {
 		machine.Use(requireMachine)
-		machine.Post("/runtime-report", routes.machine.reportRuntimes)
-		machine.Get("/status", routes.machine.status)
 		machine.Post("/runs/claim", routes.machine.claimRun)
 		machine.Post("/runs/{run_id}/attempts/{attempt_id}/renew", routes.machine.renewRun)
-	})
-}
-
-// AgentRoutes composes only the Attempt-scoped bearer surface.
-type AgentRoutes struct {
-	agent agentAPI
-}
-
-// NewAgentRoutes constructs the Agent principal surface independently of member and Machine auth.
-func NewAgentRoutes(store AgentRunStore) (*AgentRoutes, error) {
-	if store == nil {
-		return nil, errors.New("Agent route dependency is required")
-	}
-	return &AgentRoutes{agent: agentAPI{store: store}}, nil
-}
-
-func (routes *AgentRoutes) mount(router chi.Router) {
-	router.Group(func(agent chi.Router) {
-		agent.Use(requireAgent)
-		agent.Get("/runs/{run_id}/attempts/{attempt_id}/context", routes.agent.loadContext)
-		agent.Post("/runs/{run_id}/attempts/{attempt_id}/revision", routes.agent.commitRevision)
-		agent.Post("/runs/{run_id}/attempts/{attempt_id}/outcome", routes.agent.finishOutcome)
+		machine.Post("/runs/{run_id}/attempts/{attempt_id}/understanding", routes.machine.commitUnderstanding)
+		machine.Post("/runs/{run_id}/attempts/{attempt_id}/outcome", routes.machine.finishAttempt)
 	})
 }

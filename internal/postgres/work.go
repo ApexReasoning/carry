@@ -88,10 +88,10 @@ func (s *Store) ListWorks(ctx context.Context, userID string, spaceID string) ([
 		works = append(works, work.Work{
 			WorkID: row.WorkID, SpaceID: row.SpaceID, Goal: row.Goal,
 			Lifecycle: work.Lifecycle(row.Lifecycle), OwnerUserID: row.OwnerUserID,
-			CreatorUserID: row.CreatorUserID, InputHeadSeq: row.InputHeadSeq,
-			AppliedInputSeq: row.AppliedInputSeq, CurrentRevision: row.CurrentRevision,
-			Understanding: valueOrEmpty(row.Understanding), NextStep: valueOrEmpty(row.NextStep),
-			CreatedAt: row.CreatedAt.Time,
+			CreatorUserID: row.CreatorUserID,
+			Understanding: textValue(row.Understanding), NextStep: textValue(row.NextStep),
+			HasUnappliedInput: row.AppliedInputSeq < row.InputHeadSeq,
+			CreatedAt:         row.CreatedAt.Time,
 		})
 	}
 	if err := transaction.Commit(ctx); err != nil {
@@ -232,9 +232,9 @@ func workFromCreateRow(row dbsqlc.CreateWorkRow) work.Work {
 	return work.Work{
 		WorkID: row.WorkID, SpaceID: row.SpaceID, Goal: row.Goal,
 		Lifecycle: work.Lifecycle(row.Lifecycle), OwnerUserID: row.OwnerUserID,
-		CreatorUserID: row.CreatorUserID, InputHeadSeq: row.InputHeadSeq,
-		AppliedInputSeq: row.AppliedInputSeq, CurrentRevision: row.CurrentRevision,
-		CreatedAt: row.CreatedAt.Time,
+		CreatorUserID:     row.CreatorUserID,
+		HasUnappliedInput: true,
+		CreatedAt:         row.CreatedAt.Time,
 	}
 }
 
@@ -242,9 +242,9 @@ func workFromIdempotencyRow(row dbsqlc.FindWorkByCreateIdempotencyRow) work.Work
 	return work.Work{
 		WorkID: row.WorkID, SpaceID: row.SpaceID, Goal: row.Goal,
 		Lifecycle: work.Lifecycle(row.Lifecycle), OwnerUserID: row.OwnerUserID,
-		CreatorUserID: row.CreatorUserID, InputHeadSeq: row.InputHeadSeq,
-		AppliedInputSeq: row.AppliedInputSeq, CurrentRevision: row.CurrentRevision,
-		CreatedAt: row.CreatedAt.Time,
+		CreatorUserID:     row.CreatorUserID,
+		HasUnappliedInput: true,
+		CreatedAt:         row.CreatedAt.Time,
 	}
 }
 
@@ -252,9 +252,9 @@ func workFromLoadRow(row dbsqlc.LoadWorkRow) work.Work {
 	return work.Work{
 		WorkID: row.WorkID, SpaceID: row.SpaceID, Goal: row.Goal,
 		Lifecycle: work.Lifecycle(row.Lifecycle), OwnerUserID: row.OwnerUserID,
-		CreatorUserID: row.CreatorUserID, InputHeadSeq: row.InputHeadSeq,
-		AppliedInputSeq: row.AppliedInputSeq, CurrentRevision: row.CurrentRevision,
-		Understanding: valueOrEmpty(row.Understanding), NextStep: valueOrEmpty(row.NextStep),
-		CreatedAt: row.CreatedAt.Time,
+		CreatorUserID: row.CreatorUserID,
+		Understanding: textValue(row.Understanding), NextStep: textValue(row.NextStep),
+		HasUnappliedInput: row.AppliedInputSeq < row.InputHeadSeq,
+		CreatedAt:         row.CreatedAt.Time,
 	}
 }

@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/ApexReasoning/carry/internal/host"
-	"github.com/ApexReasoning/carry/internal/run"
 )
 
 func TestAdapterExecutesToollessCodexTurnAndParsesCompletedDraft(t *testing.T) {
@@ -39,15 +38,14 @@ printf '%s\n' \
 		t.Fatalf("diagnose Codex: %v", err)
 	}
 
-	draft, err := adapter.Execute(context.Background(), host.ExecutionRequest{
-		Goal:   "Prepare the renewal brief",
-		Inputs: []run.Input{{Sequence: 1, Kind: run.InputGoal, Text: "Prepare the renewal brief"}},
+	update, err := adapter.Execute(context.Background(), host.ExecutionRequest{
+		Goal: "Prepare the renewal brief",
 	})
 	if err != nil {
 		t.Fatalf("execute Codex app-server: %v", err)
 	}
-	if draft.Understanding != "Finance approved the term." || draft.NextStep != "Apply legal wording." {
-		t.Fatalf("Codex draft = %#v", draft)
+	if update.Understanding != "Finance approved the term." || update.NextStep != "Apply legal wording." {
+		t.Fatalf("Codex update = %#v", update)
 	}
 	arguments, err := os.ReadFile(argumentFile)
 	if err != nil {

@@ -48,15 +48,16 @@ The contract is set after Node research and design, before implementation. If im
 
 - Users need to understand only Space, Carry, and Work. Needs You is a query.
 - An explicit delegation creates Work directly; do not create a Work Offer entity.
-- Conversation owns private messages. Work owns shared Work messages. Delivery owns EndpointLink and ordinary outbound delivery. Action owns audience expansion or a new external consequence.
+- Current persistent owners are Identity, Space, Work, Machine, and Run. Conversation, Delivery, Action, Artifact, Plugin, Event, Result, Question, Timer, and other candidates appear only when a current journey proves an independent lifecycle and authority boundary.
 - Private content never becomes shared Work content automatically or through a readable source relation.
-- Text, model output, Plugin content, MCP annotations, webhooks, and files never grant authority.
+- Text, model output, third-party content, tool annotations, webhooks, and files never grant authority.
+- A fact's role is not a new entity: evidence remains the Message, Artifact, receipt, outcome, or database fact that supports a decision; do not create Evidence owners, APIs, or polymorphic stores.
 - Unknown external outcomes remain Unknown. Do not guess failure or retry without idempotency or reconciliation evidence.
 - Work is never classified by Git, software, content, provider, model, Host, or Runtime. Work/Run core facts, admission, continuity, and execution state are independent of those attributes. Repository or similar capabilities belong only to the exact Attempt that earns them; they do not change the Work or select its Runtime.
-- Machine Runtime observations are physical diagnostics only. They must not become Work fields, Run admission criteria, or claim eligibility.
+- Runtime availability is local Host diagnosis, not a persisted Machine fact, public status model, Work field, admission criterion, or claim selector.
 - PostgreSQL owns transactions, claims, leases, fences, queues, outboxes, and idempotency. Do not add Kafka, Redis queues, Temporal, or microservices without a new canonical decision.
-- Pi and Codex are concrete native adapters under one product contract. Do not create a provider registry.
-- Event, Artifact, Child Run, a second MCP transport, and other conditional boundaries appear only when a current journey earns them.
+- Pi and Codex are concrete native adapters under one product contract. Do not create a provider registry, shared provider event model, or Session recovery framework without a current consumer.
+- Machine mTLS plus exact Run/Attempt/fence/lease is the current execution authority. Do not add writer tokens, Agent credentials, or an Agent API until an Agent or bridge directly consumes them.
 - Do not copy another repository's package tree, schema, API, generated code, compatibility layer, or Web route.
 
 ## Implementation and Review Budget
@@ -73,7 +74,7 @@ Implementation steps receive author self-review, formatter, LSP, and focused tes
 
 At Node close, use one relevant reviewer for one focused review. A blocker may receive one narrow confirmation by the same reviewer.
 
-Only at a Milestone boundary run the three independent reviews: logic/evidence, architecture/product/AI-native, and implementation aesthetics. After blocker fixes, allow one narrow follow-up, not another full review cycle.
+Only at a Milestone boundary, or for a user-requested full-repository architecture simplification cut, run the three independent reviews: logic/evidence, architecture/product/AI-native, and implementation aesthetics. After blocker fixes, allow one narrow follow-up, not another full review cycle.
 
 Review must not expand the closing evidence after implementation unless it finds a correctness blocker, data risk, or authority vulnerability.
 

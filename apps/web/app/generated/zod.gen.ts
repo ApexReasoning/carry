@@ -24,26 +24,9 @@ export const zWork = z.object({
   lifecycle: z.enum(["open"]),
   owner_user_id: z.string(),
   creator_user_id: z.string(),
-  input_head_seq: z.coerce
-    .bigint()
-    .gte(BigInt(1))
-    .max(BigInt("9223372036854775807"), {
-      error: "Invalid value: Expected int64 to be <= 9223372036854775807",
-    }),
-  applied_input_seq: z.coerce
-    .bigint()
-    .gte(BigInt(0))
-    .max(BigInt("9223372036854775807"), {
-      error: "Invalid value: Expected int64 to be <= 9223372036854775807",
-    }),
-  current_revision: z.coerce
-    .bigint()
-    .gte(BigInt(0))
-    .max(BigInt("9223372036854775807"), {
-      error: "Invalid value: Expected int64 to be <= 9223372036854775807",
-    }),
   understanding: z.string(),
   next_step: z.string(),
+  has_unapplied_input: z.boolean(),
   created_at: z.iso.datetime({ offset: true }),
 });
 
@@ -52,12 +35,6 @@ export const zWorkMessage = z.object({
   work_id: z.uuid(),
   author_user_id: z.string(),
   text: z.string(),
-  input_seq: z.coerce
-    .bigint()
-    .gte(BigInt(2))
-    .max(BigInt("9223372036854775807"), {
-      error: "Invalid value: Expected int64 to be <= 9223372036854775807",
-    }),
   created_at: z.iso.datetime({ offset: true }),
 });
 

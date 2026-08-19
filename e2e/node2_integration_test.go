@@ -97,7 +97,7 @@ func TestHostAdvancesWorkThroughNativeExecutionContract(t *testing.T) {
 	)
 	hostCtx, cancelHost := context.WithCancel(t.Context())
 	hostLog := &lockedBuffer{}
-	hostCommand := exec.CommandContext(hostCtx, carry, "host", "start", "--interval", "1s")
+	hostCommand := exec.CommandContext(hostCtx, carry, "host", "start")
 	hostCommand.Dir = root
 	hostCommand.Env = append(os.Environ(), hostEnvironment...)
 	hostCommand.Stdout = hostLog
@@ -122,8 +122,10 @@ func TestHostAdvancesWorkThroughNativeExecutionContract(t *testing.T) {
 			if err != nil {
 				t.Fatalf("read fake Pi prompt: %v", err)
 			}
-			if strings.Contains(string(prompt), "carry_agent_") || strings.Contains(string(prompt), "writer_token") {
-				t.Fatalf("Agent prompt leaked authority: %s", prompt)
+			for _, forbidden := range []string{`"run_id"`, `"attempt_id"`, `"fence"`, `"machine_id"`, `"input_end_seq"`} {
+				if strings.Contains(string(prompt), forbidden) {
+					t.Fatalf("Agent prompt leaked authority field %s: %s", forbidden, prompt)
+				}
 			}
 			return
 		}

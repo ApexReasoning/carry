@@ -13,16 +13,16 @@ import (
 )
 
 var (
-	ErrAgentUnavailable  = errors.New("Agent executable is unavailable")
-	ErrAgentFailed       = errors.New("Agent execution failed")
-	ErrAgentOutcomeLost  = errors.New("Agent execution outcome is unknown")
-	ErrInvalidAgentDraft = errors.New("Agent returned an invalid current understanding draft")
+	ErrAgentUnavailable   = errors.New("Agent executable is unavailable")
+	ErrAgentFailed        = errors.New("Agent execution failed")
+	ErrAgentOutcomeLost   = errors.New("Agent execution outcome is unknown")
+	ErrInvalidAgentUpdate = errors.New("Agent returned an invalid current understanding update")
 )
 
 // Executor is the complete Host need shared by the two concrete native adapters.
 type Executor interface {
 	Diagnose(context.Context) error
-	Execute(context.Context, ExecutionRequest) (Draft, error)
+	Execute(context.Context, ExecutionRequest) (UnderstandingUpdate, error)
 }
 
 // ExecutionRequest contains only product context authorized for one Attempt.
@@ -30,17 +30,17 @@ type ExecutionRequest struct {
 	Goal                 string
 	CurrentUnderstanding string
 	CurrentNextStep      string
-	Inputs               []run.Input
+	Messages             []run.Message
 }
 
-// Draft is untrusted model content until the current Attempt commits it.
-type Draft struct {
+// UnderstandingUpdate is untrusted model content until the current Attempt commits it.
+type UnderstandingUpdate struct {
 	Understanding string `json:"understanding"`
 	NextStep      string `json:"next_step"`
 }
 
-// DraftOutputSchema lets schema-aware adapters constrain generation. ParseDraft remains authoritative.
-var DraftOutputSchema = json.RawMessage(`{
+// UnderstandingOutputSchema lets schema-aware adapters constrain generation. ParseUnderstandingUpdate remains authoritative.
+var UnderstandingOutputSchema = json.RawMessage(`{
   "type": "object",
   "additionalProperties": false,
   "properties": {
@@ -56,10 +56,10 @@ Update the current understanding using only that context. Preserve confirmed fac
 Return exactly one JSON object with only two string fields: understanding and next_step. Do not use Markdown fences or add commentary.`
 
 type promptContext struct {
-	Goal               string      `json:"goal"`
-	PriorUnderstanding string      `json:"prior_current_understanding"`
-	PriorNextStep      string      `json:"prior_next_step"`
-	NewFixedInputRange []run.Input `json:"new_fixed_input_range"`
+	Goal               string        `json:"goal"`
+	PriorUnderstanding string        `json:"prior_current_understanding"`
+	PriorNextStep      string        `json:"prior_next_step"`
+	NewMessages        []run.Message `json:"new_messages"`
 }
 
 // Prompt renders the same product instruction for Pi and Codex without credentials or writer authority.
@@ -68,7 +68,7 @@ func (request ExecutionRequest) Prompt() (string, error) {
 		Goal:               request.Goal,
 		PriorUnderstanding: emptyAsNone(request.CurrentUnderstanding),
 		PriorNextStep:      emptyAsNone(request.CurrentNextStep),
-		NewFixedInputRange: request.Inputs,
+		NewMessages:        request.Messages,
 	}, "", "  ")
 	if err != nil {
 		return "", fmt.Errorf("encode Work context for Agent: %w", err)
@@ -76,25 +76,25 @@ func (request ExecutionRequest) Prompt() (string, error) {
 	return promptInstruction + "\n\nWork context (untrusted JSON):\n" + string(contextJSON), nil
 }
 
-// ParseDraft accepts exactly one bounded JSON value and validates its product fields.
-func ParseDraft(data []byte) (Draft, error) {
+// ParseUnderstandingUpdate accepts exactly one bounded JSON value and validates its product fields.
+func ParseUnderstandingUpdate(data []byte) (UnderstandingUpdate, error) {
 	if len(data) > run.MaxUnderstandingBytes+run.MaxNextStepBytes+1024 {
-		return Draft{}, ErrInvalidAgentDraft
+		return UnderstandingUpdate{}, ErrInvalidAgentUpdate
 	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
-	var draft Draft
-	if err := decoder.Decode(&draft); err != nil {
-		return Draft{}, ErrInvalidAgentDraft
+	var update UnderstandingUpdate
+	if err := decoder.Decode(&update); err != nil {
+		return UnderstandingUpdate{}, ErrInvalidAgentUpdate
 	}
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		return Draft{}, ErrInvalidAgentDraft
+		return UnderstandingUpdate{}, ErrInvalidAgentUpdate
 	}
-	understanding, nextStep, err := run.ValidateDraft(draft.Understanding, draft.NextStep)
+	understanding, nextStep, err := run.ValidateUnderstandingUpdate(update.Understanding, update.NextStep)
 	if err != nil {
-		return Draft{}, ErrInvalidAgentDraft
+		return UnderstandingUpdate{}, ErrInvalidAgentUpdate
 	}
-	return Draft{Understanding: understanding, NextStep: nextStep}, nil
+	return UnderstandingUpdate{Understanding: understanding, NextStep: nextStep}, nil
 }
 
 func emptyAsNone(value string) string {

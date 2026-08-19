@@ -44,8 +44,7 @@ INSERT INTO works (
     $7
 )
 ON CONFLICT (space_id, creator_user_id, create_idempotency_key) DO NOTHING
-RETURNING work_id, space_id, goal, lifecycle, owner_user_id, creator_user_id,
-    input_head_seq, applied_input_seq, current_revision, created_at
+RETURNING work_id, space_id, goal, lifecycle, owner_user_id, creator_user_id, created_at
 `
 
 type CreateWorkParams struct {
@@ -59,16 +58,13 @@ type CreateWorkParams struct {
 }
 
 type CreateWorkRow struct {
-	WorkID          string
-	SpaceID         string
-	Goal            string
-	Lifecycle       string
-	OwnerUserID     string
-	CreatorUserID   string
-	InputHeadSeq    int64
-	AppliedInputSeq int64
-	CurrentRevision int64
-	CreatedAt       pgtype.Timestamptz
+	WorkID        string
+	SpaceID       string
+	Goal          string
+	Lifecycle     string
+	OwnerUserID   string
+	CreatorUserID string
+	CreatedAt     pgtype.Timestamptz
 }
 
 func (q *Queries) CreateWork(ctx context.Context, arg CreateWorkParams) (CreateWorkRow, error) {
@@ -89,9 +85,6 @@ func (q *Queries) CreateWork(ctx context.Context, arg CreateWorkParams) (CreateW
 		&i.Lifecycle,
 		&i.OwnerUserID,
 		&i.CreatorUserID,
-		&i.InputHeadSeq,
-		&i.AppliedInputSeq,
-		&i.CurrentRevision,
 		&i.CreatedAt,
 	)
 	return i, err
@@ -161,7 +154,7 @@ func (q *Queries) CreateWorkMessage(ctx context.Context, arg CreateWorkMessagePa
 
 const findWorkByCreateIdempotency = `-- name: FindWorkByCreateIdempotency :one
 SELECT work_id, space_id, goal, lifecycle, owner_user_id, creator_user_id,
-    input_head_seq, applied_input_seq, current_revision, created_at, create_request_digest
+    created_at, create_request_digest
 FROM works
 WHERE
     space_id = $1
@@ -182,9 +175,6 @@ type FindWorkByCreateIdempotencyRow struct {
 	Lifecycle           string
 	OwnerUserID         string
 	CreatorUserID       string
-	InputHeadSeq        int64
-	AppliedInputSeq     int64
-	CurrentRevision     int64
 	CreatedAt           pgtype.Timestamptz
 	CreateRequestDigest []byte
 }
@@ -199,9 +189,6 @@ func (q *Queries) FindWorkByCreateIdempotency(ctx context.Context, arg FindWorkB
 		&i.Lifecycle,
 		&i.OwnerUserID,
 		&i.CreatorUserID,
-		&i.InputHeadSeq,
-		&i.AppliedInputSeq,
-		&i.CurrentRevision,
 		&i.CreatedAt,
 		&i.CreateRequestDigest,
 	)
@@ -292,29 +279,26 @@ func (q *Queries) ListWorkMessages(ctx context.Context, workID string) ([]ListWo
 }
 
 const listWorks = `-- name: ListWorks :many
-SELECT w.work_id, w.space_id, w.goal, w.lifecycle, w.owner_user_id, w.creator_user_id,
-    w.input_head_seq, w.applied_input_seq, w.current_revision, w.created_at,
-    revision.understanding, revision.next_step
-FROM works AS w
-LEFT JOIN work_understanding_revisions AS revision
-    ON revision.work_id = w.work_id AND revision.revision = w.current_revision
-WHERE w.space_id = $1
-ORDER BY w.created_at DESC, w.work_id DESC
+SELECT work_id, space_id, goal, lifecycle, owner_user_id, creator_user_id,
+    input_head_seq, applied_input_seq, understanding_version, understanding, next_step, created_at
+FROM works
+WHERE space_id = $1
+ORDER BY created_at DESC, work_id DESC
 `
 
 type ListWorksRow struct {
-	WorkID          string
-	SpaceID         string
-	Goal            string
-	Lifecycle       string
-	OwnerUserID     string
-	CreatorUserID   string
-	InputHeadSeq    int64
-	AppliedInputSeq int64
-	CurrentRevision int64
-	CreatedAt       pgtype.Timestamptz
-	Understanding   *string
-	NextStep        *string
+	WorkID               string
+	SpaceID              string
+	Goal                 string
+	Lifecycle            string
+	OwnerUserID          string
+	CreatorUserID        string
+	InputHeadSeq         int64
+	AppliedInputSeq      int64
+	UnderstandingVersion int64
+	Understanding        *string
+	NextStep             *string
+	CreatedAt            pgtype.Timestamptz
 }
 
 func (q *Queries) ListWorks(ctx context.Context, spaceID string) ([]ListWorksRow, error) {
@@ -335,10 +319,10 @@ func (q *Queries) ListWorks(ctx context.Context, spaceID string) ([]ListWorksRow
 			&i.CreatorUserID,
 			&i.InputHeadSeq,
 			&i.AppliedInputSeq,
-			&i.CurrentRevision,
-			&i.CreatedAt,
+			&i.UnderstandingVersion,
 			&i.Understanding,
 			&i.NextStep,
+			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -351,14 +335,11 @@ func (q *Queries) ListWorks(ctx context.Context, spaceID string) ([]ListWorksRow
 }
 
 const loadWork = `-- name: LoadWork :one
-SELECT w.work_id, w.space_id, w.goal, w.lifecycle, w.owner_user_id, w.creator_user_id,
-    w.input_head_seq, w.applied_input_seq, w.current_revision, w.created_at,
-    revision.understanding, revision.next_step
-FROM works AS w
-LEFT JOIN work_understanding_revisions AS revision
-    ON revision.work_id = w.work_id AND revision.revision = w.current_revision
-WHERE w.space_id = $1 AND w.work_id = $2
-FOR SHARE OF w
+SELECT work_id, space_id, goal, lifecycle, owner_user_id, creator_user_id,
+    input_head_seq, applied_input_seq, understanding_version, understanding, next_step, created_at
+FROM works
+WHERE space_id = $1 AND work_id = $2
+FOR SHARE
 `
 
 type LoadWorkParams struct {
@@ -367,18 +348,18 @@ type LoadWorkParams struct {
 }
 
 type LoadWorkRow struct {
-	WorkID          string
-	SpaceID         string
-	Goal            string
-	Lifecycle       string
-	OwnerUserID     string
-	CreatorUserID   string
-	InputHeadSeq    int64
-	AppliedInputSeq int64
-	CurrentRevision int64
-	CreatedAt       pgtype.Timestamptz
-	Understanding   *string
-	NextStep        *string
+	WorkID               string
+	SpaceID              string
+	Goal                 string
+	Lifecycle            string
+	OwnerUserID          string
+	CreatorUserID        string
+	InputHeadSeq         int64
+	AppliedInputSeq      int64
+	UnderstandingVersion int64
+	Understanding        *string
+	NextStep             *string
+	CreatedAt            pgtype.Timestamptz
 }
 
 func (q *Queries) LoadWork(ctx context.Context, arg LoadWorkParams) (LoadWorkRow, error) {
@@ -393,10 +374,10 @@ func (q *Queries) LoadWork(ctx context.Context, arg LoadWorkParams) (LoadWorkRow
 		&i.CreatorUserID,
 		&i.InputHeadSeq,
 		&i.AppliedInputSeq,
-		&i.CurrentRevision,
-		&i.CreatedAt,
+		&i.UnderstandingVersion,
 		&i.Understanding,
 		&i.NextStep,
+		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -425,7 +406,7 @@ func (q *Queries) LockActiveWorkMembership(ctx context.Context, arg LockActiveWo
 
 const lockWork = `-- name: LockWork :one
 SELECT work_id, space_id, goal, lifecycle, owner_user_id, creator_user_id,
-    input_head_seq, applied_input_seq, current_revision, created_at
+    input_head_seq, applied_input_seq, understanding_version, understanding, next_step, created_at
 FROM works
 WHERE space_id = $1 AND work_id = $2
 FOR UPDATE
@@ -437,16 +418,18 @@ type LockWorkParams struct {
 }
 
 type LockWorkRow struct {
-	WorkID          string
-	SpaceID         string
-	Goal            string
-	Lifecycle       string
-	OwnerUserID     string
-	CreatorUserID   string
-	InputHeadSeq    int64
-	AppliedInputSeq int64
-	CurrentRevision int64
-	CreatedAt       pgtype.Timestamptz
+	WorkID               string
+	SpaceID              string
+	Goal                 string
+	Lifecycle            string
+	OwnerUserID          string
+	CreatorUserID        string
+	InputHeadSeq         int64
+	AppliedInputSeq      int64
+	UnderstandingVersion int64
+	Understanding        *string
+	NextStep             *string
+	CreatedAt            pgtype.Timestamptz
 }
 
 func (q *Queries) LockWork(ctx context.Context, arg LockWorkParams) (LockWorkRow, error) {
@@ -461,7 +444,9 @@ func (q *Queries) LockWork(ctx context.Context, arg LockWorkParams) (LockWorkRow
 		&i.CreatorUserID,
 		&i.InputHeadSeq,
 		&i.AppliedInputSeq,
-		&i.CurrentRevision,
+		&i.UnderstandingVersion,
+		&i.Understanding,
+		&i.NextStep,
 		&i.CreatedAt,
 	)
 	return i, err

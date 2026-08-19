@@ -382,14 +382,14 @@ make check-web
 make check-product
 ```
 
-该 target 启动 PostgreSQL、carry-server 和必要 Web runtime，运行少量最高价值浏览器旅程：
+该 target 启动 PostgreSQL、carry-server 和必要 Web runtime，只运行当前已经实现的最高价值旅程：
 
-- 创建并推进 Work，且当前 Attempt 不请求 repository capability；
-- 私人消息创建 Work 且不泄漏原文；
-- 一条渠道回复的 Delivery；
-- 一个 Pi/Codex 最小 conformance journey。
+- 成员建立 Browser Session；
+- 创建、读取并补充 Work；
+- Machine enrollment 后用独立 mTLS claim 并推进 Work；
+- Host 中断后新的 Attempt 安全继续，旧 Attempt 不能晚到提交。
 
-如果 Runtime 需要真实付费 credential，该部分不在不可信 PR 上运行，改由 protected canary 执行。
+未来 journey 只有在实现并成为发布合同后才进入 required product suite。需要真实模型 credential 的 Pi/Codex canary 不在不可信 PR 上运行，改由 protected canary 执行。
 
 ### 为什么不拆更多 job
 
@@ -522,7 +522,7 @@ carry-server 不能导入本地 Agent 进程实现
 
 它只使用 `go list` 和路径检查表达禁止方向，不维护完整 package dependency manifest，也不枚举所有允许 package。正常新增一个已赚得的 owner 不应要求更新中央 allowlist。
 
-其他依赖质量仍由 Go `internal` 结构、小而清楚的 package API 和 architecture review 保护。只有重复出现的新违规类型，才给脚本增加一条稳定规则。
+其他依赖质量仍由 Go `internal` 结构、小而清楚的 package API 和 architecture review 保护。只有重复出现的新违规类型，才给脚本增加一条稳定规则。概念预算不能靠中央 allowlist 维护；无消费者的 owner 必须删除，而不是加入例外。
 
 ## 18. Release 文件不污染源码
 

@@ -26,11 +26,10 @@ func Run(
 	version string,
 	configDirectory string,
 	streams Streams,
-	detectRuntimes func(context.Context) []hostdomain.RuntimeObservation,
 	piExecutor hostdomain.Executor,
 	codexExecutor hostdomain.Executor,
 ) int {
-	root := newRoot(version, configDirectory, streams, detectRuntimes, piExecutor, codexExecutor)
+	root := newRoot(version, configDirectory, streams, piExecutor, codexExecutor)
 	root.SetArgs(arguments)
 	if err := root.ExecuteContext(ctx); err != nil {
 		_, _ = fmt.Fprintf(streams.ErrorOutput, "Error: %v\n", err)
@@ -43,7 +42,6 @@ func newRoot(
 	version string,
 	configDirectory string,
 	streams Streams,
-	detectRuntimes func(context.Context) []hostdomain.RuntimeObservation,
 	piExecutor hostdomain.Executor,
 	codexExecutor hostdomain.Executor,
 ) *cobra.Command {
@@ -65,19 +63,7 @@ func newRoot(
 	root.AddCommand(
 		login.NewCommand(configDirectory, streams.Output),
 		workcmd.NewCommand(configDirectory, streams.Output),
-		hostcmd.NewCommand(configDirectory, streams.Output, detectRuntimes, piExecutor, codexExecutor),
-		newVersionCommand(version, streams.Output),
+		hostcmd.NewCommand(configDirectory, streams.Output, piExecutor, codexExecutor),
 	)
 	return root
-}
-
-func newVersionCommand(version string, output io.Writer) *cobra.Command {
-	return &cobra.Command{
-		Use:   "version",
-		Short: "Print the Carry version",
-		Args:  cobra.NoArgs,
-		Run: func(_ *cobra.Command, _ []string) {
-			_, _ = fmt.Fprintln(output, version)
-		},
-	}
 }

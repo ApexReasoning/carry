@@ -65,8 +65,8 @@ func TestConcurrentWorkCreationReturnsOneDurableWork(t *testing.T) {
 		if created.OwnerUserID != bootstrap.UserID || created.CreatorUserID != bootstrap.UserID {
 			t.Fatalf("Work owner/creator = %#v", created)
 		}
-		if created.InputHeadSeq != 1 {
-			t.Fatalf("initial input head = %d, want 1", created.InputHeadSeq)
+		if !created.HasUnappliedInput {
+			t.Fatal("new Work did not report unapplied input")
 		}
 	}
 	var count int
@@ -181,8 +181,8 @@ func TestConcurrentWorkMessagesReceiveContinuousInputSequence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load Work after appends: %v", err)
 	}
-	if details.Work.InputHeadSeq != messageCount+1 || len(details.Messages) != messageCount {
-		t.Fatalf("Work after messages = head %d, messages %d", details.Work.InputHeadSeq, len(details.Messages))
+	if !details.Work.HasUnappliedInput || len(details.Messages) != messageCount {
+		t.Fatalf("Work after messages = %#v", details)
 	}
 	for index, message := range details.Messages {
 		if want := int64(index + 2); message.InputSeq != want {
@@ -260,7 +260,7 @@ func TestLoadWorkHoldsAConsistentHeadAndMessageSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load Work after append: %v", err)
 	}
-	if details.Work.InputHeadSeq != 2 || len(details.Messages) != 1 || details.Messages[0].InputSeq != 2 {
+	if !details.Work.HasUnappliedInput || len(details.Messages) != 1 || details.Messages[0].InputSeq != 2 {
 		t.Fatalf("Work after append = %#v", details)
 	}
 }

@@ -26,12 +26,11 @@ INSERT INTO works (
     sqlc.arg(create_request_digest)
 )
 ON CONFLICT (space_id, creator_user_id, create_idempotency_key) DO NOTHING
-RETURNING work_id, space_id, goal, lifecycle, owner_user_id, creator_user_id,
-    input_head_seq, applied_input_seq, current_revision, created_at;
+RETURNING work_id, space_id, goal, lifecycle, owner_user_id, creator_user_id, created_at;
 
 -- name: FindWorkByCreateIdempotency :one
 SELECT work_id, space_id, goal, lifecycle, owner_user_id, creator_user_id,
-    input_head_seq, applied_input_seq, current_revision, created_at, create_request_digest
+    created_at, create_request_digest
 FROM works
 WHERE
     space_id = sqlc.arg(space_id)
@@ -39,28 +38,22 @@ WHERE
     AND create_idempotency_key = sqlc.arg(create_idempotency_key);
 
 -- name: ListWorks :many
-SELECT w.work_id, w.space_id, w.goal, w.lifecycle, w.owner_user_id, w.creator_user_id,
-    w.input_head_seq, w.applied_input_seq, w.current_revision, w.created_at,
-    revision.understanding, revision.next_step
-FROM works AS w
-LEFT JOIN work_understanding_revisions AS revision
-    ON revision.work_id = w.work_id AND revision.revision = w.current_revision
-WHERE w.space_id = sqlc.arg(space_id)
-ORDER BY w.created_at DESC, w.work_id DESC;
+SELECT work_id, space_id, goal, lifecycle, owner_user_id, creator_user_id,
+    input_head_seq, applied_input_seq, understanding_version, understanding, next_step, created_at
+FROM works
+WHERE space_id = sqlc.arg(space_id)
+ORDER BY created_at DESC, work_id DESC;
 
 -- name: LoadWork :one
-SELECT w.work_id, w.space_id, w.goal, w.lifecycle, w.owner_user_id, w.creator_user_id,
-    w.input_head_seq, w.applied_input_seq, w.current_revision, w.created_at,
-    revision.understanding, revision.next_step
-FROM works AS w
-LEFT JOIN work_understanding_revisions AS revision
-    ON revision.work_id = w.work_id AND revision.revision = w.current_revision
-WHERE w.space_id = sqlc.arg(space_id) AND w.work_id = sqlc.arg(work_id)
-FOR SHARE OF w;
+SELECT work_id, space_id, goal, lifecycle, owner_user_id, creator_user_id,
+    input_head_seq, applied_input_seq, understanding_version, understanding, next_step, created_at
+FROM works
+WHERE space_id = sqlc.arg(space_id) AND work_id = sqlc.arg(work_id)
+FOR SHARE;
 
 -- name: LockWork :one
 SELECT work_id, space_id, goal, lifecycle, owner_user_id, creator_user_id,
-    input_head_seq, applied_input_seq, current_revision, created_at
+    input_head_seq, applied_input_seq, understanding_version, understanding, next_step, created_at
 FROM works
 WHERE space_id = sqlc.arg(space_id) AND work_id = sqlc.arg(work_id)
 FOR UPDATE;

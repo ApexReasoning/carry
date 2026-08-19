@@ -12,4 +12,4 @@ make test
 make check
 ```
 
-The first implementation node establishes the `carry-server` and `carry` binaries plus Machine enrollment. Product behavior is added through the vertical Nodes in [`docs/implementation.md`](docs/implementation.md).
+The current V1 foundation supports member login, durable Work, independent Machine enrollment, and Pi/Codex execution through one fenced Run contract. Product behavior is added through the vertical Nodes in [`docs/implementation.md`](docs/implementation.md); unearned future owners and protocols are intentionally absent.

@@ -37,18 +37,16 @@ type appendWorkMessageRequest struct {
 }
 
 type workWire struct {
-	WorkID          string         `json:"work_id"`
-	SpaceID         string         `json:"space_id"`
-	Goal            string         `json:"goal"`
-	Lifecycle       work.Lifecycle `json:"lifecycle"`
-	OwnerUserID     string         `json:"owner_user_id"`
-	CreatorUserID   string         `json:"creator_user_id"`
-	InputHeadSeq    int64          `json:"input_head_seq"`
-	AppliedInputSeq int64          `json:"applied_input_seq"`
-	CurrentRevision int64          `json:"current_revision"`
-	Understanding   string         `json:"understanding"`
-	NextStep        string         `json:"next_step"`
-	CreatedAt       time.Time      `json:"created_at"`
+	WorkID            string         `json:"work_id"`
+	SpaceID           string         `json:"space_id"`
+	Goal              string         `json:"goal"`
+	Lifecycle         work.Lifecycle `json:"lifecycle"`
+	OwnerUserID       string         `json:"owner_user_id"`
+	CreatorUserID     string         `json:"creator_user_id"`
+	Understanding     string         `json:"understanding"`
+	NextStep          string         `json:"next_step"`
+	HasUnappliedInput bool           `json:"has_unapplied_input"`
+	CreatedAt         time.Time      `json:"created_at"`
 }
 
 type workMessageWire struct {
@@ -56,7 +54,6 @@ type workMessageWire struct {
 	WorkID       string    `json:"work_id"`
 	AuthorUserID string    `json:"author_user_id"`
 	Text         string    `json:"text"`
-	InputSeq     int64     `json:"input_seq"`
 	CreatedAt    time.Time `json:"created_at"`
 }
 
@@ -200,9 +197,8 @@ func workToWire(value work.Work) workWire {
 	return workWire{
 		WorkID: value.WorkID, SpaceID: value.SpaceID, Goal: value.Goal,
 		Lifecycle: value.Lifecycle, OwnerUserID: value.OwnerUserID,
-		CreatorUserID: value.CreatorUserID, InputHeadSeq: value.InputHeadSeq,
-		AppliedInputSeq: value.AppliedInputSeq, CurrentRevision: value.CurrentRevision,
-		Understanding: value.Understanding, NextStep: value.NextStep,
+		CreatorUserID: value.CreatorUserID, Understanding: value.Understanding,
+		NextStep: value.NextStep, HasUnappliedInput: value.HasUnappliedInput,
 		CreatedAt: value.CreatedAt,
 	}
 }
@@ -210,6 +206,6 @@ func workToWire(value work.Work) workWire {
 func messageToWire(value work.Message) workMessageWire {
 	return workMessageWire{
 		MessageID: value.MessageID, WorkID: value.WorkID, AuthorUserID: value.AuthorUserID,
-		Text: value.Text, InputSeq: value.InputSeq, CreatedAt: value.CreatedAt,
+		Text: value.Text, CreatedAt: value.CreatedAt,
 	}
 }

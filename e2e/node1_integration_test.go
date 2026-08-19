@@ -74,7 +74,7 @@ func TestMemberCreatesMessagesAndReloadsDurableWork(t *testing.T) {
 		t, root, environment, carry, "work", "message", workID,
 		"--text", "Enterprise customers ask for a 60-day notice period",
 	)
-	if !strings.Contains(messageOutput, "Added input 2") {
+	if !strings.Contains(messageOutput, "Added message to Work "+workID) {
 		t.Fatalf("message output = %q", messageOutput)
 	}
 
@@ -83,7 +83,6 @@ func TestMemberCreatesMessagesAndReloadsDurableWork(t *testing.T) {
 	waitForServer(t, serverURL, filepath.Join(pkiDirectory, "ca.pem"), serverLog)
 	restarted := run(t, root, environment, carry, "work", "show", workID)
 	if !strings.Contains(restarted, "Track recurring customer renewal questions") ||
-		!strings.Contains(restarted, "2  ") ||
 		!strings.Contains(restarted, "Enterprise customers ask for a 60-day notice period") {
 		t.Fatalf("Work after server restart = %q", restarted)
 	}

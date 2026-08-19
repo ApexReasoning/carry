@@ -44,18 +44,16 @@ type AppendMessageCommand struct {
 }
 
 type Work struct {
-	WorkID          string
-	SpaceID         string
-	Goal            string
-	Lifecycle       Lifecycle
-	OwnerUserID     string
-	CreatorUserID   string
-	InputHeadSeq    int64
-	AppliedInputSeq int64
-	CurrentRevision int64
-	Understanding   string
-	NextStep        string
-	CreatedAt       time.Time
+	WorkID            string
+	SpaceID           string
+	Goal              string
+	Lifecycle         Lifecycle
+	OwnerUserID       string
+	CreatorUserID     string
+	Understanding     string
+	NextStep          string
+	HasUnappliedInput bool
+	CreatedAt         time.Time
 }
 
 type Message struct {

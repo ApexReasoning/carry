@@ -7,7 +7,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/ApexReasoning/carry/internal/host"
 	"github.com/ApexReasoning/carry/internal/identity"
 	"github.com/ApexReasoning/carry/internal/work"
 )
@@ -22,7 +21,7 @@ func TestCreateWorkTakesOwnerFromAuthenticatedMember(t *testing.T) {
 	commands := &recordingWorkCommands{created: work.Work{
 		WorkID: workID, SpaceID: spaceID, Goal: "Prepare the renewal analysis",
 		Lifecycle: work.LifecycleOpen, OwnerUserID: "member-9", CreatorUserID: "member-9",
-		InputHeadSeq: 1,
+		HasUnappliedInput: true,
 	}}
 	handler := workTestAPI(t, commands, &recordingWorkQueries{})
 	request := httptest.NewRequest(
@@ -114,8 +113,8 @@ func workTestAPI(t *testing.T, commands WorkCommands, queries WorkQueries) http.
 	if err != nil {
 		t.Fatalf("compose member routes: %v", err)
 	}
-	runtimeStore := &recordingMachineRuntime{}
-	machine, err := NewMachineRoutes(runtimeStore, runtimeStore)
+	runStore := &recordingMachineRuns{}
+	machine, err := NewMachineRoutes(runStore)
 	if err != nil {
 		t.Fatalf("compose Machine routes: %v", err)
 	}
@@ -153,5 +152,4 @@ func (s *recordingWorkQueries) LoadWork(context.Context, string, string, string)
 }
 
 var _ MachineEnrollmentStore = (*recordingMachineEnrollments)(nil)
-var _ MachineRuntimeStore = (*recordingMachineRuntime)(nil)
-var _ = host.RuntimeObservation{}
+var _ MachineRunStore = (*recordingMachineRuns)(nil)

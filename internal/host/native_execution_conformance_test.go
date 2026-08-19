@@ -12,11 +12,11 @@ import (
 	"github.com/ApexReasoning/carry/internal/run"
 )
 
-func TestNativeExecutorsShareOneCarryDraftContract(t *testing.T) {
+func TestNativeExecutorsShareOneUnderstandingContract(t *testing.T) {
 	request := host.ExecutionRequest{
 		Goal:                 "Compare onboarding options",
 		CurrentUnderstanding: "Three options remain under review.",
-		Inputs:               []run.Input{{Sequence: 2, Kind: run.InputMessage, Text: "Support supplied handling times"}},
+		Messages:             []run.Message{{Text: "Support supplied handling times"}},
 	}
 	piBinary := writeConformanceExecutable(t, "pi", piConformanceScript)
 	codexBinary := writeConformanceExecutable(t, "codex", codexConformanceScript)
@@ -33,13 +33,13 @@ func TestNativeExecutorsShareOneCarryDraftContract(t *testing.T) {
 		{name: "Codex", executor: codex.New()},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
-			draft, err := testCase.executor.Execute(context.Background(), request)
+			update, err := testCase.executor.Execute(context.Background(), request)
 			if err != nil {
 				t.Fatalf("execute native Agent: %v", err)
 			}
-			if draft.Understanding != "Support evidence makes the three options comparable." ||
-				draft.NextStep != "Ask the owner to choose an option." {
-				t.Fatalf("conforming draft = %#v", draft)
+			if update.Understanding != "Support evidence makes the three options comparable." ||
+				update.NextStep != "Ask the owner to choose an option." {
+				t.Fatalf("conforming update = %#v", update)
 			}
 		})
 	}

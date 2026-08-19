@@ -33,7 +33,7 @@ func newMessageCommand(configDirectory string, output io.Writer) *cobra.Command 
 			if err != nil {
 				return err
 			}
-			message, err := client.appendMessage(
+			err = client.appendMessage(
 				command.Context(), selectedSpaceID, workID, text, idempotencyKey,
 			)
 			if err != nil {
@@ -42,7 +42,7 @@ func newMessageCommand(configDirectory string, output io.Writer) *cobra.Command 
 			if err := clearPendingIdentity(pendingPath); err != nil {
 				return fmt.Errorf("clear completed Work Message identity: %w", err)
 			}
-			_, err = fmt.Fprintf(output, "Added input %d to Work %s\n", message.InputSeq, workID)
+			_, err = fmt.Fprintf(output, "Added message to Work %s\n", workID)
 			return err
 		},
 	}

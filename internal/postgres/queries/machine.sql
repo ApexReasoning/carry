@@ -22,30 +22,3 @@ UPDATE machines
 SET revoked_at = coalesce(revoked_at, transaction_timestamp())
 WHERE machine_id = sqlc.arg(machine_id)
   AND space_id = sqlc.arg(space_id);
-
--- name: DeleteRuntimeObservations :exec
-DELETE FROM machine_runtime_observations
-WHERE machine_id = sqlc.arg(machine_id);
-
--- name: CreateRuntimeObservation :exec
-INSERT INTO machine_runtime_observations (
-    machine_id, runtime_kind, detection, executable, version,
-    diagnostic_code, diagnostic_detail, observed_at
-) VALUES (
-    sqlc.arg(machine_id), sqlc.arg(runtime_kind), sqlc.arg(detection),
-    sqlc.narg(executable), sqlc.narg(version), sqlc.narg(diagnostic_code),
-    sqlc.narg(diagnostic_detail), sqlc.arg(observed_at)
-);
-
--- name: LoadMachineStatus :one
-SELECT machine_id, space_id, display_name, enrolled_at, revoked_at
-FROM machines
-WHERE machine_id = sqlc.arg(machine_id)
-FOR UPDATE;
-
--- name: ListRuntimeObservations :many
-SELECT runtime_kind, detection, executable, version,
-       diagnostic_code, diagnostic_detail, observed_at
-FROM machine_runtime_observations
-WHERE machine_id = sqlc.arg(machine_id)
-ORDER BY runtime_kind;

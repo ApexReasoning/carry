@@ -53,8 +53,8 @@ func healthTestAPI(t *testing.T, readiness Readiness) http.Handler {
 	if err != nil {
 		t.Fatalf("compose member routes: %v", err)
 	}
-	runtimeStore := &recordingMachineRuntime{}
-	machine, err := NewMachineRoutes(runtimeStore, runtimeStore)
+	runStore := &recordingMachineRuns{}
+	machine, err := NewMachineRoutes(runStore)
 	if err != nil {
 		t.Fatalf("compose Machine routes: %v", err)
 	}

@@ -73,9 +73,7 @@ test("exchanges a member token without storing it and creates durable Work", asy
         return json({
           work: {
             ...work(),
-            input_head_seq: messageAdded ? 2 : 1,
-            applied_input_seq: messageAdded ? 2 : 0,
-            current_revision: messageAdded ? 1 : 0,
+            has_unapplied_input: !messageAdded,
             understanding: messageAdded
               ? "The renewal date is confirmed as 30 September."
               : "",
@@ -280,10 +278,8 @@ function work(id = workID, goal = "Review customer renewals") {
     lifecycle: "open",
     owner_user_id: "member-1",
     creator_user_id: "member-1",
-    input_head_seq: 1,
-    applied_input_seq: 0,
-    current_revision: 0,
     understanding: "",
+    has_unapplied_input: true,
     next_step: "",
     created_at: "2026-08-19T00:00:00+08:00",
   };
@@ -295,7 +291,6 @@ function message() {
     work_id: workID,
     author_user_id: "member-1",
     text: "  Renewal date is 30 September  ",
-    input_seq: 2,
     created_at: "2026-08-19T00:01:00+08:00",
   };
 }

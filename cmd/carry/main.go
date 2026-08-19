@@ -10,7 +10,6 @@ import (
 	"github.com/ApexReasoning/carry/internal/agent/codex"
 	"github.com/ApexReasoning/carry/internal/agent/pi"
 	"github.com/ApexReasoning/carry/internal/cli"
-	"github.com/ApexReasoning/carry/internal/host"
 )
 
 var version = "development"
@@ -28,7 +27,6 @@ func run(ctx context.Context, arguments []string, input io.Reader, output io.Wri
 		version,
 		cli.ConfigDirectory(),
 		cli.Streams{Input: input, Output: output, ErrorOutput: errorOutput},
-		host.DetectRuntimes,
 		pi.New(),
 		codex.New(),
 	)

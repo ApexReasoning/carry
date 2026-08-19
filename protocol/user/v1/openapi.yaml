@@ -232,11 +232,9 @@ components:
         - lifecycle
         - owner_user_id
         - creator_user_id
-        - input_head_seq
-        - applied_input_seq
-        - current_revision
         - understanding
         - next_step
+        - has_unapplied_input
         - created_at
       properties:
         work_id:
@@ -254,22 +252,12 @@ components:
           type: string
         creator_user_id:
           type: string
-        input_head_seq:
-          type: integer
-          format: int64
-          minimum: 1
-        applied_input_seq:
-          type: integer
-          format: int64
-          minimum: 0
-        current_revision:
-          type: integer
-          format: int64
-          minimum: 0
         understanding:
           type: string
         next_step:
           type: string
+        has_unapplied_input:
+          type: boolean
         created_at:
           type: string
           format: date-time
@@ -281,7 +269,6 @@ components:
         - work_id
         - author_user_id
         - text
-        - input_seq
         - created_at
       properties:
         message_id:
@@ -294,10 +281,6 @@ components:
           type: string
         text:
           type: string
-        input_seq:
-          type: integer
-          format: int64
-          minimum: 2
         created_at:
           type: string
           format: date-time

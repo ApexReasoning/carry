@@ -38,18 +38,16 @@ func (err *outcomeUnknownError) Unwrap() error {
 }
 
 type workWire struct {
-	WorkID          string    `json:"work_id"`
-	SpaceID         string    `json:"space_id"`
-	Goal            string    `json:"goal"`
-	Lifecycle       string    `json:"lifecycle"`
-	OwnerUserID     string    `json:"owner_user_id"`
-	CreatorUserID   string    `json:"creator_user_id"`
-	InputHeadSeq    int64     `json:"input_head_seq"`
-	AppliedInputSeq int64     `json:"applied_input_seq"`
-	CurrentRevision int64     `json:"current_revision"`
-	Understanding   string    `json:"understanding"`
-	NextStep        string    `json:"next_step"`
-	CreatedAt       time.Time `json:"created_at"`
+	WorkID            string    `json:"work_id"`
+	SpaceID           string    `json:"space_id"`
+	Goal              string    `json:"goal"`
+	Lifecycle         string    `json:"lifecycle"`
+	OwnerUserID       string    `json:"owner_user_id"`
+	CreatorUserID     string    `json:"creator_user_id"`
+	Understanding     string    `json:"understanding"`
+	NextStep          string    `json:"next_step"`
+	HasUnappliedInput bool      `json:"has_unapplied_input"`
+	CreatedAt         time.Time `json:"created_at"`
 }
 
 type messageWire struct {
@@ -57,7 +55,6 @@ type messageWire struct {
 	WorkID       string    `json:"work_id"`
 	AuthorUserID string    `json:"author_user_id"`
 	Text         string    `json:"text"`
-	InputSeq     int64     `json:"input_seq"`
 	CreatedAt    time.Time `json:"created_at"`
 }
 
@@ -133,16 +130,14 @@ func (client *memberHTTP) appendMessage(
 	workID string,
 	text string,
 	idempotencyKey string,
-) (messageWire, error) {
-	var message messageWire
-	err := client.sendJSON(
+) error {
+	return client.sendJSON(
 		ctx, http.MethodPost,
 		"/v1/spaces/"+url.PathEscape(spaceID)+"/works/"+url.PathEscape(workID)+"/messages",
 		idempotencyKey, struct {
 			Text string `json:"text"`
-		}{Text: text}, &message,
+		}{Text: text}, nil,
 	)
-	return message, err
 }
 
 func (client *memberHTTP) sendJSON(

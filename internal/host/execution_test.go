@@ -13,7 +13,7 @@ func TestExecutionPromptContainsOnlyAuthorizedWorkContext(t *testing.T) {
 	request := ExecutionRequest{
 		Goal: "Prepare the renewal brief", CurrentUnderstanding: "Finance approved the term.",
 		CurrentNextStep: "Apply legal wording.",
-		Inputs:          []run.Input{{Sequence: 3, Kind: run.InputMessage, AuthorUserID: "member-1", Text: "Legal supplied wording"}},
+		Messages:        []run.Message{{AuthorUserID: "member-1", Text: "Legal supplied wording"}},
 	}
 	prompt, err := request.Prompt()
 	if err != nil {
@@ -33,25 +33,25 @@ func TestExecutionPromptContainsOnlyAuthorizedWorkContext(t *testing.T) {
 	if context.Goal != request.Goal ||
 		context.PriorUnderstanding != request.CurrentUnderstanding ||
 		context.PriorNextStep != request.CurrentNextStep ||
-		len(context.NewFixedInputRange) != 1 ||
-		context.NewFixedInputRange[0].Sequence != 3 ||
-		context.NewFixedInputRange[0].Text != "Legal supplied wording" {
+		len(context.NewMessages) != 1 ||
+		context.NewMessages[0].AuthorUserID != "member-1" ||
+		context.NewMessages[0].Text != "Legal supplied wording" {
 		t.Fatalf("prompt Work context = %#v", context)
 	}
-	for _, forbidden := range []string{"writer_token", "agent_credential", "carry_agent_"} {
-		if strings.Contains(prompt, forbidden) {
-			t.Fatalf("prompt contains authority field %q: %s", forbidden, prompt)
+	for _, forbidden := range []string{`"run_id"`, `"attempt_id"`, `"fence"`, `"machine_id"`, `"input_end_seq"`} {
+		if strings.Contains(encodedContext, forbidden) {
+			t.Fatalf("prompt context contains authority field %s: %s", forbidden, encodedContext)
 		}
 	}
 }
 
-func TestParseDraftRequiresOneExactObject(t *testing.T) {
-	draft, err := ParseDraft([]byte(`{"understanding":"  Finance approved the term.  ","next_step":"  Apply legal wording.  "}`))
+func TestParseUnderstandingUpdateRequiresOneExactObject(t *testing.T) {
+	update, err := ParseUnderstandingUpdate([]byte(`{"understanding":"  Finance approved the term.  ","next_step":"  Apply legal wording.  "}`))
 	if err != nil {
 		t.Fatalf("parse current understanding draft: %v", err)
 	}
-	if draft.Understanding != "Finance approved the term." || draft.NextStep != "Apply legal wording." {
-		t.Fatalf("normalized draft = %#v", draft)
+	if update.Understanding != "Finance approved the term." || update.NextStep != "Apply legal wording." {
+		t.Fatalf("normalized update = %#v", update)
 	}
 	invalid := []string{
 		`{"understanding":"Known","next_step":"Continue","authority":"granted"}`,
@@ -60,8 +60,8 @@ func TestParseDraftRequiresOneExactObject(t *testing.T) {
 		"not json",
 	}
 	for _, data := range invalid {
-		if _, err := ParseDraft([]byte(data)); !errors.Is(err, ErrInvalidAgentDraft) {
-			t.Fatalf("invalid draft %q error = %v", data, err)
+		if _, err := ParseUnderstandingUpdate([]byte(data)); !errors.Is(err, ErrInvalidAgentUpdate) {
+			t.Fatalf("invalid update %q error = %v", data, err)
 		}
 	}
 }

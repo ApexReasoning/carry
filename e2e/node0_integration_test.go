@@ -82,19 +82,6 @@ func TestMemberEnrollsAndRevokesIndependentMachine(t *testing.T) {
 		t.Fatalf("pending Machine enrollment remains after success: %v", err)
 	}
 
-	memberPath := filepath.Join(configDirectory, "member.json")
-	memberCredential, err := os.ReadFile(memberPath)
-	if err != nil {
-		t.Fatalf("read member credential: %v", err)
-	}
-	if err := os.Remove(memberPath); err != nil {
-		t.Fatalf("remove member credential: %v", err)
-	}
-	run(t, root, clientEnvironment, carry, "host", "start", "--once")
-	status := run(t, root, clientEnvironment, carry, "host", "status")
-	if !strings.Contains(status, "node-zero-host") || !strings.Contains(status, "Runtime pi:") || !strings.Contains(status, "Runtime codex:") {
-		t.Fatalf("Host status = %q", status)
-	}
 	var machineCredential struct {
 		MachineID string `json:"machine_id"`
 	}
@@ -105,20 +92,40 @@ func TestMemberEnrollsAndRevokesIndependentMachine(t *testing.T) {
 	if err := json.Unmarshal(machineJSON, &machineCredential); err != nil {
 		t.Fatalf("decode Machine credential: %v", err)
 	}
+	binDirectory := filepath.Join(temporary, "bin")
+	if err := os.Mkdir(binDirectory, 0o700); err != nil {
+		t.Fatalf("create fake Agent bin directory: %v", err)
+	}
+	writeFakePi(t, filepath.Join(binDirectory, "pi"))
+	hostEnvironment := append(clientEnvironment, "PATH="+binDirectory)
+
+	memberPath := filepath.Join(configDirectory, "member.json")
+	memberCredential, err := os.ReadFile(memberPath)
+	if err != nil {
+		t.Fatalf("read member credential: %v", err)
+	}
+	if err := os.Remove(memberPath); err != nil {
+		t.Fatalf("remove member credential: %v", err)
+	}
+	started := runHostUntilStarted(t, root, carry, hostEnvironment)
+	if !strings.Contains(started, machineCredential.MachineID) || !strings.Contains(started, "with Pi") {
+		t.Fatalf("Host start output = %q", started)
+	}
+
 	stopServer()
 	stopServer, serverLog = startServer(t, root, carryServer, address, databaseURL, pkiDirectory)
 	waitForServer(t, serverURL, filepath.Join(pkiDirectory, "ca.pem"), serverLog)
-	restartedStatus := run(t, root, clientEnvironment, carry, "host", "status")
-	if !strings.Contains(restartedStatus, machineCredential.MachineID) {
-		t.Fatalf("Machine identity changed after server restart: %q", restartedStatus)
+	restarted := runHostUntilStarted(t, root, carry, hostEnvironment)
+	if !strings.Contains(restarted, machineCredential.MachineID) {
+		t.Fatalf("Machine identity changed after server restart: %q", restarted)
 	}
 
 	if err := os.WriteFile(memberPath, memberCredential, 0o600); err != nil {
 		t.Fatalf("restore member credential: %v", err)
 	}
 	run(t, root, clientEnvironment, carry, "host", "revoke")
-	if output, err := runError(root, clientEnvironment, carry, "host", "start", "--once"); err == nil || !strings.Contains(output, "403 Forbidden") {
-		t.Fatalf("revoked report output = %q, error = %v", output, err)
+	if output, err := runError(root, hostEnvironment, carry, "host", "start"); err == nil || !strings.Contains(output, "403 Forbidden") {
+		t.Fatalf("revoked Host output = %q, error = %v", output, err)
 	}
 }
 
@@ -180,6 +187,49 @@ func startServer(
 		}
 	}
 	return stop, serverLog
+}
+
+func runHostUntilStarted(t *testing.T, root string, carry string, environment []string) string {
+	t.Helper()
+	ctx, cancel := context.WithCancel(t.Context())
+	command := exec.CommandContext(ctx, carry, "host", "start")
+	command.Dir = root
+	command.Env = append(os.Environ(), environment...)
+	log := &lockedBuffer{}
+	command.Stdout = log
+	command.Stderr = log
+	if err := command.Start(); err != nil {
+		cancel()
+		t.Fatalf("start Carry Host: %v", err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- command.Wait() }()
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	timeout := time.NewTimer(5 * time.Second)
+	defer timeout.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			if !strings.Contains(log.String(), "Started Carry Host") {
+				continue
+			}
+			select {
+			case err := <-done:
+				cancel()
+				t.Fatalf("Carry Host exited after start: %v\n%s", err, log.String())
+			case <-time.After(200 * time.Millisecond):
+				cancel()
+				<-done
+				return log.String()
+			}
+		case <-timeout.C:
+			cancel()
+			<-done
+			t.Fatalf("Carry Host did not start before deadline\n%s", log.String())
+			return ""
+		}
+	}
 }
 
 func build(t *testing.T, root string, output string, packagePath string) {

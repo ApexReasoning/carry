@@ -29,33 +29,7 @@ func TestParseServerURLRequiresHTTPSRoot(t *testing.T) {
 	}
 }
 
-func TestMachineReportCannotSendMemberAuthorization(t *testing.T) {
-	t.Parallel()
-
-	connection := machineHTTP{
-		serverURL: "https://carry.example.com",
-		client: &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
-			if authorization := request.Header.Get("Authorization"); authorization != "" {
-				t.Fatalf("Machine request carried member authorization %q", authorization)
-			}
-			return &http.Response{
-				StatusCode: http.StatusOK,
-				Status:     "200 OK",
-				Body:       io.NopCloser(strings.NewReader("")),
-				Header:     make(http.Header),
-			}, nil
-		})},
-	}
-	observations := []hostdomain.RuntimeObservation{
-		{Kind: hostdomain.RuntimePi, Detection: hostdomain.RuntimeDetected},
-		{Kind: hostdomain.RuntimeCodex, Detection: hostdomain.RuntimeNotFound},
-	}
-	if err := connection.reportRuntimes(context.Background(), observations); err != nil {
-		t.Fatalf("report Runtimes: %v", err)
-	}
-}
-
-func TestMachineClaimMapsNoContentToNoPendingRun(t *testing.T) {
+func TestMachineClaimUsesOnlyMTLSClientAndReturnsCompleteContext(t *testing.T) {
 	t.Parallel()
 
 	connection := machineHTTP{
@@ -64,57 +38,68 @@ func TestMachineClaimMapsNoContentToNoPendingRun(t *testing.T) {
 			if request.URL.Path != "/v1/host/runs/claim" || request.Header.Get("Authorization") != "" {
 				t.Fatalf("Machine claim request = %s, Authorization %q", request.URL, request.Header.Get("Authorization"))
 			}
-			return &http.Response{
-				StatusCode: http.StatusNoContent,
-				Status:     "204 No Content",
-				Body:       io.NopCloser(strings.NewReader("")),
-				Header:     make(http.Header),
-			}, nil
+			return jsonResponse(http.StatusOK, `{
+				"run_id":"run-1","attempt_id":"attempt-1","work_id":"work-1","space_id":"space-1",
+				"fence":2,"lease_expires_at":"2030-01-01T00:00:00Z","goal":"Prepare renewal",
+				"current_understanding":"Finance approved","current_next_step":"Apply wording",
+				"base_understanding_version":3,"input_end_seq":5,
+				"messages":[{"author_user_id":"member-1","text":"Legal supplied wording"}]
+			}`), nil
 		})},
 	}
 
-	if _, err := connection.Claim(context.Background()); !errors.Is(err, run.ErrNoPendingRun) {
+	claim, err := connection.Claim(context.Background())
+	if err != nil {
+		t.Fatalf("claim Run: %v", err)
+	}
+	if claim.RunID != "run-1" || claim.BaseUnderstandingVersion != 3 ||
+		len(claim.Messages) != 1 || claim.Messages[0].Text != "Legal supplied wording" {
+		t.Fatalf("claim = %#v", claim)
+	}
+}
+
+func TestMachineClaimMapsNoContentToNoRunAvailable(t *testing.T) {
+	t.Parallel()
+
+	connection := machineHTTP{
+		serverURL: "https://carry.example.com",
+		client: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return jsonResponse(http.StatusNoContent, ""), nil
+		})},
+	}
+	if _, err := connection.Claim(context.Background()); !errors.Is(err, run.ErrNoRunAvailable) {
 		t.Fatalf("empty claim error = %v", err)
 	}
 }
 
-func TestAttemptContextUsesAgentBearerWithoutMachineClient(t *testing.T) {
+func TestMachineCommitUsesHostRouteWithoutBearer(t *testing.T) {
 	t.Parallel()
 
 	claim := run.Claim{
-		Coordinator: run.Coordinator{RunID: "run-1"}, AttemptID: "attempt-1",
-		Fence: 2, AgentCredential: "carry_agent_secret",
+		RunID: "run-1", AttemptID: "attempt-1", Fence: 2,
+		BaseUnderstandingVersion: 3, InputEndSeq: 5,
 	}
 	connection := machineHTTP{
 		serverURL: "https://carry.example.com",
-		client: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
-			t.Fatal("Agent request used Machine mTLS client")
-			return nil, nil
-		})},
-		agentClient: &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
-			if request.Header.Get("Authorization") != "Bearer carry_agent_secret" {
-				t.Fatalf("Agent Authorization = %q", request.Header.Get("Authorization"))
+		client: &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+			if request.URL.Path != "/v1/host/runs/run-1/attempts/attempt-1/understanding" ||
+				request.Header.Get("Authorization") != "" {
+				t.Fatalf("Machine commit request = %s, Authorization %q", request.URL, request.Header.Get("Authorization"))
 			}
-			if request.URL.Path != "/v1/agent/runs/run-1/attempts/attempt-1/context" || request.URL.Query().Get("fence") != "2" {
-				t.Fatalf("Agent context URL = %s", request.URL)
-			}
-			return &http.Response{
-				StatusCode: http.StatusOK,
-				Status:     "200 OK",
-				Body: io.NopCloser(strings.NewReader(
-					`{"run_id":"run-1","attempt_id":"attempt-1","work_id":"work-1","space_id":"space-1","goal":"Prepare renewal","current_understanding":"","current_next_step":"","input_start_seq":1,"input_end_seq":1,"base_revision":0,"fence":2,"inputs":[]}`,
-				)),
-				Header: make(http.Header),
-			}, nil
+			return jsonResponse(http.StatusNoContent, ""), nil
 		})},
 	}
+	if err := connection.Commit(context.Background(), claim, hostdomain.UnderstandingUpdate{
+		Understanding: "Finance and legal approved", NextStep: "Ask the owner",
+	}); err != nil {
+		t.Fatalf("commit understanding: %v", err)
+	}
+}
 
-	attemptContext, err := connection.LoadContext(context.Background(), claim)
-	if err != nil {
-		t.Fatalf("load Agent context: %v", err)
-	}
-	if attemptContext.RunID != claim.RunID || attemptContext.Fence != claim.Fence {
-		t.Fatalf("Attempt context = %#v", attemptContext)
+func jsonResponse(status int, body string) *http.Response {
+	return &http.Response{
+		StatusCode: status, Status: http.StatusText(status),
+		Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header),
 	}
 }
 

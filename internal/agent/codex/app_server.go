@@ -85,17 +85,17 @@ type sandboxPolicy struct {
 	NetworkAccess bool   `json:"networkAccess"`
 }
 
-func (client *appServerClient) execute(ctx context.Context, cwd string, prompt string) (host.Draft, error) {
+func (client *appServerClient) execute(ctx context.Context, cwd string, prompt string) (host.UnderstandingUpdate, error) {
 	if err := client.initialize(ctx); err != nil {
-		return host.Draft{}, err
+		return host.UnderstandingUpdate{}, err
 	}
 	threadID, err := client.startThread(ctx, cwd)
 	if err != nil {
-		return host.Draft{}, err
+		return host.UnderstandingUpdate{}, err
 	}
 	turnID, err := client.startTurn(ctx, threadID, prompt)
 	if err != nil {
-		return host.Draft{}, err
+		return host.UnderstandingUpdate{}, err
 	}
 	return client.awaitTurn(ctx, threadID, turnID)
 }

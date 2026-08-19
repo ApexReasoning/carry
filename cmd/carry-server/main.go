@@ -17,7 +17,6 @@ import (
 	"time"
 
 	carrypostgres "github.com/ApexReasoning/carry/internal/postgres"
-	carryrun "github.com/ApexReasoning/carry/internal/run"
 	carryserver "github.com/ApexReasoning/carry/internal/server"
 )
 
@@ -143,15 +142,11 @@ func run(ctx context.Context, arguments []string, stdout io.Writer, stderr io.Wr
 	if err != nil {
 		return fmt.Errorf("compose member routes: %w", err)
 	}
-	machineRoutes, err := carryserver.NewMachineRoutes(store, store)
+	machineRoutes, err := carryserver.NewMachineRoutes(store)
 	if err != nil {
 		return fmt.Errorf("compose Machine routes: %w", err)
 	}
-	agentRoutes, err := carryserver.NewAgentRoutes(store)
-	if err != nil {
-		return fmt.Errorf("compose Agent routes: %w", err)
-	}
-	apiServer, err := carryserver.NewAPI(pool, memberRoutes, machineRoutes, agentRoutes)
+	apiServer, err := carryserver.NewAPI(pool, memberRoutes, machineRoutes)
 	if err != nil {
 		return fmt.Errorf("compose Carry API: %w", err)
 	}
@@ -165,34 +160,21 @@ func run(ctx context.Context, arguments []string, stdout io.Writer, stderr io.Wr
 		IdleTimeout:       2 * time.Minute,
 	}
 
-	processCtx, stopProcesses := context.WithCancel(ctx)
-	defer stopProcesses()
 	serveResult := make(chan error, 1)
 	go func() {
 		serveResult <- httpServer.ListenAndServeTLS("", "")
 	}()
-	coordinatorResult := make(chan error, 1)
-	go func() {
-		coordinatorResult <- carryrun.Coordinate(processCtx, store, time.Second)
-	}()
 
 	var result error
 	serverStopped := false
-	coordinatorStopped := false
 	select {
 	case err := <-serveResult:
 		serverStopped = true
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			result = fmt.Errorf("serve HTTP: %w", err)
 		}
-	case err := <-coordinatorResult:
-		coordinatorStopped = true
-		if err != nil {
-			result = err
-		}
 	case <-ctx.Done():
 	}
-	stopProcesses()
 
 	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancelShutdown()
@@ -202,11 +184,6 @@ func run(ctx context.Context, arguments []string, stdout io.Writer, stderr io.Wr
 	if !serverStopped {
 		if err := <-serveResult; err != nil && !errors.Is(err, http.ErrServerClosed) && result == nil {
 			result = fmt.Errorf("serve HTTP after shutdown: %w", err)
-		}
-	}
-	if !coordinatorStopped {
-		if err := <-coordinatorResult; err != nil && result == nil {
-			result = err
 		}
 	}
 	return result

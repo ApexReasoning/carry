@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/ApexReasoning/carry/internal/host"
-	"github.com/ApexReasoning/carry/internal/run"
 )
 
 func TestAdapterExecutesIsolatedPiRPCAndParsesSettledDraft(t *testing.T) {
@@ -26,15 +25,14 @@ printf '%s\n' \
 	usePiFixture(t, binary)
 	adapter := New()
 
-	draft, err := adapter.Execute(context.Background(), host.ExecutionRequest{
-		Goal:   "Prepare the renewal brief",
-		Inputs: []run.Input{{Sequence: 1, Kind: run.InputGoal, Text: "Prepare the renewal brief"}},
+	update, err := adapter.Execute(context.Background(), host.ExecutionRequest{
+		Goal: "Prepare the renewal brief",
 	})
 	if err != nil {
 		t.Fatalf("execute Pi RPC: %v", err)
 	}
-	if draft.Understanding != "Finance approved the term." || draft.NextStep != "Apply legal wording." {
-		t.Fatalf("Pi draft = %#v", draft)
+	if update.Understanding != "Finance approved the term." || update.NextStep != "Apply legal wording." {
+		t.Fatalf("Pi update = %#v", update)
 	}
 	arguments, err := os.ReadFile(argumentFile)
 	if err != nil {

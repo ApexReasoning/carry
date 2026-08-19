@@ -9,16 +9,15 @@ import (
 	"github.com/ApexReasoning/carry/internal/run"
 )
 
-// RunClient is the Host-side consumer contract for one Machine's generic Run authority.
+// RunClient is the Host-side consumer contract for one Machine's Run authority.
 type RunClient interface {
 	Claim(context.Context) (run.Claim, error)
 	Renew(context.Context, run.Claim) (time.Time, error)
-	LoadContext(context.Context, run.Claim) (run.Context, error)
-	Commit(context.Context, run.Claim, Draft) error
+	Commit(context.Context, run.Claim, UnderstandingUpdate) error
 	Finish(context.Context, run.Claim, run.State) error
 }
 
-// Worker runs the same claim loop for one concrete Executor.
+// Worker claims and executes Work with one concrete Executor selected before serving.
 type Worker struct {
 	Client        RunClient
 	Executor      Executor
@@ -26,7 +25,6 @@ type Worker struct {
 	RenewInterval time.Duration
 }
 
-// Serve claims generic Runs until cancellation; the caller owns this goroutine.
 func (worker Worker) Serve(ctx context.Context) error {
 	if worker.Client == nil || worker.Executor == nil {
 		return errors.New("Host worker dependencies are required")
@@ -34,14 +32,11 @@ func (worker Worker) Serve(ctx context.Context) error {
 	if worker.PollInterval <= 0 || worker.RenewInterval <= 0 {
 		return errors.New("Host worker intervals must be positive")
 	}
-	if err := worker.Executor.Diagnose(ctx); err != nil {
-		return err
-	}
 	ticker := time.NewTicker(worker.PollInterval)
 	defer ticker.Stop()
 	for {
 		claim, err := worker.Client.Claim(ctx)
-		if errors.Is(err, run.ErrNoPendingRun) {
+		if errors.Is(err, run.ErrNoRunAvailable) {
 			select {
 			case <-ctx.Done():
 				return nil
@@ -53,7 +48,7 @@ func (worker Worker) Serve(ctx context.Context) error {
 			if ctx.Err() != nil {
 				return nil
 			}
-			return fmt.Errorf("claim coordinator Run: %w", err)
+			return fmt.Errorf("claim Run: %w", err)
 		}
 		if err := worker.executeClaim(ctx, claim); err != nil {
 			return err
@@ -62,24 +57,20 @@ func (worker Worker) Serve(ctx context.Context) error {
 }
 
 func (worker Worker) executeClaim(ctx context.Context, claim run.Claim) error {
-	attemptContext, err := worker.Client.LoadContext(ctx, claim)
-	if err != nil {
-		return fmt.Errorf("load claimed Attempt context: %w", err)
-	}
 	request := ExecutionRequest{
-		Goal: attemptContext.Goal, CurrentUnderstanding: attemptContext.CurrentUnderstanding,
-		CurrentNextStep: attemptContext.CurrentNextStep, Inputs: attemptContext.Inputs,
+		Goal: claim.Goal, CurrentUnderstanding: claim.CurrentUnderstanding,
+		CurrentNextStep: claim.CurrentNextStep, Messages: claim.Messages,
 	}
 	executionCtx, cancelExecution := context.WithCancel(ctx)
 	defer cancelExecution()
 	type executionResult struct {
-		draft Draft
-		err   error
+		update UnderstandingUpdate
+		err    error
 	}
 	completed := make(chan executionResult, 1)
 	go func() {
-		draft, executeErr := worker.Executor.Execute(executionCtx, request)
-		completed <- executionResult{draft: draft, err: executeErr}
+		update, executeErr := worker.Executor.Execute(executionCtx, request)
+		completed <- executionResult{update: update, err: executeErr}
 	}()
 	renewal := time.NewTicker(worker.RenewInterval)
 	defer renewal.Stop()
@@ -87,28 +78,25 @@ func (worker Worker) executeClaim(ctx context.Context, claim run.Claim) error {
 		select {
 		case result := <-completed:
 			if result.err != nil {
+				if ctx.Err() != nil {
+					return nil
+				}
 				return worker.finishExecution(ctx, claim, result.err)
 			}
-			if err := worker.Client.Commit(ctx, claim, result.draft); err != nil {
-				return fmt.Errorf("commit Agent current understanding: %w", err)
+			if err := worker.Client.Commit(ctx, claim, result.update); err != nil {
+				return fmt.Errorf("commit current understanding: %w", err)
 			}
 			return nil
 		case <-renewal.C:
 			if _, err := worker.Client.Renew(ctx, claim); err != nil {
 				cancelExecution()
 				<-completed
-				return worker.finishExecution(
-					ctx,
-					claim,
-					errors.Join(ErrAgentOutcomeLost, fmt.Errorf("renew active Attempt: %w", err)),
-				)
+				return fmt.Errorf("renew active Attempt: %w", err)
 			}
 		case <-ctx.Done():
 			cancelExecution()
 			<-completed
-			cleanupCtx, cancelCleanup := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancelCleanup()
-			return worker.finishExecution(cleanupCtx, claim, ErrAgentOutcomeLost)
+			return nil
 		}
 	}
 }

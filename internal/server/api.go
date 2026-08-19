@@ -37,12 +37,11 @@ func writeStoreError(response http.ResponseWriter, err error) {
 	case errors.Is(err, host.ErrMachineNotFound), errors.Is(err, work.ErrNotFound):
 		writeAPIError(response, http.StatusNotFound, err.Error())
 	case errors.Is(err, run.ErrStaleAttempt):
-		writeAPIError(response, http.StatusUnauthorized, "Agent credential is invalid or expired")
+		writeAPIError(response, http.StatusConflict, "Run Attempt is stale or expired")
 	case errors.Is(err, host.ErrIdempotencyConflict), errors.Is(err, work.ErrIdempotencyConflict),
 		errors.Is(err, work.ErrNotOpen):
 		writeAPIError(response, http.StatusConflict, err.Error())
-	case errors.Is(err, host.ErrInvalidRuntimeReport), errors.Is(err, run.ErrInvalidDraft),
-		errors.Is(err, run.ErrInvalidOutcome), errors.Is(err, work.ErrInvalidGoal),
+	case errors.Is(err, run.ErrInvalidUpdate), errors.Is(err, run.ErrInvalidOutcome), errors.Is(err, work.ErrInvalidGoal),
 		errors.Is(err, work.ErrInvalidMessage), errors.Is(err, work.ErrInvalidIdempotency):
 		writeAPIError(response, http.StatusBadRequest, err.Error())
 	default:

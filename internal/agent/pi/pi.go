@@ -40,14 +40,14 @@ func (adapter *Adapter) Diagnose(ctx context.Context) error {
 	return nil
 }
 
-func (adapter *Adapter) Execute(ctx context.Context, request host.ExecutionRequest) (host.Draft, error) {
+func (adapter *Adapter) Execute(ctx context.Context, request host.ExecutionRequest) (host.UnderstandingUpdate, error) {
 	prompt, err := request.Prompt()
 	if err != nil {
-		return host.Draft{}, err
+		return host.UnderstandingUpdate{}, err
 	}
 	attemptDirectory, err := os.MkdirTemp("", "carry-pi-attempt-")
 	if err != nil {
-		return host.Draft{}, fmt.Errorf("create Pi Attempt directory: %w", err)
+		return host.UnderstandingUpdate{}, fmt.Errorf("create Pi Attempt directory: %w", err)
 	}
 	defer func() { _ = os.RemoveAll(attemptDirectory) }()
 
@@ -56,16 +56,16 @@ func (adapter *Adapter) Execute(ctx context.Context, request host.ExecutionReque
 	command.Dir = attemptDirectory
 	stdin, err := command.StdinPipe()
 	if err != nil {
-		return host.Draft{}, fmt.Errorf("open Pi stdin: %w", err)
+		return host.UnderstandingUpdate{}, fmt.Errorf("open Pi stdin: %w", err)
 	}
 	stdout, err := command.StdoutPipe()
 	if err != nil {
-		return host.Draft{}, fmt.Errorf("open Pi stdout: %w", err)
+		return host.UnderstandingUpdate{}, fmt.Errorf("open Pi stdout: %w", err)
 	}
 	var stderr boundedBuffer
 	command.Stderr = &stderr
 	if err := command.Start(); err != nil {
-		return host.Draft{}, fmt.Errorf("%w: start Pi RPC: %v", host.ErrAgentUnavailable, err)
+		return host.UnderstandingUpdate{}, fmt.Errorf("%w: start Pi RPC: %v", host.ErrAgentUnavailable, err)
 	}
 	processDone := make(chan error, 1)
 	go func() { processDone <- command.Wait() }()
@@ -74,26 +74,26 @@ func (adapter *Adapter) Execute(ctx context.Context, request host.ExecutionReque
 		_ = stdin.Close()
 		_ = command.Process.Kill()
 		<-processDone
-		return host.Draft{}, fmt.Errorf("write Pi prompt: %w", err)
+		return host.UnderstandingUpdate{}, fmt.Errorf("write Pi prompt: %w", err)
 	}
 
 	draft, resultErr := awaitDraft(ctx, stdout)
 	_ = stdin.Close()
 	if resultErr == nil {
 		if err := waitForExit(command, processDone); err != nil {
-			return host.Draft{}, fmt.Errorf("close Pi RPC: %w", err)
+			return host.UnderstandingUpdate{}, fmt.Errorf("close Pi RPC: %w", err)
 		}
 		return draft, nil
 	}
 	_ = command.Process.Kill()
 	<-processDone
 	if ctx.Err() != nil {
-		return host.Draft{}, host.ErrAgentOutcomeLost
+		return host.UnderstandingUpdate{}, host.ErrAgentOutcomeLost
 	}
 	if stderr.String() != "" {
-		return host.Draft{}, fmt.Errorf("%w: %s", resultErr, stderr.String())
+		return host.UnderstandingUpdate{}, fmt.Errorf("%w: %s", resultErr, stderr.String())
 	}
-	return host.Draft{}, resultErr
+	return host.UnderstandingUpdate{}, resultErr
 }
 
 func piRPCArguments() []string {

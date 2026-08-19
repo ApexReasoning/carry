@@ -17,10 +17,8 @@ func TestLiveNativeExecutorsAdvanceTheSameWorkContext(t *testing.T) {
 	request := host.ExecutionRequest{
 		Goal:                 "Compare three onboarding approaches",
 		CurrentUnderstanding: "The approaches differ in setup time and support burden.",
-		Inputs: []run.Input{{
-			Sequence: 2,
-			Kind:     run.InputMessage,
-			Text:     "The owner values a reversible first step.",
+		Messages: []run.Message{{
+			Text: "The owner values a reversible first step.",
 		}},
 	}
 	for _, testCase := range []struct {
@@ -36,12 +34,12 @@ func TestLiveNativeExecutorsAdvanceTheSameWorkContext(t *testing.T) {
 			if err := testCase.executor.Diagnose(ctx); err != nil {
 				t.Fatalf("diagnose native Agent: %v", err)
 			}
-			draft, err := testCase.executor.Execute(ctx, request)
+			update, err := testCase.executor.Execute(ctx, request)
 			if err != nil {
 				t.Fatalf("execute native Agent: %v", err)
 			}
-			if _, _, err := run.ValidateDraft(draft.Understanding, draft.NextStep); err != nil {
-				t.Fatalf("validate native Agent draft: %v", err)
+			if _, _, err := run.ValidateUnderstandingUpdate(update.Understanding, update.NextStep); err != nil {
+				t.Fatalf("validate native Agent update: %v", err)
 			}
 		})
 	}

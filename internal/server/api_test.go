@@ -48,7 +48,7 @@ func TestEnrollMachineUsesAuthenticatedMemberAuthority(t *testing.T) {
 	request.Header.Set("Idempotency-Key", "enroll-research-mac")
 	response := httptest.NewRecorder()
 
-	testAPI(t, authority, tokens, machines, &recordingMachineRuntime{}).ServeHTTP(response, request)
+	testAPI(t, authority, tokens, machines, &recordingMachineRuns{}).ServeHTTP(response, request)
 
 	if response.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want %d; body = %s", response.Code, http.StatusCreated, response.Body.String())
@@ -71,7 +71,7 @@ func TestEnrollMachineRejectsMissingMemberToken(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, "/v1/machines/enroll", bytes.NewBufferString(`{}`))
 	response := httptest.NewRecorder()
 
-	testAPI(t, testAuthority(t), &recordingUserTokens{}, machines, &recordingMachineRuntime{}).
+	testAPI(t, testAuthority(t), &recordingUserTokens{}, machines, &recordingMachineRuns{}).
 		ServeHTTP(response, request)
 
 	if response.Code != http.StatusUnauthorized {
@@ -82,63 +82,67 @@ func TestEnrollMachineRejectsMissingMemberToken(t *testing.T) {
 	}
 }
 
-func TestRuntimeReportRequiresActiveMachineCertificate(t *testing.T) {
-	t.Parallel()
-
-	authority, machineCertificate := testMachineCertificate(t, "machine-7")
-	runtimeStore := &recordingMachineRuntime{reportErr: host.ErrMachineRevoked}
-	body := `{"runtimes":[{"kind":"pi","detection":"detected","executable":"/bin/pi","version":"1","observed_at":"2026-08-18T16:00:00Z"},{"kind":"codex","detection":"not_found","observed_at":"2026-08-18T16:00:00Z"}]}`
-	request := httptest.NewRequest(http.MethodPost, "/v1/host/runtime-report", bytes.NewBufferString(body))
-	request.TLS = &tls.ConnectionState{
-		PeerCertificates: []*x509.Certificate{machineCertificate},
-		VerifiedChains:   [][]*x509.Certificate{{machineCertificate}},
-	}
-	response := httptest.NewRecorder()
-
-	testAPI(t, authority, &recordingUserTokens{}, &recordingMachineEnrollments{}, runtimeStore).
-		ServeHTTP(response, request)
-
-	if response.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want %d; body = %s", response.Code, http.StatusForbidden, response.Body.String())
-	}
-	if runtimeStore.reportMachineID != "machine-7" {
-		t.Fatalf("report Machine = %q", runtimeStore.reportMachineID)
-	}
-}
-
-func TestMachineClaimReturnsAttemptAuthorityWithoutRuntimeSelection(t *testing.T) {
+func TestMachineClaimReturnsCompleteWorkContextWithoutSecondCredential(t *testing.T) {
 	t.Parallel()
 
 	authority, machineCertificate := testMachineCertificate(t, "machine-12")
-	runtimeStore := &recordingMachineRuntime{claim: run.Claim{
-		Coordinator: run.Coordinator{RunID: "run-4"}, AttemptID: "attempt-4", Fence: 3,
-		WriterToken: "writer-4", AgentCredential: "carry_agent_secret",
+	runs := &recordingMachineRuns{claim: run.Claim{
+		RunID: "run-4", AttemptID: "attempt-4", WorkID: "work-4", SpaceID: "space-1", Fence: 3,
 		LeaseExpiresAt: time.Date(2026, time.August, 18, 17, 0, 0, 0, time.UTC),
+		Goal:           "Prepare renewal", CurrentUnderstanding: "Finance approved",
+		BaseUnderstandingVersion: 2, InputEndSeq: 4,
+		Messages: []run.Message{{AuthorUserID: "member-1", Text: "Legal supplied wording"}},
 	}}
 	request := httptest.NewRequest(http.MethodPost, "/v1/host/runs/claim", nil)
-	request.TLS = &tls.ConnectionState{
-		PeerCertificates: []*x509.Certificate{machineCertificate},
-		VerifiedChains:   [][]*x509.Certificate{{machineCertificate}},
-	}
+	request.TLS = verifiedMachineTLS(machineCertificate)
 	response := httptest.NewRecorder()
 
-	testAPI(t, authority, &recordingUserTokens{}, &recordingMachineEnrollments{}, runtimeStore).
+	testAPI(t, authority, &recordingUserTokens{}, &recordingMachineEnrollments{}, runs).
 		ServeHTTP(response, request)
 
 	if response.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d; body = %s", response.Code, http.StatusOK, response.Body.String())
 	}
-	if runtimeStore.claimMachineID != "machine-12" {
-		t.Fatalf("claim Machine = %q", runtimeStore.claimMachineID)
+	if runs.claimMachineID != "machine-12" {
+		t.Fatalf("claim Machine = %q", runs.claimMachineID)
 	}
-	if !bytes.Contains(response.Body.Bytes(), []byte(`"agent_credential":"carry_agent_secret"`)) {
+	if !bytes.Contains(response.Body.Bytes(), []byte(`"goal":"Prepare renewal"`)) ||
+		bytes.Contains(response.Body.Bytes(), []byte("credential")) ||
+		bytes.Contains(response.Body.Bytes(), []byte("writer")) {
 		t.Fatalf("claim body = %s", response.Body.String())
 	}
 }
 
-type machineTestStore interface {
-	MachineRuntimeStore
-	MachineRunStore
+func TestMachineCommitBindsCertificateIdentity(t *testing.T) {
+	t.Parallel()
+
+	authority, machineCertificate := testMachineCertificate(t, "machine-19")
+	runs := &recordingMachineRuns{}
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/host/runs/run-7/attempts/attempt-7/understanding",
+		bytes.NewBufferString(`{"fence":4,"base_understanding_version":2,"input_end_seq":5,"understanding":"Known","next_step":"Continue"}`),
+	)
+	request.TLS = verifiedMachineTLS(machineCertificate)
+	response := httptest.NewRecorder()
+
+	testAPI(t, authority, &recordingUserTokens{}, &recordingMachineEnrollments{}, runs).
+		ServeHTTP(response, request)
+
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d; body = %s", response.Code, http.StatusNoContent, response.Body.String())
+	}
+	if runs.commit.MachineID != "machine-19" || runs.commit.RunID != "run-7" ||
+		runs.commit.BaseUnderstandingVersion != 2 {
+		t.Fatalf("commit = %#v", runs.commit)
+	}
+}
+
+func verifiedMachineTLS(certificate *x509.Certificate) *tls.ConnectionState {
+	return &tls.ConnectionState{
+		PeerCertificates: []*x509.Certificate{certificate},
+		VerifiedChains:   [][]*x509.Certificate{{certificate}},
+	}
 }
 
 func testAPI(
@@ -146,18 +150,17 @@ func testAPI(
 	authority *host.CertificateAuthority,
 	tokens UserTokenAuthenticator,
 	machines MachineEnrollmentStore,
-	runtimes machineTestStore,
+	runs MachineRunStore,
 ) http.Handler {
 	t.Helper()
-	sessions := unavailableBrowserSessions{}
 	member, err := NewMemberRoutes(
-		tokens, sessions, emptyMemberships{}, machines,
+		tokens, unavailableBrowserSessions{}, emptyMemberships{}, machines,
 		unavailableWorkCommands{}, unavailableWorkQueries{}, authority,
 	)
 	if err != nil {
 		t.Fatalf("compose member routes: %v", err)
 	}
-	machine, err := NewMachineRoutes(runtimes, runtimes)
+	machine, err := NewMachineRoutes(runs)
 	if err != nil {
 		t.Fatalf("compose Machine routes: %v", err)
 	}
@@ -176,11 +179,7 @@ func mustAPIWithReadiness(
 	machine *MachineRoutes,
 ) http.Handler {
 	t.Helper()
-	agent, err := NewAgentRoutes(unavailableAgentRuns{})
-	if err != nil {
-		t.Fatalf("compose Agent routes: %v", err)
-	}
-	apiServer, err := NewAPI(readiness, member, machine, agent)
+	apiServer, err := NewAPI(readiness, member, machine)
 	if err != nil {
 		t.Fatalf("compose API: %v", err)
 	}
@@ -229,12 +228,12 @@ type recordingUserTokens struct {
 	authenticatedToken string
 }
 
-func (s *recordingUserTokens) AuthenticateUserToken(_ context.Context, token string) (identity.AuthenticatedUser, error) {
-	s.authenticatedToken = token
-	if s.user.UserID == "" {
+func (store *recordingUserTokens) AuthenticateUserToken(_ context.Context, token string) (identity.AuthenticatedUser, error) {
+	store.authenticatedToken = token
+	if store.user.UserID == "" {
 		return identity.AuthenticatedUser{}, identity.ErrUnauthenticated
 	}
-	return s.user, nil
+	return store.user, nil
 }
 
 type unavailableBrowserSessions struct{}
@@ -260,65 +259,46 @@ type recordingMachineEnrollments struct {
 	command    host.EnrollMachineCommand
 }
 
-func (s *recordingMachineEnrollments) EnrollMachine(_ context.Context, command host.EnrollMachineCommand) (host.MachineEnrollment, error) {
-	s.command = command
-	return s.enrollment, nil
+func (store *recordingMachineEnrollments) EnrollMachine(_ context.Context, command host.EnrollMachineCommand) (host.MachineEnrollment, error) {
+	store.command = command
+	return store.enrollment, nil
 }
 
 func (*recordingMachineEnrollments) RevokeMachine(context.Context, string, string, string) error {
 	return nil
 }
 
-type recordingMachineRuntime struct {
-	reportMachineID string
-	reportErr       error
-	claimMachineID  string
-	claim           run.Claim
-	claimErr        error
+type recordingMachineRuns struct {
+	claimMachineID string
+	claim          run.Claim
+	claimErr       error
+	commit         run.CommitCommand
+	finish         run.FinishCommand
 }
 
-func (s *recordingMachineRuntime) ReplaceRuntimeObservations(_ context.Context, machineID string, _ []host.RuntimeObservation) error {
-	s.reportMachineID = machineID
-	return s.reportErr
-}
-
-func (*recordingMachineRuntime) LoadMachineStatus(context.Context, string) (host.MachineStatus, error) {
-	return host.MachineStatus{}, errors.New("not implemented")
-}
-
-func (s *recordingMachineRuntime) ClaimCoordinatorRun(_ context.Context, machineID string) (run.Claim, error) {
-	s.claimMachineID = machineID
-	if s.claimErr != nil {
-		return run.Claim{}, s.claimErr
+func (store *recordingMachineRuns) ClaimRun(_ context.Context, machineID string) (run.Claim, error) {
+	store.claimMachineID = machineID
+	if store.claimErr != nil {
+		return run.Claim{}, store.claimErr
 	}
-	if s.claim.RunID == "" {
-		return run.Claim{}, run.ErrNoPendingRun
+	if store.claim.RunID == "" {
+		return run.Claim{}, run.ErrNoRunAvailable
 	}
-	return s.claim, nil
+	return store.claim, nil
 }
 
-func (*recordingMachineRuntime) RenewRunAttempt(
-	context.Context,
-	string,
-	string,
-	string,
-	int64,
-) (time.Time, error) {
+func (*recordingMachineRuns) RenewRunAttempt(context.Context, string, string, string, int64) (time.Time, error) {
 	return time.Time{}, run.ErrStaleAttempt
 }
 
-type unavailableAgentRuns struct{}
-
-func (unavailableAgentRuns) LoadAttemptContext(context.Context, string, string, int64, string) (run.Context, error) {
-	return run.Context{}, run.ErrStaleAttempt
+func (store *recordingMachineRuns) CommitWorkUnderstanding(_ context.Context, command run.CommitCommand) error {
+	store.commit = command
+	return nil
 }
 
-func (unavailableAgentRuns) CommitWorkUnderstanding(context.Context, run.CommitCommand) error {
-	return run.ErrStaleAttempt
-}
-
-func (unavailableAgentRuns) FinishUnresolvedAttempt(context.Context, run.FinishCommand) error {
-	return run.ErrStaleAttempt
+func (store *recordingMachineRuns) FinishUnresolvedAttempt(_ context.Context, command run.FinishCommand) error {
+	store.finish = command
+	return nil
 }
 
 type unavailableWorkCommands struct{}
