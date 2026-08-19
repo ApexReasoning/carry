@@ -88,8 +88,19 @@ printf '%s\n' '{"id":4,"result":{"thread":{"turns":[{"id":"turn-2","status":"com
 	}
 }
 
-func TestAdapterKeepsCodexOutcomeUnknownWhenThreadReadCannotProveCompletion(t *testing.T) {
-	binary := writeCodexFixture(t, `
+func TestAdapterClassifiesReconciledCodexTurnStatuses(t *testing.T) {
+	tests := []struct {
+		status    string
+		wantError error
+	}{
+		{status: "inProgress", wantError: host.ErrAgentOutcomeLost},
+		{status: "futureStatus", wantError: host.ErrAgentOutcomeLost},
+		{status: "failed", wantError: host.ErrAgentFailed},
+		{status: "interrupted", wantError: host.ErrAgentFailed},
+	}
+	for _, test := range tests {
+		t.Run(test.status, func(t *testing.T) {
+			fixture := strings.ReplaceAll(`
 IFS= read -r initialize
 printf '%s\n' '{"id":1,"result":{"userAgent":"fixture"}}'
 IFS= read -r initialized
@@ -101,12 +112,15 @@ printf '%s\n' \
   '{"method":"item/agentMessage/delta","params":{"threadId":"thread-3","turnId":"turn-3","itemId":"message-3","delta":"{\"understanding\":\"Unconfirmed\",\"next_step\":\"Wait\"}"}}' \
   '{"method":"thread/status/changed","params":{"threadId":"thread-3","status":{"type":"idle"}}}'
 IFS= read -r thread_read
-printf '%s\n' '{"id":4,"result":{"thread":{"turns":[{"id":"turn-3","status":"inProgress","items":[]}]}}}'
-`)
-	useCodexFixture(t, binary)
-	_, err := New().Execute(context.Background(), host.ExecutionRequest{Goal: "Compare onboarding options"})
-	if !errors.Is(err, host.ErrAgentOutcomeLost) {
-		t.Fatalf("unproven Codex turn error = %v", err)
+printf '%s\n' '{"id":4,"result":{"thread":{"turns":[{"id":"turn-3","status":"RECONCILED_STATUS","items":[]}]}}}'
+`, "RECONCILED_STATUS", test.status)
+			binary := writeCodexFixture(t, fixture)
+			useCodexFixture(t, binary)
+			_, err := New().Execute(context.Background(), host.ExecutionRequest{Goal: "Compare onboarding options"})
+			if !errors.Is(err, test.wantError) {
+				t.Fatalf("reconciled Codex turn status %q error = %v, want %v", test.status, err, test.wantError)
+			}
+		})
 	}
 }
 

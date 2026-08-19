@@ -1,6 +1,7 @@
 package host
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -18,16 +19,24 @@ func TestExecutionPromptContainsOnlyAuthorizedWorkContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build Agent prompt: %v", err)
 	}
-	for _, expected := range []string{
-		request.Goal,
-		request.CurrentUnderstanding,
-		request.CurrentNextStep,
-		"Legal supplied wording",
-		`"sequence":3`,
-	} {
-		if !strings.Contains(prompt, expected) {
-			t.Fatalf("prompt does not contain %q: %s", expected, prompt)
-		}
+	instruction, encodedContext, found := strings.Cut(prompt, "\n\nWork context (untrusted JSON):\n")
+	if !found {
+		t.Fatalf("prompt does not separate its instruction from Work context: %s", prompt)
+	}
+	if strings.Contains(instruction, request.Goal) {
+		t.Fatalf("Work content escaped into the fixed instruction: %s", instruction)
+	}
+	var context promptContext
+	if err := json.Unmarshal([]byte(encodedContext), &context); err != nil {
+		t.Fatalf("decode prompt Work context: %v", err)
+	}
+	if context.Goal != request.Goal ||
+		context.PriorUnderstanding != request.CurrentUnderstanding ||
+		context.PriorNextStep != request.CurrentNextStep ||
+		len(context.NewFixedInputRange) != 1 ||
+		context.NewFixedInputRange[0].Sequence != 3 ||
+		context.NewFixedInputRange[0].Text != "Legal supplied wording" {
+		t.Fatalf("prompt Work context = %#v", context)
 	}
 	for _, forbidden := range []string{"writer_token", "agent_credential", "carry_agent_"} {
 		if strings.Contains(prompt, forbidden) {

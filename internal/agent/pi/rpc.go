@@ -1,0 +1,115 @@
+package pi
+
+import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"strings"
+
+	"github.com/ApexReasoning/carry/internal/host"
+)
+
+const (
+	maxProtocolLineBytes = 1 << 20
+	promptRequestID      = "carry-prompt"
+)
+
+type promptRequest struct {
+	ID      string `json:"id"`
+	Type    string `json:"type"`
+	Message string `json:"message"`
+}
+
+type envelope struct {
+	ID      string          `json:"id"`
+	Type    string          `json:"type"`
+	Command string          `json:"command"`
+	Success bool            `json:"success"`
+	Error   string          `json:"error"`
+	Message json.RawMessage `json:"message"`
+}
+
+type assistantMessage struct {
+	Role    string `json:"role"`
+	Content []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	} `json:"content"`
+	StopReason string `json:"stopReason"`
+}
+
+type resultState struct {
+	promptAccepted bool
+	finalMessage   assistantMessage
+}
+
+func awaitDraft(ctx context.Context, stdout io.Reader) (host.Draft, error) {
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 64*1024), maxProtocolLineBytes)
+	var state resultState
+	for scanner.Scan() {
+		var record envelope
+		if err := json.Unmarshal(scanner.Bytes(), &record); err != nil {
+			return host.Draft{}, fmt.Errorf("%w: decode Pi RPC record", host.ErrAgentOutcomeLost)
+		}
+		draft, settled, err := state.accept(record)
+		if err != nil {
+			return host.Draft{}, fmt.Errorf("read Pi result: %w", err)
+		}
+		if settled {
+			return draft, nil
+		}
+		if ctx.Err() != nil {
+			return host.Draft{}, host.ErrAgentOutcomeLost
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return host.Draft{}, fmt.Errorf("%w: read Pi RPC: %v", host.ErrAgentOutcomeLost, err)
+	}
+	return host.Draft{}, fmt.Errorf("%w: Pi RPC ended before agent_settled", host.ErrAgentOutcomeLost)
+}
+
+func (state *resultState) accept(record envelope) (host.Draft, bool, error) {
+	switch record.Type {
+	case "response":
+		if record.ID != promptRequestID || record.Command != "prompt" {
+			return host.Draft{}, false, nil
+		}
+		if !record.Success {
+			return host.Draft{}, false, fmt.Errorf("%w: Pi rejected prompt: %s", host.ErrAgentFailed, record.Error)
+		}
+		state.promptAccepted = true
+	case "message_end":
+		var message assistantMessage
+		if err := json.Unmarshal(record.Message, &message); err != nil {
+			return host.Draft{}, false, fmt.Errorf("%w: decode Pi assistant message", host.ErrAgentOutcomeLost)
+		}
+		if message.Role == "assistant" {
+			state.finalMessage = message
+		}
+	case "extension_error":
+		return host.Draft{}, false, fmt.Errorf("%w: Pi extension error", host.ErrAgentFailed)
+	case "agent_settled":
+		draft, err := state.draft()
+		return draft, true, err
+	}
+	return host.Draft{}, false, nil
+}
+
+func (state resultState) draft() (host.Draft, error) {
+	if !state.promptAccepted || state.finalMessage.Role != "assistant" {
+		return host.Draft{}, fmt.Errorf("%w: Pi settled without an accepted prompt and final message", host.ErrAgentFailed)
+	}
+	if state.finalMessage.StopReason != "stop" {
+		return host.Draft{}, fmt.Errorf("%w: Pi stop reason %q", host.ErrAgentFailed, state.finalMessage.StopReason)
+	}
+	var text strings.Builder
+	for _, content := range state.finalMessage.Content {
+		if content.Type == "text" {
+			text.WriteString(content.Text)
+		}
+	}
+	return host.ParseDraft([]byte(text.String()))
+}
