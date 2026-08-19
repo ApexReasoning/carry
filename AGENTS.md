@@ -14,6 +14,15 @@ Before a material change, read the relevant sections of:
 
 Do not silently choose between conflicting instructions. Stop, identify the conflict, and ask for a decision. An explicit current user decision overrides older text; update the affected canonical document before implementing the conflicting design.
 
+## Four Operating Principles
+
+These principles turn Carry's restraint and freedom philosophy into coding behavior:
+
+1. **Surface uncertainty before code.** Read the owning facts first. State assumptions and materially different interpretations instead of choosing silently. Ask only when the answer changes the user journey, owner, authority, consequence, or approved scope; make routine engineering judgments without pushing them back to the user.
+2. **Build only earned structure.** Implement the smallest complete structure required by the current journey. Do not add speculative flexibility, but retain every type, transaction, failure path, and test needed to protect truth. Line count is not a simplicity metric.
+3. **Keep scope constrained and the vertical change complete.** Do not make unrelated improvements. Within the approved behavior, include every necessary owner, migration, protocol, generated artifact, test, and document, and delete the path it replaces. A small diff that leaves two truths is not surgical.
+4. **Define completion with evidence.** Before implementation, name success, failure, authority/concurrency, and user-journey evidence. Loop until the required evidence is observed; a green command alone does not prove that the changed path executed or that the product promise is true.
+
 At every Node entry, include read-only archaeology of the user-designated historical implementation alongside the five external primary-source comparisons. Cite exact files and symbols, extract strengths and failure modes, and re-derive the Carry design from the current journey. Never copy its package tree, schema, API, migrations, generated code, compatibility paths, or Web routes. Nodes 0 and 1 must receive this archaeology before M0 closes.
 
 ## Node Contract Before Code
