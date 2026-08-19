@@ -1,9 +1,11 @@
 package host
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,9 +13,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ApexReasoning/carry/internal/conversation"
 	hostdomain "github.com/ApexReasoning/carry/internal/host"
 	"github.com/ApexReasoning/carry/internal/host/machinefile"
 	"github.com/ApexReasoning/carry/internal/run"
+	"github.com/google/uuid"
 )
 
 type machineHTTP struct {
@@ -146,8 +150,164 @@ func (c *machineHTTP) Finish(ctx context.Context, claim run.Claim, outcome run.S
 	return sendJSON(c.client, request, nil)
 }
 
+type conversationContextMessageWire struct {
+	Author conversation.Author `json:"author"`
+	Text   string              `json:"text"`
+}
+
+type conversationReplyClaimWire struct {
+	SourceMessageID string                           `json:"source_message_id"`
+	Fence           int64                            `json:"fence"`
+	LeaseExpiresAt  time.Time                        `json:"lease_expires_at"`
+	Messages        []conversationContextMessageWire `json:"messages"`
+}
+
+func (c *machineHTTP) ClaimConversation(ctx context.Context) (conversation.ReplyClaim, error) {
+	request, err := newJSONRequest(ctx, http.MethodPost, c.serverURL+"/v1/host/conversation-replies/claim", struct{}{})
+	if err != nil {
+		return conversation.ReplyClaim{}, err
+	}
+	response, err := c.client.Do(request)
+	if err != nil {
+		return conversation.ReplyClaim{}, fmt.Errorf("claim private Conversation reply: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode == http.StatusNoContent {
+		_, _ = io.Copy(io.Discard, response.Body)
+		return conversation.ReplyClaim{}, conversation.ErrNoReplyAvailable
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
+		return conversation.ReplyClaim{}, fmt.Errorf("POST %s returned %s", request.URL, response.Status)
+	}
+	const maxClaimWireBytes = conversation.MaxContextTextBytes*6 + 64*1024
+	var wire conversationReplyClaimWire
+	if err := decodeBoundedExactJSON(response.Body, maxClaimWireBytes, &wire); err != nil {
+		return conversation.ReplyClaim{}, fmt.Errorf("decode private Conversation reply claim: %w", err)
+	}
+	if uuid.Validate(wire.SourceMessageID) != nil || wire.Fence <= 0 || wire.LeaseExpiresAt.IsZero() {
+		return conversation.ReplyClaim{}, errors.New("decode private Conversation reply claim: invalid authority")
+	}
+	messages := make([]conversation.ContextMessage, 0, len(wire.Messages))
+	for _, message := range wire.Messages {
+		messages = append(messages, conversation.ContextMessage{Author: message.Author, Text: message.Text})
+	}
+	fixed, err := conversation.FixedContextSuffix(messages)
+	if err != nil || len(fixed) != len(messages) || messages[len(messages)-1].Author != conversation.AuthorMember {
+		return conversation.ReplyClaim{}, errors.New("decode private Conversation reply claim: invalid bounded context")
+	}
+	for index := 1; index < len(messages); index++ {
+		if messages[index-1].Author == messages[index].Author {
+			return conversation.ReplyClaim{}, errors.New("decode private Conversation reply claim: invalid message order")
+		}
+	}
+	return conversation.ReplyClaim{
+		SourceMessageID: wire.SourceMessageID,
+		Fence:           wire.Fence,
+		LeaseExpiresAt:  wire.LeaseExpiresAt,
+		Messages:        messages,
+	}, nil
+}
+
+func (c *machineHTTP) RenewConversation(ctx context.Context, claim conversation.ReplyClaim) (time.Time, error) {
+	request, err := newJSONRequest(
+		ctx,
+		http.MethodPost,
+		c.serverURL+conversationReplyPath(claim)+"/renew",
+		struct {
+			Fence int64 `json:"fence"`
+		}{Fence: claim.Fence},
+	)
+	if err != nil {
+		return time.Time{}, err
+	}
+	var wire struct {
+		LeaseExpiresAt time.Time `json:"lease_expires_at"`
+	}
+	if err := sendExactConversationJSON(c.client, request, &wire); err != nil {
+		return time.Time{}, err
+	}
+	if wire.LeaseExpiresAt.IsZero() {
+		return time.Time{}, errors.New("decode private Conversation renewal: missing lease expiry")
+	}
+	return wire.LeaseExpiresAt, nil
+}
+
+func (c *machineHTTP) CommitConversation(
+	ctx context.Context,
+	claim conversation.ReplyClaim,
+	candidate conversation.ReplyCandidate,
+) (conversation.CommitReplyResult, error) {
+	request, err := newJSONRequest(ctx, http.MethodPost, c.serverURL+conversationReplyPath(claim)+"/commit", struct {
+		Fence          int64   `json:"fence"`
+		Reply          string  `json:"reply"`
+		DelegationGoal *string `json:"delegation_goal"`
+	}{Fence: claim.Fence, Reply: candidate.Reply, DelegationGoal: candidate.DelegationGoal})
+	if err != nil {
+		return conversation.CommitReplyResult{}, err
+	}
+	var wire struct {
+		ReplyMessageID string          `json:"reply_message_id"`
+		CreatedWorkID  json.RawMessage `json:"created_work_id"`
+	}
+	if err := sendExactConversationJSON(c.client, request, &wire); err != nil {
+		return conversation.CommitReplyResult{}, err
+	}
+	if uuid.Validate(wire.ReplyMessageID) != nil {
+		return conversation.CommitReplyResult{}, errors.New("decode private Conversation commit: invalid reply identity")
+	}
+	createdWorkID := ""
+	if len(wire.CreatedWorkID) != 0 {
+		if string(wire.CreatedWorkID) == "null" || json.Unmarshal(wire.CreatedWorkID, &createdWorkID) != nil ||
+			uuid.Validate(createdWorkID) != nil {
+			return conversation.CommitReplyResult{}, errors.New("decode private Conversation commit: invalid Work identity")
+		}
+	}
+	return conversation.CommitReplyResult{ReplyMessageID: wire.ReplyMessageID, CreatedWorkID: createdWorkID}, nil
+}
+
+func sendExactConversationJSON(client *http.Client, request *http.Request, destination any) error {
+	response, err := client.Do(request)
+	if err != nil {
+		return fmt.Errorf("send %s %s: %w", request.Method, request.URL, err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
+		return fmt.Errorf("%s %s returned %s", request.Method, request.URL, response.Status)
+	}
+	if err := decodeBoundedExactJSON(response.Body, 1<<20, destination); err != nil {
+		return fmt.Errorf("decode %s response: %w", request.URL, err)
+	}
+	return nil
+}
+
+func decodeBoundedExactJSON(reader io.Reader, maxBytes int64, destination any) error {
+	data, err := io.ReadAll(io.LimitReader(reader, maxBytes+1))
+	if err != nil {
+		return err
+	}
+	if int64(len(data)) > maxBytes {
+		return errors.New("response exceeds its byte limit")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(destination); err != nil {
+		return err
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return errors.New("response contains trailing JSON")
+	}
+	return nil
+}
+
 func attemptPath(claim run.Claim) string {
 	return "/v1/host/runs/" + url.PathEscape(claim.RunID) + "/attempts/" + url.PathEscape(claim.AttemptID)
 }
 
+func conversationReplyPath(claim conversation.ReplyClaim) string {
+	return "/v1/host/conversation-replies/" + url.PathEscape(claim.SourceMessageID)
+}
+
 var _ hostdomain.RunClient = (*machineHTTP)(nil)
+var _ hostdomain.ConversationClient = (*machineHTTP)(nil)

@@ -60,7 +60,7 @@ export function useWorkBoard(member: Member | null) {
 
   async function selectWork(workID: string) {
     if (!spaceID) return;
-    await run(async () => setDetails(await loadWork(spaceID, workID)));
+    await run(async () => updateDetails(await loadWork(spaceID, workID)));
   }
 
   async function addWork(goal: string): Promise<boolean> {

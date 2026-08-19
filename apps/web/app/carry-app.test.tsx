@@ -27,6 +27,7 @@ test("exchanges a member token without storing it and creates durable Work", asy
         input instanceof Request ? input : new Request(input, init);
       requests.push(request.clone());
       const path = new URL(request.url).pathname;
+      if (isConversationList(request, path)) return json({ messages: [] });
 
       if (request.method === "GET" && path === "/v1/me") {
         if (!sessionEstablished)
@@ -132,6 +133,7 @@ test("clears a message draft when the member selects another Work", async () => 
       const request =
         input instanceof Request ? input : new Request(input, init);
       const path = new URL(request.url).pathname;
+      if (isConversationList(request, path)) return json({ messages: [] });
 
       if (request.method === "GET" && path === "/v1/me") {
         if (!sessionEstablished)
@@ -213,6 +215,7 @@ test("reuses the same Work identity after a create response is lost", async () =
       const request =
         input instanceof Request ? input : new Request(input, init);
       const path = new URL(request.url).pathname;
+      if (isConversationList(request, path)) return json({ messages: [] });
 
       if (request.method === "GET" && path === "/v1/me") {
         if (!sessionEstablished)
@@ -296,6 +299,7 @@ test("reuses a pending Work identity after remount", async () => {
       const request =
         input instanceof Request ? input : new Request(input, init);
       const path = new URL(request.url).pathname;
+      if (isConversationList(request, path)) return json({ messages: [] });
       if (request.method === "GET" && path === "/v1/me") {
         if (!sessionEstablished)
           return json({ error: "authentication required" }, 401);
@@ -364,6 +368,7 @@ test("requires an explicit Space choice when several are available", async () =>
       const request =
         input instanceof Request ? input : new Request(input, init);
       const path = new URL(request.url).pathname;
+      if (isConversationList(request, path)) return json({ messages: [] });
       if (request.method === "GET" && path === "/v1/me") {
         if (!sessionEstablished)
           return json({ error: "authentication required" }, 401);
@@ -397,7 +402,9 @@ test("requires an explicit Space choice when several are available", async () =>
     "member-secret",
   );
   await user.click(screen.getByRole("button", { name: "Open Carry" }));
-  await screen.findByText("Choose a Space before opening shared Work.");
+  await screen.findByText(
+    "Choose a Space before talking to Carry or opening shared Work.",
+  );
   expect(workLists).toEqual([]);
   await user.selectOptions(screen.getByLabelText("Space"), secondWorkID);
   await waitFor(() =>
@@ -413,6 +420,9 @@ test("keeps Work hidden across an unconfirmed sign-out reload", async () => {
       const request =
         input instanceof Request ? input : new Request(input, init);
       const path = new URL(request.url).pathname;
+      if (isConversationList(request, path)) {
+        return json({ messages: privateSignOutMessages() });
+      }
       if (request.method === "GET" && path === "/v1/me") {
         return json({
           user_id: "member-1",
@@ -441,6 +451,7 @@ test("keeps Work hidden across an unconfirmed sign-out reload", async () => {
   const user = userEvent.setup();
   const first = render(<App />);
   await screen.findByText("Review customer renewals");
+  await screen.findByText("Private renewal concern");
   const storageWrite = vi
     .spyOn(window.sessionStorage, "setItem")
     .mockImplementation(() => {
@@ -451,6 +462,10 @@ test("keeps Work hidden across an unconfirmed sign-out reload", async () => {
   expect(
     screen.queryByText("Review customer renewals"),
   ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("heading", { name: "Talk to Carry" }),
+  ).not.toBeInTheDocument();
+  expect(screen.queryByText("Private renewal concern")).not.toBeInTheDocument();
   await screen.findByText("Your Work is hidden on this browser.");
   await screen.findByText(/Sign-out revocation is not confirmed/);
   expect(
@@ -462,6 +477,9 @@ test("keeps Work hidden across an unconfirmed sign-out reload", async () => {
   await screen.findByText("Your Work is hidden on this browser.");
   expect(
     screen.queryByText("Review customer renewals"),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("heading", { name: "Talk to Carry" }),
   ).not.toBeInTheDocument();
   finishSignOut = true;
   await user.click(screen.getByRole("button", { name: "Finish signing out" }));
@@ -480,6 +498,9 @@ test("falls back from a failed URL latch without reopening Work", async () => {
       const request =
         input instanceof Request ? input : new Request(input, init);
       const path = new URL(request.url).pathname;
+      if (isConversationList(request, path)) {
+        return json({ messages: privateSignOutMessages() });
+      }
       if (request.method === "GET" && path === "/v1/me") {
         return json({
           user_id: "member-1",
@@ -509,6 +530,7 @@ test("falls back from a failed URL latch without reopening Work", async () => {
   const user = userEvent.setup();
   const first = render(<App />);
   await screen.findByText("Review customer renewals");
+  await screen.findByText("Private renewal concern");
   const historyWrite = vi
     .spyOn(window.history, "replaceState")
     .mockImplementation(() => {
@@ -521,6 +543,10 @@ test("falls back from a failed URL latch without reopening Work", async () => {
   expect(
     screen.queryByText("Review customer renewals"),
   ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("heading", { name: "Talk to Carry" }),
+  ).not.toBeInTheDocument();
+  expect(screen.queryByText("Private renewal concern")).not.toBeInTheDocument();
 
   first.unmount();
   render(<App />);
@@ -545,6 +571,7 @@ test("reconciles a lost Work retry response by reloading the Work", async () => 
       const request =
         input instanceof Request ? input : new Request(input, init);
       const path = new URL(request.url).pathname;
+      if (isConversationList(request, path)) return json({ messages: [] });
       if (request.method === "GET" && path === "/v1/me") {
         return json({
           user_id: "member-1",
@@ -604,6 +631,7 @@ test("reconciles an old retry identity before authorizing a later terminal Run",
       const request =
         input instanceof Request ? input : new Request(input, init);
       const path = new URL(request.url).pathname;
+      if (isConversationList(request, path)) return json({ messages: [] });
       if (request.method === "GET" && path === "/v1/me") {
         return json({
           user_id: "member-1",
@@ -672,6 +700,72 @@ test("reconciles an old retry identity before authorizing a later terminal Run",
   expect(retryKeys[2]).not.toBe(retryKeys[0]);
 });
 
+test("opens shared Work from a private Carry reply without copying private text", async () => {
+  const privateSource = "Confidential launch concern from the member";
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request =
+        input instanceof Request ? input : new Request(input, init);
+      const path = new URL(request.url).pathname;
+      if (request.method === "GET" && path === "/v1/me") {
+        return json({
+          user_id: "member-1",
+          spaces: [
+            { space_id: spaceID, name: "Research", can_enroll_machines: true },
+          ],
+        });
+      }
+      if (request.method === "GET" && path.endsWith("/works")) {
+        return json({ works: [] });
+      }
+      if (request.method === "GET" && path.endsWith("/conversation/messages")) {
+        return json({
+          messages: [
+            {
+              message_id: "55555555-5555-4555-8555-555555555555",
+              author: "member",
+              text: privateSource,
+              request_id: "66666666-6666-4666-8666-666666666666",
+              created_at: "2026-08-20T12:00:00Z",
+            },
+            {
+              message_id: "77777777-7777-4777-8777-777777777777",
+              author: "carry",
+              text: "I’ll prepare the launch brief and keep it moving.",
+              created_work_id: secondWorkID,
+              created_at: "2026-08-20T12:00:01Z",
+            },
+          ],
+        });
+      }
+      if (
+        request.method === "GET" &&
+        path === `/v1/spaces/${spaceID}/works/${secondWorkID}`
+      ) {
+        return json({
+          work: work(secondWorkID, "Prepare the launch brief"),
+          messages: [],
+        });
+      }
+      throw new Error(`unexpected request: ${request.method} ${path}`);
+    }),
+  );
+
+  const user = userEvent.setup();
+  render(<App />);
+  await screen.findByText("I’ll prepare the launch brief and keep it moving.");
+  await user.click(screen.getByRole("button", { name: "Open Work" }));
+
+  const heading = await screen.findByRole("heading", {
+    name: "Prepare the launch brief",
+  });
+  expect(
+    screen.getByRole("button", { name: /Prepare the launch brief/ }),
+  ).toBeVisible();
+  expect(heading.closest("article")).not.toHaveTextContent(privateSource);
+});
+
 test("reconciles an unknown browser-session exchange", async () => {
   let sessionEstablished = false;
   vi.stubGlobal(
@@ -680,6 +774,7 @@ test("reconciles an unknown browser-session exchange", async () => {
       const request =
         input instanceof Request ? input : new Request(input, init);
       const path = new URL(request.url).pathname;
+      if (isConversationList(request, path)) return json({ messages: [] });
       if (request.method === "POST" && path === "/v1/browser/sessions") {
         sessionEstablished = true;
         throw new TypeError("response lost");
@@ -742,4 +837,19 @@ function json(body: unknown, status = 200): Response {
     status,
     headers: { "Content-Type": "application/json" },
   });
+}
+
+function isConversationList(request: Request, path: string): boolean {
+  return request.method === "GET" && path.endsWith("/conversation/messages");
+}
+
+function privateSignOutMessages() {
+  return [
+    {
+      message_id: "88888888-8888-4888-8888-888888888888",
+      author: "carry",
+      text: "Private renewal concern",
+      created_at: "2026-08-20T12:00:00Z",
+    },
+  ];
 }

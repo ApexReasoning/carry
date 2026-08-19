@@ -19,6 +19,21 @@ export type Member = {
   spaces: Array<Membership>;
 };
 
+export type ConversationMessage = {
+  message_id: string;
+  author: "member" | "carry";
+  text: string;
+  /**
+   * Present only on the authenticated member's own input
+   */
+  request_id?: string;
+  /**
+   * Present only on a private Carry reply that created Work
+   */
+  created_work_id?: string;
+  created_at: string;
+};
+
 export type Work = {
   work_id: string;
   space_id: string;
@@ -49,6 +64,10 @@ export type SpaceId = string;
 export type WorkId = string;
 
 export type IdempotencyKey = string;
+
+export type BeforeConversationMessage = string;
+
+export type AfterConversationMessage = string;
 
 export type CreateBrowserSessionData = {
   body?: never;
@@ -130,6 +149,97 @@ export type LoadCurrentMemberResponses = {
 
 export type LoadCurrentMemberResponse =
   LoadCurrentMemberResponses[keyof LoadCurrentMemberResponses];
+
+export type ListConversationMessagesData = {
+  body?: never;
+  path: {
+    spaceID: string;
+  };
+  query?: {
+    before?: string;
+    after?: string;
+  };
+  url: "/v1/spaces/{spaceID}/conversation/messages";
+};
+
+export type ListConversationMessagesErrors = {
+  /**
+   * Request rejected
+   */
+  400: ApiError;
+  /**
+   * Request rejected
+   */
+  401: ApiError;
+  /**
+   * Request rejected
+   */
+  403: ApiError;
+};
+
+export type ListConversationMessagesError =
+  ListConversationMessagesErrors[keyof ListConversationMessagesErrors];
+
+export type ListConversationMessagesResponses = {
+  /**
+   * Newest or cursor-relative private Conversation page
+   */
+  200: {
+    messages: Array<ConversationMessage>;
+  };
+};
+
+export type ListConversationMessagesResponse =
+  ListConversationMessagesResponses[keyof ListConversationMessagesResponses];
+
+export type SendConversationMessageData = {
+  body: {
+    /**
+     * After trimming, 1–16384 UTF-8 bytes
+     */
+    text: string;
+  };
+  headers: {
+    "Idempotency-Key": string;
+  };
+  path: {
+    spaceID: string;
+  };
+  query?: never;
+  url: "/v1/spaces/{spaceID}/conversation/messages";
+};
+
+export type SendConversationMessageErrors = {
+  /**
+   * Request rejected
+   */
+  400: ApiError;
+  /**
+   * Request rejected
+   */
+  401: ApiError;
+  /**
+   * Request rejected
+   */
+  403: ApiError;
+  /**
+   * Request rejected
+   */
+  409: ApiError;
+};
+
+export type SendConversationMessageError =
+  SendConversationMessageErrors[keyof SendConversationMessageErrors];
+
+export type SendConversationMessageResponses = {
+  /**
+   * Accepted or idempotently replayed private member message
+   */
+  200: ConversationMessage;
+};
+
+export type SendConversationMessageResponse =
+  SendConversationMessageResponses[keyof SendConversationMessageResponses];
 
 export type ListWorksData = {
   body?: never;

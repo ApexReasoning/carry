@@ -2,6 +2,7 @@ package codex
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ApexReasoning/carry/internal/conversation"
 	"github.com/ApexReasoning/carry/internal/host"
 )
 
@@ -58,6 +60,90 @@ printf '%s\n' \
 		if !strings.Contains(string(arguments), required) {
 			t.Fatalf("Codex arguments do not contain %q: %s", required, arguments)
 		}
+	}
+}
+
+func TestAdapterSelectsPrivateReplySchemaForCodexTurn(t *testing.T) {
+	turnFile := filepath.Join(t.TempDir(), "turn-start.json")
+	t.Setenv("CODEX_TURN_FILE", turnFile)
+	binary := writeCodexFixture(t, `
+IFS= read -r initialize
+printf '%s\n' '{"id":1,"result":{"userAgent":"fixture"}}'
+IFS= read -r initialized
+IFS= read -r thread_start
+printf '{"id":2,"result":{"thread":{"id":"thread-private","ephemeral":true,"cwd":"%s","gitInfo":null},"runtimeWorkspaceRoots":["%s"],"instructionSources":[],"approvalPolicy":"never","sandbox":{"type":"readOnly","networkAccess":false}}}\n' "$PWD" "$PWD"
+IFS= read -r turn_start
+printf '%s\n' "$turn_start" > "$CODEX_TURN_FILE"
+printf '%s\n' \
+  '{"id":3,"result":{"turn":{"id":"turn-private","status":"inProgress","items":[]}}}' \
+  '{"method":"item/completed","params":{"threadId":"thread-private","turnId":"turn-private","item":{"id":"message-private","type":"agentMessage","phase":"final_answer","text":"{\"reply\":\"Here are the private options.\",\"delegation_goal\":null}"}}}' \
+  '{"method":"turn/completed","params":{"threadId":"thread-private","turn":{"id":"turn-private","status":"completed","items":[]}}}'
+`)
+	useCodexFixture(t, binary)
+	candidate, err := New().Reply(context.Background(), host.ConversationReplyRequest{
+		Messages: []conversation.ContextMessage{{Author: conversation.AuthorMember, Text: "What are my options?"}},
+	})
+	if err != nil {
+		t.Fatalf("reply through Codex app-server: %v", err)
+	}
+	if candidate.Reply != "Here are the private options." || candidate.DelegationGoal != nil {
+		t.Fatalf("Codex private candidate = %#v", candidate)
+	}
+	turnData, err := os.ReadFile(turnFile)
+	if err != nil {
+		t.Fatalf("read Codex private turn/start: %v", err)
+	}
+	var turnRequest struct {
+		Params struct {
+			OutputSchema struct {
+				AdditionalProperties bool     `json:"additionalProperties"`
+				Required             []string `json:"required"`
+			} `json:"outputSchema"`
+		} `json:"params"`
+	}
+	if err := json.Unmarshal(turnData, &turnRequest); err != nil {
+		t.Fatalf("decode Codex private turn/start: %v", err)
+	}
+	if turnRequest.Params.OutputSchema.AdditionalProperties ||
+		!sameStrings(turnRequest.Params.OutputSchema.Required, []string{"reply", "delegation_goal"}) {
+		t.Fatalf("Codex private output schema = %#v", turnRequest.Params.OutputSchema)
+	}
+}
+
+func TestAdapterDoesNotExposePrivateConversationThroughCodexStderr(t *testing.T) {
+	binary := writeCodexFixture(t, `
+printf '%s\n' 'PRIVATE CONVERSATION MUST NOT LEAK' >&2
+	exit 1
+`)
+	useCodexFixture(t, binary)
+	_, err := New().Reply(context.Background(), host.ConversationReplyRequest{
+		Messages: []conversation.ContextMessage{{Author: conversation.AuthorMember, Text: "Private question"}},
+	})
+	if err == nil || strings.Contains(err.Error(), "PRIVATE CONVERSATION MUST NOT LEAK") {
+		t.Fatalf("Codex private failure exposed stderr: %v", err)
+	}
+}
+
+func TestAdapterSanitizesPrivateCodexProtocolError(t *testing.T) {
+	const privateSentinel = "PRIVATE CODEX PROTOCOL ERROR MUST NOT LEAK"
+	binary := writeCodexFixture(t, `
+IFS= read -r initialize
+printf '%s\n' '{"id":1,"result":{"userAgent":"fixture"}}'
+IFS= read -r initialized
+IFS= read -r thread_start
+printf '{"id":2,"result":{"thread":{"id":"thread-private-error","ephemeral":true,"cwd":"%s","gitInfo":null},"runtimeWorkspaceRoots":["%s"],"instructionSources":[],"approvalPolicy":"never","sandbox":{"type":"readOnly","networkAccess":false}}}\n' "$PWD" "$PWD"
+IFS= read -r turn_start
+printf '%s\n' '{"id":3,"error":{"code":-1,"message":"PRIVATE CODEX PROTOCOL ERROR MUST NOT LEAK"}}'
+`)
+	useCodexFixture(t, binary)
+	_, err := New().Reply(context.Background(), host.ConversationReplyRequest{
+		Messages: []conversation.ContextMessage{{Author: conversation.AuthorMember, Text: "Private question"}},
+	})
+	if !errors.Is(err, host.ErrAgentFailed) {
+		t.Fatalf("Codex private protocol error category = %v", err)
+	}
+	if strings.Contains(err.Error(), privateSentinel) {
+		t.Fatalf("Codex private failure exposed protocol error: %v", err)
 	}
 }
 
@@ -183,4 +269,16 @@ func writeCodexFixture(t *testing.T, body string) string {
 func useCodexFixture(t *testing.T, binary string) {
 	t.Helper()
 	t.Setenv("PATH", filepath.Dir(binary)+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+func sameStrings(left []string, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
 }

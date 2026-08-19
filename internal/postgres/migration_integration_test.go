@@ -7,7 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ApexReasoning/carry/internal/conversation"
 	"github.com/ApexReasoning/carry/internal/work"
+	"github.com/google/uuid"
 )
 
 func TestMigrateCreatesCurrentFactsAndRejectsUnearnedWorkLifecycle(t *testing.T) {
@@ -24,6 +26,9 @@ func TestMigrateCreatesCurrentFactsAndRejectsUnearnedWorkLifecycle(t *testing.T)
 		"space_memberships",
 		"user_tokens",
 		"machines",
+		"conversations",
+		"conversation_messages",
+		"conversation_reply_claims",
 		"works",
 		"work_messages",
 		"runs",
@@ -74,6 +79,77 @@ func TestMigrateCreatesCurrentFactsAndRejectsUnearnedWorkLifecycle(t *testing.T)
 	}
 	if details.Work.Lifecycle != work.LifecycleOpen {
 		t.Fatalf("lifecycle = %q, want %q", details.Work.Lifecycle, work.LifecycleOpen)
+	}
+}
+
+func TestConversationReplySchemaRejectsInvalidSourceAndReplyShapes(t *testing.T) {
+	ctx := context.Background()
+	pool := openMigratedTestPool(t, ctx)
+	store := NewStore(pool)
+	bootstrap, err := bootstrapForTest(ctx, store, BootstrapCommand{
+		DisplayName: "Reply Constraint Owner", SpaceName: "Reply Constraint Space",
+		TokenExpiresAt: time.Now().Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("bootstrap constraint fixture: %v", err)
+	}
+	source, err := store.SendConversationMessage(ctx, conversation.SendCommand{
+		SpaceID: bootstrap.SpaceID, MemberUserID: bootstrap.UserID,
+		Text: "Private source", IdempotencyKey: "reply-constraint-source",
+	})
+	if err != nil {
+		t.Fatalf("send constraint source: %v", err)
+	}
+	var conversationID string
+	if err := pool.QueryRow(ctx, `select conversation_id from conversations where space_id = $1 and member_user_id = $2`, bootstrap.SpaceID, bootstrap.UserID).Scan(&conversationID); err != nil {
+		t.Fatalf("load constraint Conversation: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		insert into conversation_messages (message_id, conversation_id, message_seq, author, text)
+		values ($1, $2, 2, 'carry', 'Missing source relation')
+	`, uuid.NewString(), conversationID); err == nil {
+		t.Fatal("Carry reply without a source member message was accepted")
+	}
+	if _, err := pool.Exec(ctx, `
+		insert into conversation_messages (
+			message_id, conversation_id, message_seq, author, author_user_id,
+			text, member_request_id, request_digest, reply_to_member_message_id
+		) values ($1, $2, 2, 'member', $3, 'Invalid member reply', 'invalid-member-reply', decode(repeat('01', 32), 'hex'), $4)
+	`, uuid.NewString(), conversationID, bootstrap.UserID, source.MessageID); err == nil {
+		t.Fatal("member message with a reply source was accepted")
+	}
+
+	machineID := insertReplyMachine(t, ctx, pool, bootstrap.SpaceID, bootstrap.UserID)
+	if _, err := pool.Exec(ctx, `
+		update conversation_reply_claims
+		set current_machine_id = $1,
+			current_fence = 1,
+			lease_expires_at = clock_timestamp() + interval '5 minutes',
+			context_start_seq = 1,
+			context_end_seq = 1,
+			output_digest = decode(repeat('01', 32), 'hex'),
+			committed_reply_message_id = $2,
+			committed_reply_author = 'carry'
+		where source_message_id = $2
+	`, machineID, source.MessageID); err == nil {
+		t.Fatal("private claim accepted a member message as its committed Carry reply")
+	}
+	if _, err := pool.Exec(ctx, `delete from conversation_reply_claims where source_message_id = $1`, source.MessageID); err != nil {
+		t.Fatalf("remove source claim: %v", err)
+	}
+	carryMessageID := uuid.NewString()
+	if _, err := pool.Exec(ctx, `
+		insert into conversation_messages (
+			message_id, conversation_id, message_seq, author, text, reply_to_member_message_id
+		) values ($1, $2, 2, 'carry', 'Valid Carry reply shape', $3)
+	`, carryMessageID, conversationID, source.MessageID); err != nil {
+		t.Fatalf("insert valid Carry reply shape: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		insert into conversation_reply_claims (source_message_id, conversation_id)
+		values ($1, $2)
+	`, carryMessageID, conversationID); err == nil {
+		t.Fatal("private reply claim accepted a Carry message as its source")
 	}
 }
 

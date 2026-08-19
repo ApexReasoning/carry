@@ -40,6 +40,67 @@ paths:
                 $ref: "#/components/schemas/Member"
         "401":
           $ref: "#/components/responses/Error"
+  /v1/spaces/{spaceID}/conversation/messages:
+    parameters:
+      - $ref: "#/components/parameters/SpaceID"
+    get:
+      operationId: listConversationMessages
+      parameters:
+        - $ref: "#/components/parameters/BeforeConversationMessage"
+        - $ref: "#/components/parameters/AfterConversationMessage"
+      responses:
+        "200":
+          description: Newest or cursor-relative private Conversation page
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [messages]
+                properties:
+                  messages:
+                    type: array
+                    maxItems: 50
+                    items:
+                      $ref: "#/components/schemas/ConversationMessage"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+    post:
+      operationId: sendConversationMessage
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [text]
+              properties:
+                text:
+                  type: string
+                  minLength: 1
+                  description: After trimming, 1–16384 UTF-8 bytes
+      responses:
+        "200":
+          description: Accepted or idempotently replayed private member message
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationMessage"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
   /v1/spaces/{spaceID}/works:
     parameters:
       - $ref: "#/components/parameters/SpaceID"
@@ -203,6 +264,20 @@ components:
         type: string
         minLength: 1
         maxLength: 255
+    BeforeConversationMessage:
+      name: before
+      in: query
+      required: false
+      schema:
+        type: string
+        format: uuid
+    AfterConversationMessage:
+      name: after
+      in: query
+      required: false
+      schema:
+        type: string
+        format: uuid
   responses:
     Error:
       description: Request rejected
@@ -241,6 +316,29 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Membership"
+    ConversationMessage:
+      type: object
+      additionalProperties: false
+      required: [message_id, author, text, created_at]
+      properties:
+        message_id:
+          type: string
+          format: uuid
+        author:
+          type: string
+          enum: [member, carry]
+        text:
+          type: string
+        request_id:
+          type: string
+          description: Present only on the authenticated member's own input
+        created_work_id:
+          type: string
+          format: uuid
+          description: Present only on a private Carry reply that created Work
+        created_at:
+          type: string
+          format: date-time
     Work:
       type: object
       additionalProperties: false

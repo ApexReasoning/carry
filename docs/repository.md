@@ -126,7 +126,25 @@ Carry 通过明确区分当前产品、生成物、实验和历史来避免这�
 
 ### `internal/`
 
-按事实 owner 和具体 adapter 组织。`internal/cli/` 是具体 Carry CLI adapter，不是通用 ownership bucket。结构由 `docs/architecture.md` 决定，不由数据库表、HTTP route 或 UI 页面决定。
+按事实 owner 和具体 adapter 组织。当前已经由旅程赚得的主干是：
+
+```text
+internal/
+├── identity/
+├── space/
+├── conversation/
+├── work/
+├── run/
+├── host/
+├── agent/
+│   ├── pi/
+│   └── codex/
+├── postgres/
+├── server/
+└── cli/
+```
+
+`internal/cli/` 是具体 Carry CLI adapter，不是通用 ownership bucket。结构由 `docs/architecture.md` 决定，不由数据库表、HTTP route 或 UI 页面决定。
 
 禁止新增：
 
@@ -398,7 +416,9 @@ make check-product
 - 成员建立 Browser Session；
 - 创建、读取并补充 Work；
 - Machine enrollment 后用独立 mTLS claim 并推进 Work；
-- Host 中断后新的 Attempt 安全继续，旧 Attempt 不能晚到提交。
+- Host 中断后新的 Attempt 安全继续，旧 Attempt 不能晚到提交；
+- 成员在 Web 私聊 Carry，普通问题只得到私人回复；
+- 清晰委托原子形成一份共享 Work，而私人原文和 source identity 不进入 Work。
 
 未来 journey 只有在实现并成为发布合同后才进入 required product suite。需要真实模型 credential 的 Pi/Codex canary 不在不可信 PR 上运行，改由 protected canary 执行。
 

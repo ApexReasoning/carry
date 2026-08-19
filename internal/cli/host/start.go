@@ -50,13 +50,17 @@ func runStart(
 	if _, err := fmt.Fprintf(output, "Started Carry Host %s with %s\n", credential.MachineID, label); err != nil {
 		return fmt.Errorf("write Host start status: %w", err)
 	}
-	if err := (hostdomain.Worker{
-		Client: connection, Executor: executor,
-		PollInterval: time.Second, RenewInterval: time.Minute,
-	}).Serve(ctx); err != nil {
+	if err := newMachineWorker(connection, executor).Serve(ctx); err != nil {
 		return fmt.Errorf("serve Carry Host: %w", err)
 	}
 	return nil
+}
+
+func newMachineWorker(connection *machineHTTP, executor hostdomain.Executor) hostdomain.Worker {
+	return hostdomain.Worker{
+		Runs: connection, Conversations: connection, Executor: executor,
+		PollInterval: time.Second, RenewInterval: time.Minute,
+	}
 }
 
 func selectExecutor(

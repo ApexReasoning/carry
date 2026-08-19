@@ -10,11 +10,12 @@ import (
 // MemberRoutes composes only routes authorized by a member token or opaque
 // browser session, plus the one-way token-to-session exchange.
 type MemberRoutes struct {
-	auth     memberAuthenticator
-	sessions browserSessionAPI
-	member   memberAPI
-	machines memberMachineAPI
-	works    workAPI
+	auth          memberAuthenticator
+	sessions      browserSessionAPI
+	member        memberAPI
+	machines      memberMachineAPI
+	conversations conversationAPI
+	works         workAPI
 }
 
 // NewMemberRoutes constructs the member principal surface from narrow
@@ -25,20 +26,24 @@ func NewMemberRoutes(
 	sessions BrowserSessionStore,
 	memberships MembershipReader,
 	machines MachineEnrollmentStore,
+	conversationCommands ConversationCommands,
+	conversationQueries ConversationQueries,
 	workCommands WorkCommands,
 	workQueries WorkQueries,
 	authority *host.CertificateAuthority,
 ) (*MemberRoutes, error) {
 	if tokens == nil || sessions == nil || memberships == nil || machines == nil ||
+		conversationCommands == nil || conversationQueries == nil ||
 		workCommands == nil || workQueries == nil || authority == nil {
 		return nil, errors.New("member route dependencies are required")
 	}
 	return &MemberRoutes{
-		auth:     memberAuthenticator{tokens: tokens, sessions: sessions},
-		sessions: browserSessionAPI{store: sessions},
-		member:   memberAPI{memberships: memberships},
-		machines: memberMachineAPI{store: machines, authority: authority},
-		works:    workAPI{commands: workCommands, queries: workQueries},
+		auth:          memberAuthenticator{tokens: tokens, sessions: sessions},
+		sessions:      browserSessionAPI{store: sessions},
+		member:        memberAPI{memberships: memberships},
+		machines:      memberMachineAPI{store: machines, authority: authority},
+		conversations: conversationAPI{commands: conversationCommands, queries: conversationQueries},
+		works:         workAPI{commands: workCommands, queries: workQueries},
 	}, nil
 }
 
@@ -52,6 +57,7 @@ func (routes *MemberRoutes) mount(router chi.Router) {
 			member.Get("/me", routes.member.me)
 			member.Post("/machines/enroll", routes.machines.enroll)
 			member.Post("/machines/revoke", routes.machines.revoke)
+			routes.conversations.mount(member)
 			routes.works.mount(member)
 		})
 	})
@@ -59,15 +65,19 @@ func (routes *MemberRoutes) mount(router chi.Router) {
 
 // MachineRoutes composes only the mTLS-authenticated Host surface.
 type MachineRoutes struct {
-	machine machineAPI
+	machine       machineAPI
+	conversations machineConversationAPI
 }
 
-// NewMachineRoutes constructs the narrow mTLS-authenticated Run surface.
-func NewMachineRoutes(store MachineRunStore) (*MachineRoutes, error) {
-	if store == nil {
-		return nil, errors.New("Machine route dependency is required")
+// NewMachineRoutes constructs the two narrow mTLS-authenticated Host surfaces.
+func NewMachineRoutes(runs MachineRunStore, conversations MachineConversationStore) (*MachineRoutes, error) {
+	if runs == nil || conversations == nil {
+		return nil, errors.New("Machine route dependencies are required")
 	}
-	return &MachineRoutes{machine: machineAPI{store: store}}, nil
+	return &MachineRoutes{
+		machine:       machineAPI{store: runs},
+		conversations: machineConversationAPI{store: conversations},
+	}, nil
 }
 
 func (routes *MachineRoutes) mount(router chi.Router) {
@@ -77,5 +87,6 @@ func (routes *MachineRoutes) mount(router chi.Router) {
 		machine.Post("/runs/{run_id}/attempts/{attempt_id}/renew", routes.machine.renewRun)
 		machine.Post("/runs/{run_id}/attempts/{attempt_id}/understanding", routes.machine.commitUnderstanding)
 		machine.Post("/runs/{run_id}/attempts/{attempt_id}/outcome", routes.machine.finishAttempt)
+		routes.conversations.mount(machine)
 	})
 }

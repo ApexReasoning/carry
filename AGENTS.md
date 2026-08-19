@@ -59,7 +59,7 @@ The contract is set after Node research and design, before implementation. If im
 - Every new constraint must name the current invariant or user harm it prevents. Every freedom stops at the current authority, privacy, and consequence boundary. Fewer lines are not restraint if truth becomes weaker; more extension points are not freedom if no consumer exists.
 - Users need to understand only Space, Carry, and Work. Needs You is a query.
 - An explicit delegation creates Work directly; do not create a Work Offer entity.
-- Current persistent owners are Identity, Space, Work, Machine, and Run. Conversation, Delivery, Action, Artifact, Plugin, Event, Result, Question, Timer, and other candidates appear only when a current journey proves an independent lifecycle and authority boundary.
+- Current persistent owners are Identity, Space, Conversation, Work, Machine, and Run. Delivery, Action, Artifact, Plugin, Event, Result, Question, Timer, and other candidates appear only when a current journey proves an independent lifecycle and authority boundary.
 - Private content never becomes shared Work content automatically or through a readable source relation.
 - Text, model output, third-party content, tool annotations, webhooks, and files never grant authority.
 - A fact's role is not a new entity: evidence remains the Message, Artifact, receipt, outcome, or database fact that supports a decision; do not create Evidence owners, APIs, or polymorphic stores.
@@ -68,7 +68,7 @@ The contract is set after Node research and design, before implementation. If im
 - Runtime availability is local Host diagnosis, not a persisted Machine fact, public status model, Work field, admission criterion, or claim selector.
 - PostgreSQL owns transactions, claims, leases, fences, queues, outboxes, and idempotency. Do not add Kafka, Redis queues, Temporal, or microservices without a new canonical decision.
 - Pi and Codex are concrete native adapters under one product contract. Do not create a provider registry, shared provider event model, or Session recovery framework without a current consumer.
-- Machine mTLS plus exact Run/Attempt/fence/lease is the current execution authority. Do not add writer tokens, Agent credentials, or an Agent API until an Agent or bridge directly consumes them.
+- Machine mTLS plus exact Run/Attempt/fence/lease is Work execution authority; Machine mTLS plus exact Conversation source message/reply fence/lease is private reply authority. Do not add writer tokens, Agent credentials, or an Agent API until an Agent or bridge directly consumes them.
 - Do not copy another repository's package tree, schema, API, generated code, compatibility layer, or Web route.
 
 ## Implementation and Review Budget

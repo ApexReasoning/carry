@@ -143,11 +143,13 @@ func run(ctx context.Context, arguments []string, stdout io.Writer, stderr io.Wr
 	}
 
 	store := carrypostgres.NewStore(pool)
-	memberRoutes, err := carryserver.NewMemberRoutes(store, store, store, store, store, store, authority)
+	memberRoutes, err := carryserver.NewMemberRoutes(
+		store, store, store, store, store, store, store, store, authority,
+	)
 	if err != nil {
 		return fmt.Errorf("compose member routes: %w", err)
 	}
-	machineRoutes, err := carryserver.NewMachineRoutes(store)
+	machineRoutes, err := carryserver.NewMachineRoutes(store, store)
 	if err != nil {
 		return fmt.Errorf("compose Machine routes: %w", err)
 	}

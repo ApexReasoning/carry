@@ -23,6 +23,42 @@ type CarryUser struct {
 	CreatedAt   pgtype.Timestamptz
 }
 
+type Conversation struct {
+	ConversationID string
+	SpaceID        string
+	MemberUserID   string
+	MessageHeadSeq int64
+	CreatedAt      pgtype.Timestamptz
+}
+
+type ConversationMessage struct {
+	MessageID              string
+	ConversationID         string
+	MessageSeq             int64
+	Author                 string
+	AuthorUserID           pgtype.UUID
+	Text                   string
+	MemberRequestID        *string
+	RequestDigest          []byte
+	ReplyToMemberMessageID pgtype.UUID
+	CreatedAt              pgtype.Timestamptz
+}
+
+type ConversationReplyClaim struct {
+	SourceMessageID         string
+	ConversationID          string
+	SourceMessageAuthor     string
+	CurrentMachineID        pgtype.UUID
+	CurrentFence            int64
+	LeaseExpiresAt          pgtype.Timestamptz
+	ContextStartSeq         *int64
+	ContextEndSeq           *int64
+	OutputDigest            []byte
+	CommittedReplyMessageID pgtype.UUID
+	CommittedReplyAuthor    *string
+	CreatedWorkID           pgtype.UUID
+}
+
 type Machine struct {
 	MachineID                string
 	SpaceID                  string

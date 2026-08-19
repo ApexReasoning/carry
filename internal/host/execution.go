@@ -9,6 +9,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/ApexReasoning/carry/internal/conversation"
 	"github.com/ApexReasoning/carry/internal/run"
 )
 
@@ -23,6 +24,7 @@ var (
 type Executor interface {
 	Diagnose(context.Context) error
 	Execute(context.Context, ExecutionRequest) (UnderstandingUpdate, error)
+	Reply(context.Context, ConversationReplyRequest) (conversation.ReplyCandidate, error)
 }
 
 // ExecutionRequest contains only product context authorized for one Attempt.

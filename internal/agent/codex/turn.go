@@ -40,11 +40,17 @@ type turnStartResult struct {
 	Turn turn `json:"turn"`
 }
 
-func (client *appServerClient) startTurn(ctx context.Context, threadID string, prompt string) (string, error) {
+func startStructuredTurnProtocol(
+	client *appServerClient,
+	ctx context.Context,
+	threadID string,
+	prompt string,
+	outputSchema json.RawMessage,
+) (string, error) {
 	params := turnStartParams{
 		ThreadID:     threadID,
 		Input:        []turnInput{{Type: "text", Text: prompt}},
-		OutputSchema: host.UnderstandingOutputSchema,
+		OutputSchema: outputSchema,
 		Sandbox:      sandboxPolicy{Type: "readOnly", NetworkAccess: false},
 	}
 	if err := client.sendRequest(startTurnRequestID, "turn/start", params); err != nil {
@@ -68,14 +74,14 @@ type turnObservation struct {
 	streamedText strings.Builder
 }
 
-func (client *appServerClient) awaitTurn(ctx context.Context, threadID string, turnID string) (host.UnderstandingUpdate, error) {
+func awaitTurnTextProtocol(client *appServerClient, ctx context.Context, threadID string, turnID string) ([]byte, error) {
 	observation := turnObservation{threadID: threadID, turnID: turnID}
 	var reconciliationDeadline time.Time
 	reconciliationRequested := false
 	for {
 		message, err := client.readEnvelope(ctx, reconciliationDeadline)
 		if err != nil {
-			return host.UnderstandingUpdate{}, err
+			return nil, err
 		}
 		if responseID, ok := numericID(message.ID); ok && responseID == reconcileThreadRequestID {
 			return observation.reconcile(message)
@@ -87,18 +93,18 @@ func (client *appServerClient) awaitTurn(ctx context.Context, threadID string, t
 			observation.recordCompletedItem(message.Params)
 		case "turn/completed":
 			if completed, ok := observation.completedTurn(message.Params); ok {
-				return observation.completedDraft(completed)
+				return observation.completedText(completed)
 			}
 		case "error":
 			if observation.isTerminalError(message.Params) {
-				return host.UnderstandingUpdate{}, fmt.Errorf("%w: Codex reported a terminal turn error", host.ErrAgentFailed)
+				return nil, fmt.Errorf("%w: Codex reported a terminal turn error", host.ErrAgentFailed)
 			}
 		case "thread/status/changed":
 			if observation.isIdle(message.Params) && !reconciliationRequested {
 				reconciliationRequested = true
 				reconciliationDeadline = time.Now().Add(reconciliationTimeout)
 				if err := client.requestReconciliation(threadID); err != nil {
-					return host.UnderstandingUpdate{}, err
+					return nil, err
 				}
 			}
 		}
@@ -149,17 +155,17 @@ func (observation turnObservation) completedTurn(raw json.RawMessage) (turn, boo
 	return params.Turn, true
 }
 
-func (observation *turnObservation) completedDraft(completed turn) (host.UnderstandingUpdate, error) {
+func (observation *turnObservation) completedText(completed turn) ([]byte, error) {
 	switch completed.Status {
 	case "completed":
 		if text := finalAgentText(completed.Items); text != "" {
 			observation.finalText = text
 		}
-		return host.ParseUnderstandingUpdate([]byte(observation.finalText))
+		return []byte(observation.finalText), nil
 	case "failed", "interrupted":
-		return host.UnderstandingUpdate{}, fmt.Errorf("%w: Codex turn status %q", host.ErrAgentFailed, completed.Status)
+		return nil, fmt.Errorf("%w: Codex turn status %q", host.ErrAgentFailed, completed.Status)
 	default:
-		return host.UnderstandingUpdate{}, fmt.Errorf("%w: unrecognized Codex turn status %q", host.ErrAgentOutcomeLost, completed.Status)
+		return nil, fmt.Errorf("%w: unrecognized Codex turn status %q", host.ErrAgentOutcomeLost, completed.Status)
 	}
 }
 
@@ -181,9 +187,9 @@ func (observation turnObservation) isIdle(raw json.RawMessage) bool {
 	return json.Unmarshal(raw, &params) == nil && params.ThreadID == observation.threadID && params.Status.Type == "idle"
 }
 
-func (observation *turnObservation) reconcile(message envelope) (host.UnderstandingUpdate, error) {
+func (observation *turnObservation) reconcile(message envelope) ([]byte, error) {
 	if len(message.Error) != 0 && string(message.Error) != "null" {
-		return host.UnderstandingUpdate{}, fmt.Errorf(
+		return nil, fmt.Errorf(
 			"%w: Codex thread/read failed: %s",
 			host.ErrAgentOutcomeLost,
 			protocolErrorMessage(message.Error),
@@ -191,9 +197,9 @@ func (observation *turnObservation) reconcile(message envelope) (host.Understand
 	}
 	reconciled, ok := findTurn(message.Result, observation.turnID)
 	if !ok {
-		return host.UnderstandingUpdate{}, fmt.Errorf("%w: Codex turn completion is not provable", host.ErrAgentOutcomeLost)
+		return nil, fmt.Errorf("%w: Codex turn completion is not provable", host.ErrAgentOutcomeLost)
 	}
-	return observation.completedDraft(reconciled)
+	return observation.completedText(reconciled)
 }
 
 func (client *appServerClient) readEnvelope(ctx context.Context, deadline time.Time) (envelope, error) {

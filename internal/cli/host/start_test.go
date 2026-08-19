@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/ApexReasoning/carry/internal/conversation"
 	hostdomain "github.com/ApexReasoning/carry/internal/host"
 )
 
@@ -29,6 +30,18 @@ func TestSelectExecutorUsesCodexWhenPiIsUnavailable(t *testing.T) {
 	}
 	if selected != codex || label != "Codex" || pi.diagnoses != 1 || codex.diagnoses != 1 {
 		t.Fatalf("selection = %s, Pi diagnoses = %d, Codex diagnoses = %d", label, pi.diagnoses, codex.diagnoses)
+	}
+}
+
+func TestMachineWorkerCompositionUsesBothNarrowClientsAndOneExecutor(t *testing.T) {
+	connection := &machineHTTP{}
+	executor := &diagnosticExecutor{}
+	worker := newMachineWorker(connection, executor)
+	if worker.Runs != connection || worker.Conversations != connection || worker.Executor != executor {
+		t.Fatalf("Machine worker composition = %#v", worker)
+	}
+	if worker.PollInterval <= 0 || worker.RenewInterval <= 0 {
+		t.Fatalf("Machine worker intervals = %s/%s", worker.PollInterval, worker.RenewInterval)
 	}
 }
 
@@ -57,6 +70,10 @@ func (executor *diagnosticExecutor) Diagnose(context.Context) error {
 
 func (*diagnosticExecutor) Execute(context.Context, hostdomain.ExecutionRequest) (hostdomain.UnderstandingUpdate, error) {
 	return hostdomain.UnderstandingUpdate{}, errors.New("not implemented")
+}
+
+func (*diagnosticExecutor) Reply(context.Context, hostdomain.ConversationReplyRequest) (conversation.ReplyCandidate, error) {
+	return conversation.ReplyCandidate{}, errors.New("not implemented")
 }
 
 var _ hostdomain.Executor = (*diagnosticExecutor)(nil)

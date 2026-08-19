@@ -204,12 +204,13 @@ func TestMachineRouteRejectsMemberCredentialsEvenWithValidCertificate(t *testing
 			runStore := &recordingMachineRuns{}
 			member, err := NewMemberRoutes(
 				&recordingUserTokens{}, unavailableBrowserSessions{}, emptyMemberships{},
-				&recordingMachineEnrollments{}, unavailableWorkCommands{}, unavailableWorkQueries{}, authority,
+				&recordingMachineEnrollments{}, unavailableConversationCommands{}, unavailableConversationQueries{},
+				unavailableWorkCommands{}, unavailableWorkQueries{}, authority,
 			)
 			if err != nil {
 				t.Fatalf("compose member routes: %v", err)
 			}
-			machine, err := NewMachineRoutes(runStore)
+			machine, err := NewMachineRoutes(runStore, unavailableMachineConversations{})
 			if err != nil {
 				t.Fatalf("compose Machine routes: %v", err)
 			}
@@ -243,13 +244,14 @@ func memberSurfaceTestAPI(
 	t.Helper()
 	member, err := NewMemberRoutes(
 		tokens, sessions, emptyMemberships{}, &recordingMachineEnrollments{},
+		unavailableConversationCommands{}, unavailableConversationQueries{},
 		unavailableWorkCommands{}, unavailableWorkQueries{}, authority,
 	)
 	if err != nil {
 		t.Fatalf("compose member routes: %v", err)
 	}
 	runStore := &recordingMachineRuns{}
-	machine, err := NewMachineRoutes(runStore)
+	machine, err := NewMachineRoutes(runStore, unavailableMachineConversations{})
 	if err != nil {
 		t.Fatalf("compose Machine routes: %v", err)
 	}
@@ -261,13 +263,14 @@ func browserTestAPI(t *testing.T, sessions BrowserSessionStore) http.Handler {
 	authority := testAuthority(t)
 	member, err := NewMemberRoutes(
 		&recordingUserTokens{}, sessions, emptyMemberships{}, &recordingMachineEnrollments{},
+		unavailableConversationCommands{}, unavailableConversationQueries{},
 		unavailableWorkCommands{}, unavailableWorkQueries{}, authority,
 	)
 	if err != nil {
 		t.Fatalf("compose member routes: %v", err)
 	}
 	runStore := &recordingMachineRuns{}
-	machine, err := NewMachineRoutes(runStore)
+	machine, err := NewMachineRoutes(runStore, unavailableMachineConversations{})
 	if err != nil {
 		t.Fatalf("compose Machine routes: %v", err)
 	}

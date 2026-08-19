@@ -3,13 +3,20 @@ import {
   appendWorkMessage as appendWorkMessageRequest,
   createBrowserSession,
   createWork as createWorkRequest,
+  listConversationMessages as listConversationMessagesRequest,
   listWorks as listWorksRequest,
   loadCurrentMember,
   loadWork as loadWorkRequest,
   retryWork as retryWorkRequest,
   revokeCurrentBrowserSession,
+  sendConversationMessage as sendConversationMessageRequest,
 } from "./generated/sdk.gen";
-import type { Member, Work, WorkMessage } from "./generated/types.gen";
+import type {
+  ConversationMessage,
+  Member,
+  Work,
+  WorkMessage,
+} from "./generated/types.gen";
 
 export class MutationOutcomeUnknownError extends Error {}
 
@@ -48,6 +55,42 @@ export async function currentMember(): Promise<Member | null> {
     return null;
   }
   return requireData(result.data, result.response, result.error, "Load member");
+}
+
+export async function listConversationMessages(
+  spaceID: string,
+  cursor?: { before: string } | { after: string },
+): Promise<Array<ConversationMessage>> {
+  const result = await listConversationMessagesRequest({
+    ...sameOrigin,
+    path: { spaceID },
+    query: cursor,
+  });
+  return requireData(
+    result.data,
+    result.response,
+    result.error,
+    "Load private messages",
+  ).messages;
+}
+
+export async function sendConversationMessage(
+  spaceID: string,
+  text: string,
+  idempotencyKey: string,
+): Promise<ConversationMessage> {
+  const result = await sendConversationMessageRequest({
+    ...sameOrigin,
+    body: { text },
+    headers: { "Idempotency-Key": idempotencyKey },
+    path: { spaceID },
+  });
+  return requireMutationData(
+    result.data,
+    result.response,
+    result.error,
+    "Send private message",
+  );
 }
 
 export async function listWorks(spaceID: string): Promise<Array<Work>> {

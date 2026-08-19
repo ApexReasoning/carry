@@ -17,6 +17,15 @@ export const zMember = z.object({
   spaces: z.array(zMembership),
 });
 
+export const zConversationMessage = z.object({
+  message_id: z.uuid(),
+  author: z.enum(["member", "carry"]),
+  text: z.string(),
+  request_id: z.string().optional(),
+  created_work_id: z.uuid().optional(),
+  created_at: z.iso.datetime({ offset: true }),
+});
+
 export const zWork = z.object({
   work_id: z.uuid(),
   space_id: z.uuid(),
@@ -45,6 +54,10 @@ export const zWorkId = z.uuid();
 
 export const zIdempotencyKey = z.string().min(1).max(255);
 
+export const zBeforeConversationMessage = z.uuid();
+
+export const zAfterConversationMessage = z.uuid();
+
 /**
  * Browser session created
  */
@@ -59,6 +72,39 @@ export const zRevokeCurrentBrowserSessionResponse = z.void();
  * Current member and Spaces
  */
 export const zLoadCurrentMemberResponse = zMember;
+
+export const zListConversationMessagesPath = z.object({
+  spaceID: z.uuid(),
+});
+
+export const zListConversationMessagesQuery = z.object({
+  before: z.uuid().optional(),
+  after: z.uuid().optional(),
+});
+
+/**
+ * Newest or cursor-relative private Conversation page
+ */
+export const zListConversationMessagesResponse = z.object({
+  messages: z.array(zConversationMessage).max(50),
+});
+
+export const zSendConversationMessageBody = z.object({
+  text: z.string().min(1),
+});
+
+export const zSendConversationMessageHeaders = z.object({
+  "Idempotency-Key": z.string().min(1).max(255),
+});
+
+export const zSendConversationMessagePath = z.object({
+  spaceID: z.uuid(),
+});
+
+/**
+ * Accepted or idempotently replayed private member message
+ */
+export const zSendConversationMessageResponse = zConversationMessage;
 
 export const zListWorksPath = z.object({
   spaceID: z.uuid(),

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ApexReasoning/carry/internal/conversation"
 	"github.com/ApexReasoning/carry/internal/host"
 )
 
@@ -45,9 +46,29 @@ func (adapter *Adapter) Execute(ctx context.Context, request host.ExecutionReque
 	if err != nil {
 		return host.UnderstandingUpdate{}, err
 	}
+	text, err := adapter.generate(ctx, prompt, true)
+	if err != nil {
+		return host.UnderstandingUpdate{}, err
+	}
+	return host.ParseUnderstandingUpdate(text)
+}
+
+func (adapter *Adapter) Reply(ctx context.Context, request host.ConversationReplyRequest) (conversation.ReplyCandidate, error) {
+	prompt, err := request.Prompt()
+	if err != nil {
+		return conversation.ReplyCandidate{}, err
+	}
+	text, err := adapter.generate(ctx, prompt, false)
+	if err != nil {
+		return conversation.ReplyCandidate{}, host.SanitizePrivateAgentError(err)
+	}
+	return host.ParseConversationReply(text)
+}
+
+func (adapter *Adapter) generate(ctx context.Context, prompt string, includeStderr bool) ([]byte, error) {
 	attemptDirectory, err := os.MkdirTemp("", "carry-pi-attempt-")
 	if err != nil {
-		return host.UnderstandingUpdate{}, fmt.Errorf("create Pi Attempt directory: %w", err)
+		return nil, fmt.Errorf("create Pi Attempt directory: %w", err)
 	}
 	defer func() { _ = os.RemoveAll(attemptDirectory) }()
 
@@ -56,16 +77,16 @@ func (adapter *Adapter) Execute(ctx context.Context, request host.ExecutionReque
 	command.Dir = attemptDirectory
 	stdin, err := command.StdinPipe()
 	if err != nil {
-		return host.UnderstandingUpdate{}, fmt.Errorf("open Pi stdin: %w", err)
+		return nil, fmt.Errorf("open Pi stdin: %w", err)
 	}
 	stdout, err := command.StdoutPipe()
 	if err != nil {
-		return host.UnderstandingUpdate{}, fmt.Errorf("open Pi stdout: %w", err)
+		return nil, fmt.Errorf("open Pi stdout: %w", err)
 	}
 	var stderr boundedBuffer
 	command.Stderr = &stderr
 	if err := command.Start(); err != nil {
-		return host.UnderstandingUpdate{}, fmt.Errorf("%w: start Pi RPC: %v", host.ErrAgentUnavailable, err)
+		return nil, fmt.Errorf("%w: start Pi RPC: %v", host.ErrAgentUnavailable, err)
 	}
 	processDone := make(chan error, 1)
 	go func() { processDone <- command.Wait() }()
@@ -74,26 +95,26 @@ func (adapter *Adapter) Execute(ctx context.Context, request host.ExecutionReque
 		_ = stdin.Close()
 		_ = command.Process.Kill()
 		<-processDone
-		return host.UnderstandingUpdate{}, fmt.Errorf("write Pi prompt: %w", err)
+		return nil, fmt.Errorf("write Pi prompt: %w", err)
 	}
 
-	draft, resultErr := awaitDraft(ctx, stdout)
+	text, resultErr := awaitText(ctx, stdout)
 	_ = stdin.Close()
 	if resultErr == nil {
 		if err := waitForExit(command, processDone); err != nil {
-			return host.UnderstandingUpdate{}, fmt.Errorf("close Pi RPC: %w", err)
+			return nil, fmt.Errorf("close Pi RPC: %w", err)
 		}
-		return draft, nil
+		return text, nil
 	}
 	_ = command.Process.Kill()
 	<-processDone
 	if ctx.Err() != nil {
-		return host.UnderstandingUpdate{}, host.ErrAgentOutcomeLost
+		return nil, host.ErrAgentOutcomeLost
 	}
-	if stderr.String() != "" {
-		return host.UnderstandingUpdate{}, fmt.Errorf("%w: %s", resultErr, stderr.String())
+	if includeStderr && stderr.String() != "" {
+		return nil, fmt.Errorf("%w: %s", resultErr, stderr.String())
 	}
-	return host.UnderstandingUpdate{}, resultErr
+	return nil, resultErr
 }
 
 func piRPCArguments() []string {

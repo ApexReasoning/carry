@@ -147,7 +147,7 @@ utils.Normalize(value)
 
 ### 名词规则
 
-- 当前已经确认的 owner 是 Identity、Space、Work、Machine 和 Run；Pi/Codex 是具体 adapter；
+- 当前已经确认的 owner 是 Identity、Space、Conversation、Work、Machine 和 Run；Pi/Codex 是具体 adapter；
 - 不为同一概念创造缩写、别名或“更技术”的第二套名字；
 - Evidence、Completion、Observation、Draft 等行为角色不能仅凭用途获得 ID、表、package 或 API；
 - ID 在代码中保留 owner：`workID`、`runID`，不要只写 `id`；

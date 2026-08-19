@@ -129,10 +129,13 @@ func TestBrowserCreatesDurableWorkWithoutStoringBearer(t *testing.T) {
 			"CARRY_WEB_URL=" + webURL,
 			"CARRY_MEMBER_TOKEN=" + bootstrap.UserToken,
 		},
-		"pnpm", "--dir", "apps/web", "test:product",
+		"pnpm", "--dir", "apps/web", "exec", "playwright", "test", "e2e/first-durable-work.spec.ts",
 	)
 	if err != nil {
 		t.Fatalf("run browser product journey: %v\n%s", err, output)
+	}
+	if !strings.Contains(output, "1 passed") {
+		t.Fatalf("durable Work Playwright spec did not execute:\n%s", output)
 	}
 }
 

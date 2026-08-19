@@ -128,7 +128,7 @@ Milestone:
 
 ```text
 M0 Foundation       Nodes 0–1         complete
-M1 Native core      Nodes 2–4         active
+M1 Native core      Nodes 2–4         complete
 M2 Responsibility   Nodes 5–7
 M3 Connections      Nodes 8–11
 M4 V1 closure       Node 12
@@ -308,22 +308,56 @@ active Attempt lease expires
 - recovery 前后 fixed Work context 完全相同；
 - 没有 provider/runtime/session state 进入 core。
 
-## 12. Node 4：Private Conversation
+## 12. Node 4：Private Conversation — complete
 
 ### 用户结果
 
-成员可以私聊 Carry；普通问题得到回复，明确委托幂等创建 Work，共享成员看不到私人原文。
+成员在 Web 中选择一个 Space 后私聊 Carry。普通问题得到一条私人回复；清晰的自然语言委托直接、幂等创建一份共享 Work，并在私人回复中提供入口。同一 Space 的其他成员看不到私人原文。
 
 ### 进入原则
 
-只有这条 journey 证明独立隐私、参与者和 message lifecycle 后才建立 Conversation owner。不要建立通用 Message package或 Work Offer。
+这条 journey 已经证明独立隐私、参与者和 message lifecycle，因此建立 Conversation owner。第一条旅程每个 `(Space, member)` 只有一个内部 Conversation，Carry 是隐含参与者；不建立通用 Message package、Work Offer、Question 或多个可命名 Conversation。
+
+Space-enrolled Machine 是该 Space 的受信 Carry 执行基础设施。它只能通过 exact private reply claim、current fence 和 unexpired database-time lease 读取一段有界 fixed context；没有通用 Machine Conversation list/read API。要求连 Space 管理者控制的 Host 都无法读取私人内容，需要另一条成员专属或端到端加密旅程。
+
+当前每个 Conversation 同时只接受一个尚未回复的 member turn。相同 request replay 返回原消息；不同新消息在 Carry 回复前冲突。queued follow-up、reply graph、streaming 和成员 CLI chat 不进入本 Node。
+
+Agent 只解释自然语言并返回严格 `reply` 与可空 `delegation_goal`。actor、creator、owner、Space、idempotency 和 authority 只能来自 authenticated source member、当前 Membership 和 PostgreSQL；清晰委托不增加统一确认步骤，含糊内容只得到私人澄清。
+
+### 固定界限
+
+- member/reply text 各最多 16 KiB UTF-8；
+- private Agent context 最多 32 条完整消息且最多 256 KiB；
+- User API 每页最多 50 条，支持 newest initial page 与 before/after cursor；
+- Web 只持久保存随机 pending request key，不保存私人文本或 deterministic text digest；
+- Work 不保存 Conversation/message identity、private digest 或可反向读取的 source relation；
+- Run 仍只拥有 Work 推进，不泛化成 Work/Conversation union；
+- 不建立 deletion/retention、summary、provider Session 或 native resume。
+
+### 实现顺序
+
+1. private Conversation admission/read：Membership、连续顺序、请求幂等、单一 outstanding turn、分页与 same-Space negative privacy；
+2. private reply execution：Machine claim/renew/recovery、fixed context、Pi/Codex strict reply parity、reply-once commit；
+3. explicit delegation：reply 与至多一份 Work 在同一事务提交，source member 成为 creator/owner，只保存 private-side Work link；
+4. Web journey：pending-key reconciliation、polling、disabled composer、Work link、reload 与 fail-closed sign-out。
 
 ### 关闭证据
 
-- 同一 execution retry 不产生第二条回复；
-- 同一 source message 返回同一 Work；
-- Agent 不能伪造 actor、owner 或权限；
-- Work 查询无法读取私人原文。
+- 同一 member request key 与文本返回同一消息，不同文本冲突；
+- pending reply 存在时不同 POST 冲突，消息顺序在并发下连续；
+- same-Space member、former member、cross-Space caller 和 Work query 都不能读取私人原文；
+- private reply 并发 claim 一个 winner，recovery 增加 fence 并返回 byte-equivalent fixed context；
+- stale、expired、revoked 或 cross-Space Machine 不能 renew/首次 commit；
+- first commit 需要 live lease；同 Machine/fence/output digest 的 completed replay 在 Machine 与 member 仍 active 时返回原 reply/Work，不需要旧 lease且不产生第二后果；
+- 普通问题不创建 Work；同一明确 source message 的并发/retry commit 只创建一个 Work；
+- member removal before commit 同时阻止 reply 与 Work；
+- Agent 不能伪造 actor、owner、Space、idempotency 或权限；unknown fields fail closed；
+- Work API、Run context、日志与 generated User protocol 无私人 source relation/text；
+- initial transcript 与 polling 有界，browser storage 无私人文本或其 deterministic digest；
+- sign-out 同时隐藏 Conversation 与 Work；
+- Pi 与 Codex 通过相同 private-reply conformance；
+- real PostgreSQL focused tests、`make check-go`、`make check-web`、`make check-product` 和 `make check` 通过；
+- M1 boundary 三门独立 review 无 blocker。
 
 ## 13. Node 5：结果检查与 Needs You
 

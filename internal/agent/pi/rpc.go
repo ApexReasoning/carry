@@ -45,67 +45,67 @@ type resultState struct {
 	finalMessage   assistantMessage
 }
 
-func awaitDraft(ctx context.Context, stdout io.Reader) (host.UnderstandingUpdate, error) {
+func awaitText(ctx context.Context, stdout io.Reader) ([]byte, error) {
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 64*1024), maxProtocolLineBytes)
 	var state resultState
 	for scanner.Scan() {
 		var record envelope
 		if err := json.Unmarshal(scanner.Bytes(), &record); err != nil {
-			return host.UnderstandingUpdate{}, fmt.Errorf("%w: decode Pi RPC record", host.ErrAgentOutcomeLost)
+			return nil, fmt.Errorf("%w: decode Pi RPC record", host.ErrAgentOutcomeLost)
 		}
-		draft, settled, err := state.accept(record)
+		text, settled, err := state.accept(record)
 		if err != nil {
-			return host.UnderstandingUpdate{}, fmt.Errorf("read Pi result: %w", err)
+			return nil, fmt.Errorf("read Pi result: %w", err)
 		}
 		if settled {
-			return draft, nil
+			return text, nil
 		}
 		if ctx.Err() != nil {
-			return host.UnderstandingUpdate{}, fmt.Errorf(
+			return nil, fmt.Errorf(
 				"%w: Pi execution context ended: %v", host.ErrAgentOutcomeLost, ctx.Err(),
 			)
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return host.UnderstandingUpdate{}, fmt.Errorf("%w: read Pi RPC: %v", host.ErrAgentOutcomeLost, err)
+		return nil, fmt.Errorf("%w: read Pi RPC: %v", host.ErrAgentOutcomeLost, err)
 	}
-	return host.UnderstandingUpdate{}, fmt.Errorf("%w: Pi RPC ended before agent_settled", host.ErrAgentOutcomeLost)
+	return nil, fmt.Errorf("%w: Pi RPC ended before agent_settled", host.ErrAgentOutcomeLost)
 }
 
-func (state *resultState) accept(record envelope) (host.UnderstandingUpdate, bool, error) {
+func (state *resultState) accept(record envelope) ([]byte, bool, error) {
 	switch record.Type {
 	case "response":
 		if record.ID != promptRequestID || record.Command != "prompt" {
-			return host.UnderstandingUpdate{}, false, nil
+			return nil, false, nil
 		}
 		if !record.Success {
-			return host.UnderstandingUpdate{}, false, fmt.Errorf("%w: Pi rejected prompt: %s", host.ErrAgentFailed, record.Error)
+			return nil, false, fmt.Errorf("%w: Pi rejected prompt: %s", host.ErrAgentFailed, record.Error)
 		}
 		state.promptAccepted = true
 	case "message_end":
 		var message assistantMessage
 		if err := json.Unmarshal(record.Message, &message); err != nil {
-			return host.UnderstandingUpdate{}, false, fmt.Errorf("%w: decode Pi assistant message", host.ErrAgentOutcomeLost)
+			return nil, false, fmt.Errorf("%w: decode Pi assistant message", host.ErrAgentOutcomeLost)
 		}
 		if message.Role == "assistant" {
 			state.finalMessage = message
 		}
 	case "extension_error":
-		return host.UnderstandingUpdate{}, false, fmt.Errorf("%w: Pi extension error", host.ErrAgentFailed)
+		return nil, false, fmt.Errorf("%w: Pi extension error", host.ErrAgentFailed)
 	case "agent_settled":
-		draft, err := state.draft()
-		return draft, true, err
+		text, err := state.text()
+		return text, true, err
 	}
-	return host.UnderstandingUpdate{}, false, nil
+	return nil, false, nil
 }
 
-func (state resultState) draft() (host.UnderstandingUpdate, error) {
+func (state resultState) text() ([]byte, error) {
 	if !state.promptAccepted || state.finalMessage.Role != "assistant" {
-		return host.UnderstandingUpdate{}, fmt.Errorf("%w: Pi settled without an accepted prompt and final message", host.ErrAgentFailed)
+		return nil, fmt.Errorf("%w: Pi settled without an accepted prompt and final message", host.ErrAgentFailed)
 	}
 	if state.finalMessage.StopReason != "stop" {
-		return host.UnderstandingUpdate{}, fmt.Errorf("%w: Pi stop reason %q", host.ErrAgentFailed, state.finalMessage.StopReason)
+		return nil, fmt.Errorf("%w: Pi stop reason %q", host.ErrAgentFailed, state.finalMessage.StopReason)
 	}
 	var text strings.Builder
 	for _, content := range state.finalMessage.Content {
@@ -113,5 +113,5 @@ func (state resultState) draft() (host.UnderstandingUpdate, error) {
 			text.WriteString(content.Text)
 		}
 	}
-	return host.ParseUnderstandingUpdate([]byte(text.String()))
+	return []byte(text.String()), nil
 }

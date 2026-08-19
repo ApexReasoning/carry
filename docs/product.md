@@ -123,6 +123,8 @@ Space 是团队边界，包含成员、团队权限、共同 Work、已确认的
 
 Space 不是文件夹。它决定哪些人和能力可以共同参与一份责任。
 
+Space-enrolled Machine 是该 Space 的受信 Carry 执行基础设施，不是普通成员。它可以在准确、短期且可撤销的执行 authority 下处理完成当前责任所必需的 Space 内容，包括成员提交给 Carry 的有界私人 Conversation 上下文；enrollment 不授予通用内容浏览能力，也不能让 Machine 把私人内容写入共享 Work、日志或 provider Session。
+
 成员身份、浏览器会话、外部身份和执行机器身份必须分开。通过 Slack 或 Lark 验证的外部用户，不会因此自动成为 Space 成员。
 
 ## Carry
@@ -235,9 +237,13 @@ Needs You 不显示 Agent 重试、Runtime 状态、lease、fence 或技术恢�
 
 成员可以在原生界面或已连接渠道中私下与 Carry 交谈。
 
-私人内容默认私有。明确委托可以形成共享 Work，但共享 Work 只能保存成员授权后形成的新目标和新消息，不能通过来源关系读取私人原文。
+第一条原生旅程在每个成员与 Space 之间维持一段私人 Conversation。Carry 是隐含参与者；成员不需要创建、命名或管理 Conversation。为保持清楚因果，当前一次只接受一个尚未得到 Carry 回复的成员 turn。
 
-Conversation 只有在第一条真实私人对话旅程实现时才成为持久 owner；在此之前不预建空 package 或协议。
+私人内容默认只对该成员可见。同一 Space 的其他成员不能读取；Space-enrolled Machine 只能在 exact reply claim、current fence 和 unexpired lease 下读取生成当前回复所需的有界上下文，不能通用查询私人历史。
+
+明确的自然语言委托可以直接形成共享 Work，不增加 Work Offer 或强制确认步骤。Agent 只解释成员表达，不能提供 actor、owner、Space 或 authority；PostgreSQL 从已认证成员、当前 Membership 和准确 source message 建立这些事实。共享 Work 只能保存新形成、成员已授权的目标和新消息，不能保存私人原文、可反向读取的 source relation 或私人 transcript digest。
+
+普通问题只形成私人回复。清晰委托形成私人回复和至多一份共享 Work；同一 source message 的执行或网络重放必须返回同一回复和 Work。
 
 ## 外部世界
 
@@ -303,11 +309,13 @@ Carry 的权限来自真实关系：
 
 ## 隐私与保留
 
-- 私人消息默认私有；
+- 私人消息默认只对准确成员可见，不能从共享 Work 反向读取；
+- 私人文本或可猜测的 deterministic digest 不进入 browser storage、URL、日志或长期 provider Session；
+- Space Machine 对私人上下文的读取必须绑定 exact claim、fence、lease 和有界输入，不能获得通用 transcript capability；
 - 外部 thread 关联是可撤销的通信同意，不是 Membership；
 - provider-native payload 不是长期产品模型；
 - 临时下载 URL 和 credential 不进入长期 Work 或 Agent prompt；
-- 删除必须区分停止未来访问、删除可删除内容和保留必要审计事实。
+- 删除必须区分停止未来访问、删除可删除内容和保留必要审计事实；第一条 Conversation journey 不提前建立删除或 retention lifecycle。
 
 ## 失败与恢复
 

@@ -18,6 +18,9 @@ import type {
   CreateWorkData,
   CreateWorkErrors,
   CreateWorkResponses,
+  ListConversationMessagesData,
+  ListConversationMessagesErrors,
+  ListConversationMessagesResponses,
   ListWorksData,
   ListWorksErrors,
   ListWorksResponses,
@@ -33,16 +36,21 @@ import type {
   RevokeCurrentBrowserSessionData,
   RevokeCurrentBrowserSessionErrors,
   RevokeCurrentBrowserSessionResponses,
+  SendConversationMessageData,
+  SendConversationMessageErrors,
+  SendConversationMessageResponses,
 } from "./types.gen";
 import {
   zAppendWorkMessageResponse,
   zCreateBrowserSessionResponse,
   zCreateWorkResponse,
+  zListConversationMessagesResponse,
   zListWorksResponse,
   zLoadCurrentMemberResponse,
   zLoadWorkResponse,
   zRetryWorkResponse,
   zRevokeCurrentBrowserSessionResponse,
+  zSendConversationMessageResponse,
 } from "./zod.gen";
 
 export type Options<
@@ -133,6 +141,62 @@ export const loadCurrentMember = <ThrowOnError extends boolean = false>(
     ],
     url: "/v1/me",
     ...options,
+  });
+
+export const listConversationMessages = <ThrowOnError extends boolean = false>(
+  options: Options<ListConversationMessagesData, ThrowOnError>,
+): RequestResult<
+  ListConversationMessagesResponses,
+  ListConversationMessagesErrors,
+  ThrowOnError
+> =>
+  (options.client ?? client).get<
+    ListConversationMessagesResponses,
+    ListConversationMessagesErrors,
+    ThrowOnError
+  >({
+    responseValidator: async (data) =>
+      await zListConversationMessagesResponse.parseAsync(data),
+    security: [
+      { scheme: "bearer", type: "http" },
+      {
+        in: "cookie",
+        name: "__Host-carry_session",
+        type: "apiKey",
+      },
+    ],
+    url: "/v1/spaces/{spaceID}/conversation/messages",
+    ...options,
+  });
+
+export const sendConversationMessage = <ThrowOnError extends boolean = false>(
+  options: Options<SendConversationMessageData, ThrowOnError>,
+): RequestResult<
+  SendConversationMessageResponses,
+  SendConversationMessageErrors,
+  ThrowOnError
+> =>
+  (options.client ?? client).post<
+    SendConversationMessageResponses,
+    SendConversationMessageErrors,
+    ThrowOnError
+  >({
+    responseValidator: async (data) =>
+      await zSendConversationMessageResponse.parseAsync(data),
+    security: [
+      { scheme: "bearer", type: "http" },
+      {
+        in: "cookie",
+        name: "__Host-carry_session",
+        type: "apiKey",
+      },
+    ],
+    url: "/v1/spaces/{spaceID}/conversation/messages",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
   });
 
 export const listWorks = <ThrowOnError extends boolean = false>(

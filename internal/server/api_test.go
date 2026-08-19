@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ApexReasoning/carry/internal/conversation"
 	"github.com/ApexReasoning/carry/internal/host"
 	"github.com/ApexReasoning/carry/internal/identity"
 	"github.com/ApexReasoning/carry/internal/run"
@@ -155,12 +156,13 @@ func testAPI(
 	t.Helper()
 	member, err := NewMemberRoutes(
 		tokens, unavailableBrowserSessions{}, emptyMemberships{}, machines,
+		unavailableConversationCommands{}, unavailableConversationQueries{},
 		unavailableWorkCommands{}, unavailableWorkQueries{}, authority,
 	)
 	if err != nil {
 		t.Fatalf("compose member routes: %v", err)
 	}
-	machine, err := NewMachineRoutes(runs)
+	machine, err := NewMachineRoutes(runs, unavailableMachineConversations{})
 	if err != nil {
 		t.Fatalf("compose Machine routes: %v", err)
 	}
@@ -299,6 +301,32 @@ func (store *recordingMachineRuns) CommitWorkUnderstanding(_ context.Context, co
 func (store *recordingMachineRuns) FinishUnresolvedAttempt(_ context.Context, command run.FinishCommand) error {
 	store.finish = command
 	return nil
+}
+
+type unavailableMachineConversations struct{}
+
+func (unavailableMachineConversations) ClaimConversationReply(context.Context, string) (conversation.ReplyClaim, error) {
+	return conversation.ReplyClaim{}, conversation.ErrNoReplyAvailable
+}
+
+func (unavailableMachineConversations) RenewConversationReply(context.Context, conversation.RenewReplyCommand) (time.Time, error) {
+	return time.Time{}, conversation.ErrStaleReplyClaim
+}
+
+func (unavailableMachineConversations) CommitConversationReply(context.Context, conversation.CommitReplyCommand) (conversation.CommitReplyResult, error) {
+	return conversation.CommitReplyResult{}, conversation.ErrStaleReplyClaim
+}
+
+type unavailableConversationCommands struct{}
+
+func (unavailableConversationCommands) SendConversationMessage(context.Context, conversation.SendCommand) (conversation.Message, error) {
+	return conversation.Message{}, errors.New("not implemented")
+}
+
+type unavailableConversationQueries struct{}
+
+func (unavailableConversationQueries) ListConversationMessages(context.Context, conversation.ListCommand) ([]conversation.Message, error) {
+	return nil, errors.New("not implemented")
 }
 
 type unavailableWorkCommands struct{}

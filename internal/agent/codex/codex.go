@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ApexReasoning/carry/internal/conversation"
 	"github.com/ApexReasoning/carry/internal/host"
 )
 
@@ -67,9 +68,29 @@ func (adapter *Adapter) Execute(ctx context.Context, request host.ExecutionReque
 	if err != nil {
 		return host.UnderstandingUpdate{}, err
 	}
+	text, err := adapter.generate(ctx, prompt, host.UnderstandingOutputSchema, true)
+	if err != nil {
+		return host.UnderstandingUpdate{}, err
+	}
+	return host.ParseUnderstandingUpdate(text)
+}
+
+func (adapter *Adapter) Reply(ctx context.Context, request host.ConversationReplyRequest) (conversation.ReplyCandidate, error) {
+	prompt, err := request.Prompt()
+	if err != nil {
+		return conversation.ReplyCandidate{}, err
+	}
+	text, err := adapter.generate(ctx, prompt, host.ConversationReplyOutputSchema, false)
+	if err != nil {
+		return conversation.ReplyCandidate{}, host.SanitizePrivateAgentError(err)
+	}
+	return host.ParseConversationReply(text)
+}
+
+func (adapter *Adapter) generate(ctx context.Context, prompt string, outputSchema []byte, includeStderr bool) ([]byte, error) {
 	attemptDirectory, err := os.MkdirTemp("", "carry-codex-attempt-")
 	if err != nil {
-		return host.UnderstandingUpdate{}, fmt.Errorf("create Codex Attempt directory: %w", err)
+		return nil, fmt.Errorf("create Codex Attempt directory: %w", err)
 	}
 	defer func() { _ = os.RemoveAll(attemptDirectory) }()
 
@@ -78,38 +99,38 @@ func (adapter *Adapter) Execute(ctx context.Context, request host.ExecutionReque
 	command.Dir = attemptDirectory
 	stdin, err := command.StdinPipe()
 	if err != nil {
-		return host.UnderstandingUpdate{}, fmt.Errorf("open Codex stdin: %w", err)
+		return nil, fmt.Errorf("open Codex stdin: %w", err)
 	}
 	stdout, err := command.StdoutPipe()
 	if err != nil {
-		return host.UnderstandingUpdate{}, fmt.Errorf("open Codex stdout: %w", err)
+		return nil, fmt.Errorf("open Codex stdout: %w", err)
 	}
 	var stderr boundedBuffer
 	command.Stderr = &stderr
 	if err := command.Start(); err != nil {
-		return host.UnderstandingUpdate{}, fmt.Errorf("%w: start Codex app-server: %v", host.ErrAgentUnavailable, err)
+		return nil, fmt.Errorf("%w: start Codex app-server: %v", host.ErrAgentUnavailable, err)
 	}
 	processDone := make(chan error, 1)
 	go func() { processDone <- command.Wait() }()
 
 	client := newAppServerClient(stdin, stdout)
-	draft, resultErr := client.execute(ctx, attemptDirectory, prompt)
+	text, resultErr := client.execute(ctx, attemptDirectory, prompt, outputSchema)
 	_ = stdin.Close()
 	if resultErr == nil {
 		if err := waitForExit(command, processDone); err != nil {
-			return host.UnderstandingUpdate{}, fmt.Errorf("close Codex app-server: %w", err)
+			return nil, fmt.Errorf("close Codex app-server: %w", err)
 		}
-		return draft, nil
+		return text, nil
 	}
 	_ = command.Process.Kill()
 	<-processDone
 	if ctx.Err() != nil {
-		return host.UnderstandingUpdate{}, host.ErrAgentOutcomeLost
+		return nil, host.ErrAgentOutcomeLost
 	}
-	if stderr.String() != "" {
-		return host.UnderstandingUpdate{}, fmt.Errorf("%w: %s", resultErr, stderr.String())
+	if includeStderr && stderr.String() != "" {
+		return nil, fmt.Errorf("%w: %s", resultErr, stderr.String())
 	}
-	return host.UnderstandingUpdate{}, resultErr
+	return nil, resultErr
 }
 
 func appServerArguments() []string {

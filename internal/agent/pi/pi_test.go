@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ApexReasoning/carry/internal/conversation"
 	"github.com/ApexReasoning/carry/internal/host"
 )
 
@@ -45,6 +46,59 @@ printf '%s\n' \
 		if !strings.Contains(string(arguments), required) {
 			t.Fatalf("Pi arguments do not contain %q: %s", required, arguments)
 		}
+	}
+}
+
+func TestAdapterRepliesToPrivateConversationAfterPiSettles(t *testing.T) {
+	binary := writePiFixture(t, `
+IFS= read -r prompt
+printf '%s\n' \
+  '{"id":"carry-prompt","type":"response","command":"prompt","success":true}' \
+  '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"{\"reply\":\"Here are the private options.\",\"delegation_goal\":null}"}],"stopReason":"stop"}}' \
+  '{"type":"agent_settled"}'
+`)
+	usePiFixture(t, binary)
+	candidate, err := New().Reply(context.Background(), host.ConversationReplyRequest{
+		Messages: []conversation.ContextMessage{{Author: conversation.AuthorMember, Text: "What are my options?"}},
+	})
+	if err != nil {
+		t.Fatalf("reply through Pi RPC: %v", err)
+	}
+	if candidate.Reply != "Here are the private options." || candidate.DelegationGoal != nil {
+		t.Fatalf("Pi private candidate = %#v", candidate)
+	}
+}
+
+func TestAdapterDoesNotExposePrivateConversationThroughPiStderr(t *testing.T) {
+	binary := writePiFixture(t, `
+printf '%s\n' 'PRIVATE CONVERSATION MUST NOT LEAK' >&2
+IFS= read -r prompt
+printf '%s\n' '{"id":"carry-prompt","type":"response","command":"prompt","success":false,"error":"generation failed"}'
+`)
+	usePiFixture(t, binary)
+	_, err := New().Reply(context.Background(), host.ConversationReplyRequest{
+		Messages: []conversation.ContextMessage{{Author: conversation.AuthorMember, Text: "Private question"}},
+	})
+	if err == nil || strings.Contains(err.Error(), "PRIVATE CONVERSATION MUST NOT LEAK") {
+		t.Fatalf("Pi private failure exposed stderr: %v", err)
+	}
+}
+
+func TestAdapterSanitizesPrivatePiProtocolError(t *testing.T) {
+	const privateSentinel = "PRIVATE PI PROTOCOL ERROR MUST NOT LEAK"
+	binary := writePiFixture(t, `
+IFS= read -r prompt
+printf '%s\n' '{"id":"carry-prompt","type":"response","command":"prompt","success":false,"error":"PRIVATE PI PROTOCOL ERROR MUST NOT LEAK"}'
+`)
+	usePiFixture(t, binary)
+	_, err := New().Reply(context.Background(), host.ConversationReplyRequest{
+		Messages: []conversation.ContextMessage{{Author: conversation.AuthorMember, Text: "Private question"}},
+	})
+	if !errors.Is(err, host.ErrAgentFailed) {
+		t.Fatalf("Pi private protocol error category = %v", err)
+	}
+	if strings.Contains(err.Error(), privateSentinel) {
+		t.Fatalf("Pi private failure exposed protocol error: %v", err)
 	}
 }
 

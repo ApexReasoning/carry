@@ -1,3 +1,4 @@
+import { ConversationPanel } from "./features/conversation/conversation-panel";
 import { MemberEntry } from "./features/member-session/member-entry";
 import { useMemberSession } from "./features/member-session/use-member-session";
 import { CreateWorkForm } from "./features/works/create-work-form";
@@ -40,6 +41,9 @@ export function App() {
       <main className="center-state">
         <p className="brand-mark">
           Carry<span className="brand-dot">.</span>
+        </p>
+        <p className="center-state-copy">
+          Your private conversation is hidden on this browser.
         </p>
         <p className="center-state-copy">
           Your Work is hidden on this browser.
@@ -138,27 +142,43 @@ export function App() {
         ) : null}
         {board.spaceID ? (
           <>
-            <CreateWorkForm busy={busy} onCreate={board.addWork} />
-            <div className="work-grid">
-              <WorkList
-                works={board.works}
-                selectedWorkID={board.details?.work.work_id ?? null}
-                busy={busy}
-                onSelect={(workID) => void board.selectWork(workID)}
-              />
-              <WorkDetail
-                key={board.details?.work.work_id ?? "no-work-selected"}
-                details={board.details}
-                busy={busy}
-                currentMemberID={session.member.user_id}
-                onMessage={board.addMessage}
-                onRetry={board.retryCurrentWork}
-              />
-            </div>
+            <ConversationPanel
+              key={`${session.member.user_id}:${board.spaceID}`}
+              memberID={session.member.user_id}
+              spaceID={board.spaceID}
+              workBusy={board.busy}
+              onOpenWork={board.selectWork}
+            />
+            <section
+              className="shared-work"
+              aria-labelledby="shared-work-title"
+            >
+              <div className="shared-work-heading">
+                <p className="eyebrow">Visible to the Space</p>
+                <h2 id="shared-work-title">Shared Work</h2>
+              </div>
+              <CreateWorkForm busy={busy} onCreate={board.addWork} />
+              <div className="work-grid">
+                <WorkList
+                  works={board.works}
+                  selectedWorkID={board.details?.work.work_id ?? null}
+                  busy={busy}
+                  onSelect={(workID) => void board.selectWork(workID)}
+                />
+                <WorkDetail
+                  key={board.details?.work.work_id ?? "no-work-selected"}
+                  details={board.details}
+                  busy={busy}
+                  currentMemberID={session.member.user_id}
+                  onMessage={board.addMessage}
+                  onRetry={board.retryCurrentWork}
+                />
+              </div>
+            </section>
           </>
         ) : session.member.spaces.length > 1 ? (
           <p className="empty-panel">
-            Choose a Space before opening shared Work.
+            Choose a Space before talking to Carry or opening shared Work.
           </p>
         ) : (
           <p className="empty-panel">
