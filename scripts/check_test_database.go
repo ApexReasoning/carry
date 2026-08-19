@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -8,18 +9,64 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 var testDatabaseName = regexp.MustCompile(`^carry_test_[0-9]{14}_[0-9a-f]{12}_postgres$`)
 
 func main() {
-	if len(os.Args) != 2 {
-		fmt.Fprintln(os.Stderr, "usage: go run ./scripts/check_test_database.go DATABASE_URL")
+	if len(os.Args) != 2 && (len(os.Args) != 4 || os.Args[1] != "--wait") {
+		fmt.Fprintln(os.Stderr, "usage: go run ./scripts/check_test_database.go [--wait DURATION] DATABASE_URL")
 		os.Exit(2)
 	}
-	if err := validateTestDatabaseURL(os.Args[1]); err != nil {
+
+	databaseURL := os.Args[len(os.Args)-1]
+	if err := validateTestDatabaseURL(databaseURL); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
+	}
+	if len(os.Args) == 2 {
+		return
+	}
+
+	wait, err := time.ParseDuration(os.Args[2])
+	if err != nil || wait <= 0 {
+		fmt.Fprintln(os.Stderr, "PostgreSQL wait duration must be positive")
+		os.Exit(2)
+	}
+	if err := waitForTestDatabase(context.Background(), databaseURL, wait); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
+
+func waitForTestDatabase(parent context.Context, databaseURL string, wait time.Duration) error {
+	ctx, cancel := context.WithTimeout(parent, wait)
+	defer cancel()
+
+	var lastErr error
+	for {
+		attemptCtx, cancelAttempt := context.WithTimeout(ctx, 2*time.Second)
+		connection, err := pgx.Connect(attemptCtx, databaseURL)
+		if err == nil {
+			err = connection.Ping(attemptCtx)
+			if closeErr := connection.Close(attemptCtx); err == nil {
+				err = closeErr
+			}
+		}
+		cancelAttempt()
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("PostgreSQL test database did not become reachable within %s: %w", wait, lastErr)
+		case <-time.After(250 * time.Millisecond):
+		}
 	}
 }
 
