@@ -76,6 +76,8 @@ carry host status
 
 因此“通过 CLI 注册 Agent”保持成立，但更准确地说，是 CLI 完成 Machine enrollment，Host 再报告本机可用 Runtime。Pi/Codex 本身不注册成成员，也不直接连接服务端。
 
+Runtime observation 只记录 Machine 上的物理探测结果，不能进入 Work、Run admission 或 claim eligibility。具体 Attempt 使用哪个 adapter，是 Host 在获得通用 claim 后的执行事实，不是 Work 类型或服务端 provider 路由。
+
 同一个发布物不代表同一个 principal：成员 token 与 Machine key 分开保存，Host 进程不能借用成员权限。
 
 Host 负责调用 Pi 或 Codex CLI、准备临时目录、运行当前已选择的本地 MCP transport、诊断进程并回传结果。它不拥有 Work 权限，最终授权判断始终在服务端完成。
@@ -690,9 +692,9 @@ workview
 
 架构必须通过真实旅程证明。
 
-### 非 Git Work
+### 不请求 repository capability 的 Attempt
 
-成员创建研究或持续观察 Work，Carry 记录新输入、产生 Result、等待 Timer，并在 Pi 与 Codex 之间切换执行。
+成员创建 Work，Carry 记录新输入、产生 Result、等待 Timer，并在 Pi 与 Codex 之间切换执行。这个旅程中的 Attempt 不请求 repository capability；该事实不进入 Work identity、schema、admission、continuity 或 lifecycle。
 
 ### 私人消息创建 Work
 

@@ -126,7 +126,7 @@ Work 也可以是持续的：
 - 上线后观察指标并复盘；
 - 定期检查关键运营状态。
 
-同一个 Work 可以包含阶段结果、等待、未来继续和周期观察。因此 Carry 不区分“一次性 Work”“周期 Work”“研究 Work”或“开发 Work”。
+同一个 Work 可以包含阶段结果、等待、未来继续和周期观察。因此 Carry 不区分“一次性 Work”“周期 Work”“研究 Work”或“开发 Work”，也不按 Git、软件、内容、provider、model、Host 或 Runtime 分类。推进过程中需要 repository 等能力时，只授权给当前明确的执行；该能力不改变 Work，也不参与 admission 或 continuity。
 
 ## Work 的创建
 

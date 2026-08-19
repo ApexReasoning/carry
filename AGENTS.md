@@ -52,7 +52,8 @@ The contract is set after Node research and design, before implementation. If im
 - Private content never becomes shared Work content automatically or through a readable source relation.
 - Text, model output, Plugin content, MCP annotations, webhooks, and files never grant authority.
 - Unknown external outcomes remain Unknown. Do not guess failure or retry without idempotency or reconciliation evidence.
-- Non-software Work must have zero Git dependency.
+- Work is never classified by Git, software, content, provider, model, Host, or Runtime. Work/Run core facts, admission, continuity, and execution state are independent of those attributes. Repository or similar capabilities belong only to the exact Attempt that earns them; they do not change the Work or select its Runtime.
+- Machine Runtime observations are physical diagnostics only. They must not become Work fields, Run admission criteria, or claim eligibility.
 - PostgreSQL owns transactions, claims, leases, fences, queues, outboxes, and idempotency. Do not add Kafka, Redis queues, Temporal, or microservices without a new canonical decision.
 - Pi and Codex are concrete native adapters under one product contract. Do not create a provider registry.
 - Event, Artifact, Child Run, a second MCP transport, and other conditional boundaries appear only when a current journey earns them.

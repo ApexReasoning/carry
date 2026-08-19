@@ -170,7 +170,7 @@ Node 方案同时列出本次允许新增或修改的目录。实现若需要一
 - 系统是否只类型化权限、时间、因果、物理执行和外部后果？
 - 是否错误地增加 Plan、Step、Role、Router、Workflow 或工具选择状态机？
 - Pi 与 Codex 是否都能在同一个 Work 合同下自然工作？
-- 非软件 Work 是否仍然完全不需要 Git？
+- 是否错误地把 Git、软件、内容或 provider 变成 Work 分类，而不是由当前 Attempt 获得窄 capability？
 - Prompt 是否被用来代替真实 capability 或事务？
 
 发现过度设计时先删设计，不带着问题进入开发。
@@ -264,7 +264,7 @@ Split
 | --- | --- | --- |
 | 0. Foundation 与 Host enrollment | 两个二进制可运行，成员可以注册并启动 Host | 1–2 天 |
 | 1. First durable Work | 成员可以创建、查看和补充一份持久 Work | 1–2 天 |
-| 2. First native execution | 一个真实 Runtime 可以推进非 Git Work | 1–2 天 |
+| 2. First native execution | 一个真实 Runtime 可以推进 Work | 1–2 天 |
 | 3. Runtime parity 与 recovery | 第二个 Runtime 通过同一合同并可安全接力 | 1–2 天 |
 | 4. Private Conversation | 私聊可以回答问题或直接形成 Work，且不泄漏原文 | 1–2 天 |
 | 5. Result 与 Needs You | 成员可以验收结果并只看到必须处理的事项 | 1 天 |
@@ -387,7 +387,7 @@ Split
 
 ### 用户结果
 
-成员要求 Carry 推进一份非 Git Work，一个真实 Runtime 可以领取并更新 Work 当前理解。
+成员要求 Carry 推进一份 Work，一个真实 Runtime 可以领取并更新 Work 当前理解。这次路径不需要任何仓库能力；这不是 Work 类型，admission、continuity 和 execution state 不得按 Git、软件、内容或 provider 分类。
 
 ### 进入时评估的候选 modules
 
@@ -414,7 +414,7 @@ Split
 2. Run claim、attempt fence 和 late commit rejection；
 3. Agent API context/read/revision commit；
 4. 第一个 Runtime 的最小 Start/Send/Diagnose/Close；
-5. 一个非 Git Work 的当前理解展示。
+5. Work 的当前理解展示。
 
 ### 明确不做
 
@@ -429,10 +429,10 @@ Split
 
 ### 关闭证据
 
-- 真实 Runtime 完成一条非 Git Work journey；
+- 真实 Runtime 完成一条 Work journey；
 - 同一 Work 只有一个 coordinator 和 writer；
 - stale writer 与 late attempt commit 被拒绝；
-- 非软件 journey 中没有 Git 字段或命令。
+- 当前 Attempt 不请求 repository capability，且该事实没有进入 Work schema、admission 或 lifecycle。
 
 ## 13. Node 3：Runtime parity 与 recovery
 
@@ -861,7 +861,7 @@ Carry 可以提出一个准确的真实外部写操作，由正确成员批准�
 
 ### 用户结果
 
-一个团队可以通过 Web、CLI、Lark 或 Slack 把非 Git Work 交给 Carry，由 Pi/Codex 和一个 Plugin 持续推进，并安全处理一个外部 Action。
+一个团队可以通过 Web、CLI、Lark 或 Slack 把 Work 交给 Carry，由 Pi/Codex 和一个 Plugin 持续推进，并安全处理一个外部 Action。
 
 ### 进入时评估的候选 modules
 
@@ -880,7 +880,7 @@ Carry 可以提出一个准确的真实外部写操作，由正确成员批准�
 
 1. 从空数据库执行全部 migration；
 2. 如果已经存在真实部署的 V1 candidate，再验证其 upgrade；没有已承诺版本时不制造兼容工作；
-3. 完整非 Git product journey；
+3. 完整 product journey，其中当前 Attempt 不请求 repository capability；
 4. Pi/Codex、Lark/Slack、Plugin/Action canary；
 5. Web accessibility 和关键浏览器路径；
 6. release binaries/image/Web assets；

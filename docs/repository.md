@@ -384,7 +384,7 @@ make check-product
 
 该 target 启动 PostgreSQL、carry-server 和必要 Web runtime，运行少量最高价值浏览器旅程：
 
-- 创建并推进非 Git Work；
+- 创建并推进 Work，且当前 Attempt 不请求 repository capability；
 - 私人消息创建 Work 且不泄漏原文；
 - 一条渠道回复的 Delivery；
 - 一个 Pi/Codex 最小 conformance journey。

@@ -4,27 +4,16 @@ package postgres
 
 import (
 	"context"
-	"os"
 	"testing"
+	"time"
+
+	"github.com/ApexReasoning/carry/internal/work"
 )
 
-func TestMigrateCreatesNodeZeroFacts(t *testing.T) {
-	databaseURL := os.Getenv("CARRY_TEST_DATABASE_URL")
-	if databaseURL == "" {
-		t.Fatal("CARRY_TEST_DATABASE_URL is required for PostgreSQL integration tests")
-	}
-
+func TestMigrateCreatesCurrentFactsAndRejectsUnearnedWorkLifecycle(t *testing.T) {
 	ctx := context.Background()
-	pool, err := Open(ctx, databaseURL)
-	if err != nil {
-		t.Fatalf("open PostgreSQL: %v", err)
-	}
-	defer pool.Close()
-	requireIsolatedTestDatabase(t, ctx, pool, databaseURL)
+	pool := openMigratedTestPool(t, ctx)
 
-	if err := Migrate(ctx, pool); err != nil {
-		t.Fatalf("migrate PostgreSQL: %v", err)
-	}
 	if err := Migrate(ctx, pool); err != nil {
 		t.Fatalf("repeat migration: %v", err)
 	}
@@ -36,6 +25,9 @@ func TestMigrateCreatesNodeZeroFacts(t *testing.T) {
 		"user_tokens",
 		"machines",
 		"machine_runtime_observations",
+		"works",
+		"work_messages",
+		"browser_sessions",
 	} {
 		var exists bool
 		if err := pool.QueryRow(ctx, `select to_regclass('public.' || $1) is not null`, table).Scan(&exists); err != nil {
@@ -44,5 +36,32 @@ func TestMigrateCreatesNodeZeroFacts(t *testing.T) {
 		if !exists {
 			t.Errorf("table %s does not exist", table)
 		}
+	}
+
+	store := NewStore(pool)
+	bootstrap, err := store.Bootstrap(ctx, BootstrapCommand{
+		DisplayName: "Migration Owner", SpaceName: "Migration Space",
+		TokenExpiresAt: time.Now().Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("bootstrap lifecycle fixture: %v", err)
+	}
+	created, err := store.CreateWork(ctx, work.CreateCommand{
+		SpaceID: bootstrap.SpaceID, CreatorUserID: bootstrap.UserID,
+		Goal: "Keep Work lifecycle limited to earned states", IdempotencyKey: "migration-lifecycle",
+	})
+	if err != nil {
+		t.Fatalf("create lifecycle fixture: %v", err)
+	}
+
+	if _, err := pool.Exec(ctx, `update works set lifecycle = 'paused' where work_id = $1`, created.WorkID); err == nil {
+		t.Fatal("unimplemented paused lifecycle was accepted")
+	}
+	details, err := store.LoadWork(ctx, bootstrap.UserID, bootstrap.SpaceID, created.WorkID)
+	if err != nil {
+		t.Fatalf("reload lifecycle fixture: %v", err)
+	}
+	if details.Work.Lifecycle != work.LifecycleOpen {
+		t.Fatalf("lifecycle = %q, want %q", details.Work.Lifecycle, work.LifecycleOpen)
 	}
 }
