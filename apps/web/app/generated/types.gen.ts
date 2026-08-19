@@ -27,6 +27,10 @@ export type Work = {
   owner_user_id: string;
   creator_user_id: string;
   input_head_seq: number;
+  applied_input_seq: number;
+  current_revision: number;
+  understanding: string;
+  next_step: string;
   created_at: string;
 };
 

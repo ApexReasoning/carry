@@ -7,6 +7,8 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/ApexReasoning/carry/internal/agent/codex"
+	"github.com/ApexReasoning/carry/internal/agent/pi"
 	"github.com/ApexReasoning/carry/internal/cli"
 	"github.com/ApexReasoning/carry/internal/host"
 )
@@ -27,5 +29,7 @@ func run(ctx context.Context, arguments []string, input io.Reader, output io.Wri
 		cli.ConfigDirectory(),
 		cli.Streams{Input: input, Output: output, ErrorOutput: errorOutput},
 		host.DetectRuntimes,
+		pi.New(),
+		codex.New(),
 	)
 }

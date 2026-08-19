@@ -43,14 +43,17 @@ func NewMemberRoutes(
 }
 
 func (routes *MemberRoutes) mount(router chi.Router) {
-	router.Post("/browser/sessions", routes.sessions.create)
-	router.Delete("/browser/sessions/current", routes.sessions.revokeCurrent)
-	router.Group(func(member chi.Router) {
-		member.Use(routes.auth.requireMember)
-		member.Get("/me", routes.member.me)
-		member.Post("/machines/enroll", routes.machines.enroll)
-		member.Post("/machines/revoke", routes.machines.revoke)
-		routes.works.mount(member)
+	router.Group(func(memberSurface chi.Router) {
+		memberSurface.Use(rejectMachinePrincipal)
+		memberSurface.Post("/browser/sessions", routes.sessions.create)
+		memberSurface.Delete("/browser/sessions/current", routes.sessions.revokeCurrent)
+		memberSurface.Group(func(member chi.Router) {
+			member.Use(routes.auth.requireMember)
+			member.Get("/me", routes.member.me)
+			member.Post("/machines/enroll", routes.machines.enroll)
+			member.Post("/machines/revoke", routes.machines.revoke)
+			routes.works.mount(member)
+		})
 	})
 }
 
@@ -59,12 +62,12 @@ type MachineRoutes struct {
 	machine machineAPI
 }
 
-// NewMachineRoutes constructs the Machine principal surface.
-func NewMachineRoutes(store MachineRuntimeStore) (*MachineRoutes, error) {
-	if store == nil {
-		return nil, errors.New("Machine route dependency is required")
+// NewMachineRoutes constructs the Machine principal surface from independent runtime-report and Run-claim contracts.
+func NewMachineRoutes(runtimeStore MachineRuntimeStore, runStore MachineRunStore) (*MachineRoutes, error) {
+	if runtimeStore == nil || runStore == nil {
+		return nil, errors.New("Machine route dependencies are required")
 	}
-	return &MachineRoutes{machine: machineAPI{store: store}}, nil
+	return &MachineRoutes{machine: machineAPI{runtimeStore: runtimeStore, runStore: runStore}}, nil
 }
 
 func (routes *MachineRoutes) mount(router chi.Router) {
@@ -72,5 +75,29 @@ func (routes *MachineRoutes) mount(router chi.Router) {
 		machine.Use(requireMachine)
 		machine.Post("/runtime-report", routes.machine.reportRuntimes)
 		machine.Get("/status", routes.machine.status)
+		machine.Post("/runs/claim", routes.machine.claimRun)
+		machine.Post("/runs/{run_id}/attempts/{attempt_id}/renew", routes.machine.renewRun)
+	})
+}
+
+// AgentRoutes composes only the Attempt-scoped bearer surface.
+type AgentRoutes struct {
+	agent agentAPI
+}
+
+// NewAgentRoutes constructs the Agent principal surface independently of member and Machine auth.
+func NewAgentRoutes(store AgentRunStore) (*AgentRoutes, error) {
+	if store == nil {
+		return nil, errors.New("Agent route dependency is required")
+	}
+	return &AgentRoutes{agent: agentAPI{store: store}}, nil
+}
+
+func (routes *AgentRoutes) mount(router chi.Router) {
+	router.Group(func(agent chi.Router) {
+		agent.Use(requireAgent)
+		agent.Get("/runs/{run_id}/attempts/{attempt_id}/context", routes.agent.loadContext)
+		agent.Post("/runs/{run_id}/attempts/{attempt_id}/revision", routes.agent.commitRevision)
+		agent.Post("/runs/{run_id}/attempts/{attempt_id}/outcome", routes.agent.finishOutcome)
 	})
 }

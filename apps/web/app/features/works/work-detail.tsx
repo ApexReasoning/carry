@@ -60,6 +60,27 @@ export function WorkDetail({
         </dl>
       </header>
 
+      <section
+        className="current-understanding"
+        aria-labelledby="current-understanding-title"
+        aria-live="polite"
+      >
+        <h3 id="current-understanding-title">Current understanding</h3>
+        {details.work.current_revision === 0 ? (
+          <p className="empty-copy">
+            Carry has not applied this Work’s information yet.
+          </p>
+        ) : (
+          <>
+            <p className="understanding-copy">{details.work.understanding}</p>
+            <div className="next-step">
+              <h4>Next step</h4>
+              <p>{details.work.next_step}</p>
+            </div>
+          </>
+        )}
+      </section>
+
       <section className="message-section" aria-labelledby="messages-title">
         <h3 id="messages-title">Messages</h3>
         {details.messages.length === 0 ? (

@@ -10,8 +10,14 @@ import (
 
 type runtimeDetector func(context.Context) []hostdomain.RuntimeObservation
 
-// NewCommand constructs the Host subtree with separate member and Machine paths.
-func NewCommand(configDirectory string, output io.Writer, detectRuntimes runtimeDetector) *cobra.Command {
+// NewCommand constructs the Host subtree with separate member and Machine paths and two explicit native executors.
+func NewCommand(
+	configDirectory string,
+	output io.Writer,
+	detectRuntimes runtimeDetector,
+	piExecutor hostdomain.Executor,
+	codexExecutor hostdomain.Executor,
+) *cobra.Command {
 	command := &cobra.Command{
 		Use:   "host",
 		Short: "Enroll and run this Machine as a Carry Host",
@@ -22,7 +28,7 @@ func NewCommand(configDirectory string, output io.Writer, detectRuntimes runtime
 	}
 	command.AddCommand(
 		newEnrollCommand(configDirectory, output),
-		newStartCommand(configDirectory, output, detectRuntimes),
+		newStartCommand(configDirectory, output, detectRuntimes, piExecutor, codexExecutor),
 		newStatusCommand(configDirectory, output, detectRuntimes),
 		newRevokeCommand(configDirectory, output),
 	)

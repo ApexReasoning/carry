@@ -29,6 +29,8 @@ func TestRunBuildsFreshCommandTree(t *testing.T) {
 			t.TempDir(),
 			Streams{Input: strings.NewReader(""), Output: &output, ErrorOutput: &errorOutput},
 			detect,
+			nil,
+			nil,
 		)
 		if exitCode != 0 {
 			t.Fatalf("exit code = %d, stderr = %q", exitCode, errorOutput.String())
@@ -59,6 +61,8 @@ func TestRunPrintsHelpAndVersion(t *testing.T) {
 				context.Background(), test.arguments, "test-version", t.TempDir(),
 				Streams{Input: strings.NewReader(""), Output: &output, ErrorOutput: &errorOutput},
 				func(context.Context) []host.RuntimeObservation { return nil },
+				nil,
+				nil,
 			)
 			if exitCode != 0 {
 				t.Fatalf("exit code = %d, stderr = %q", exitCode, errorOutput.String())
@@ -79,6 +83,8 @@ func TestRunRejectsUnknownCommand(t *testing.T) {
 		context.Background(), []string{"unknown"}, "test-version", t.TempDir(),
 		Streams{Input: strings.NewReader(""), Output: &output, ErrorOutput: &errorOutput},
 		func(context.Context) []host.RuntimeObservation { return nil },
+		nil,
+		nil,
 	)
 	if exitCode != 1 {
 		t.Fatalf("exit code = %d, want 1", exitCode)

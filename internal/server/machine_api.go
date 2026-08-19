@@ -2,11 +2,14 @@ package server
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/ApexReasoning/carry/internal/host"
+	"github.com/ApexReasoning/carry/internal/run"
+	"github.com/go-chi/chi/v5"
 )
 
 // MachineRuntimeStore handles only Machine-authenticated runtime reporting and
@@ -16,14 +19,25 @@ type MachineRuntimeStore interface {
 	LoadMachineStatus(context.Context, string) (host.MachineStatus, error)
 }
 
+// MachineRunStore claims generic pending Runs without selecting an Agent.
+type MachineRunStore interface {
+	ClaimCoordinatorRun(context.Context, string) (run.Claim, error)
+	RenewRunAttempt(context.Context, string, string, string, int64) (time.Time, error)
+}
+
 type machineAPI struct {
-	store MachineRuntimeStore
+	runtimeStore MachineRuntimeStore
+	runStore     MachineRunStore
 }
 
 type machineContextKey struct{}
 
 type runtimeReportRequest struct {
 	Runtimes []runtimeObservationWire `json:"runtimes"`
+}
+
+type renewRunAttemptRequest struct {
+	Fence int64 `json:"fence"`
 }
 
 type runtimeObservationWire struct {
@@ -85,7 +99,7 @@ func (api machineAPI) reportRuntimes(response http.ResponseWriter, request *http
 			DiagnosticDetail: runtime.DiagnosticDetail, ObservedAt: runtime.ObservedAt,
 		})
 	}
-	if err := api.store.ReplaceRuntimeObservations(request.Context(), machineID, observations); err != nil {
+	if err := api.runtimeStore.ReplaceRuntimeObservations(request.Context(), machineID, observations); err != nil {
 		writeStoreError(response, err)
 		return
 	}
@@ -99,7 +113,7 @@ func (api machineAPI) status(response http.ResponseWriter, request *http.Request
 	if !ok {
 		return
 	}
-	status, err := api.store.LoadMachineStatus(request.Context(), machineID)
+	status, err := api.runtimeStore.LoadMachineStatus(request.Context(), machineID)
 	if err != nil {
 		writeStoreError(response, err)
 		return
@@ -125,5 +139,62 @@ func (api machineAPI) status(response http.ResponseWriter, request *http.Request
 	}{
 		MachineID: status.MachineID, SpaceID: status.SpaceID, DisplayName: status.DisplayName,
 		EnrolledAt: status.EnrolledAt, Runtimes: runtimes,
+	})
+}
+
+func (api machineAPI) renewRun(response http.ResponseWriter, request *http.Request) {
+	machineID, ok := currentMachine(response, request)
+	if !ok {
+		return
+	}
+	var body renewRunAttemptRequest
+	if !decodeJSON(response, request, &body) {
+		return
+	}
+	leaseExpiresAt, err := api.runStore.RenewRunAttempt(
+		request.Context(),
+		machineID,
+		chi.URLParam(request, "run_id"),
+		chi.URLParam(request, "attempt_id"),
+		body.Fence,
+	)
+	if err != nil {
+		writeStoreError(response, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, struct {
+		LeaseExpiresAt time.Time `json:"lease_expires_at"`
+	}{LeaseExpiresAt: leaseExpiresAt})
+}
+
+func (api machineAPI) claimRun(response http.ResponseWriter, request *http.Request) {
+	machineID, ok := currentMachine(response, request)
+	if !ok {
+		return
+	}
+	claim, err := api.runStore.ClaimCoordinatorRun(request.Context(), machineID)
+	if errors.Is(err, run.ErrNoPendingRun) {
+		response.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if err != nil {
+		writeStoreError(response, err)
+		return
+	}
+	response.Header().Set("Cache-Control", "no-store")
+	writeJSON(response, http.StatusOK, struct {
+		RunID           string    `json:"run_id"`
+		AttemptID       string    `json:"attempt_id"`
+		Fence           int64     `json:"fence"`
+		BaseRevision    int64     `json:"base_revision"`
+		InputEndSeq     int64     `json:"input_end_seq"`
+		WriterToken     string    `json:"writer_token"`
+		AgentCredential string    `json:"agent_credential"`
+		LeaseExpiresAt  time.Time `json:"lease_expires_at"`
+	}{
+		RunID: claim.RunID, AttemptID: claim.AttemptID, Fence: claim.Fence,
+		BaseRevision: claim.BaseRevision, InputEndSeq: claim.InputEndSeq,
+		WriterToken: claim.WriterToken, AgentCredential: claim.AgentCredential,
+		LeaseExpiresAt: claim.LeaseExpiresAt,
 	})
 }

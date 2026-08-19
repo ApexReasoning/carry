@@ -281,28 +281,31 @@ Host claim 时原子完成：
 - 验证该 Machine 仍被 Space 允许；
 - 创建新的 attempt fence；
 - 获得 lease；
-- 记录实际 Pi/Codex 和安全环境；
+- 记录 Machine 与安全环境证据；
 - 签发短期 Run credential。
+
+通用 claim 不携带 Runtime、provider 或 model。Host 为每个当前可用的具体 adapter 显式运行相同 worker loop；哪个 worker 获得 claim 是物理执行事实，不是服务端路由结果。
 
 只有当前 fence 可以续租、提交或结束。
 
 ### 6.2 Pi 与 Codex
 
-Pi 和 Codex 是两个具体 production adapter。Host 只共享真实共同能力：
+Pi 和 Codex 是两个具体 production adapter，并在第一条 native execution journey 中同时实现。Host 只提升两个 adapter 已经真实满足的消费语义：
 
 ```text
-Start
-Resume
-Send
-Diagnose
-Close
+Execute：用一份不可变 Attempt 输入产生经过验证的当前理解草稿
+Diagnose：只读判断本地 Agent 是否可启动
 ```
 
-各 adapter 自己解释 provider Session。它们不能读取或伪造对方的 Session。
+取消由调用方 `context` 表达；启动、原生消息循环、进程关闭和临时目录清理由具体 adapter 拥有，不为了语法对称暴露共同生命周期接口。Node 3 在两个 adapter 都证明原生恢复后才加入 Resume。
 
-启动前，Host 获得一个不可变 Run descriptor，包含 subject、输入引用、Plugin 版本、Skills、MCP endpoint 和短期 Agent 能力。
+Pi adapter 直接使用 Pi 0.84.2 documented RPC，并关闭 Session、builtin tools、ambient extensions、Skills 和 context files。Codex adapter 直接使用 Codex 0.148 app-server 和固定的已验证 schema，在空临时目录与只读策略下执行。Node 2 不把 ACP 作为共同 wire protocol：现有 Pi/Codex ACP wrapper 没有消除终态、隔离和错误语义差异，反而增加额外 executable 与版本矩阵；未来只有出现真实消费者时，ACP 才可以成为某个具体 adapter 的内部实现细节。
 
-Pi 与 Codex 必须通过同一产品 conformance suite，但不要求拥有相同内部事件模型。
+启动前，Host 获得一个不可变 Run descriptor，包含准确 subject、输入范围、base revision、writer token 和短期 Agent 能力。Host 从已授权 context 构造 adapter 输入；writer token 与短期 credential 只由 Host 持有，不进入 prompt、Agent subprocess 或模型输出。当前旅程不请求 repository、Plugin、Skill 或 MCP capability，也不把这些未使用字段放入 descriptor。
+
+各 adapter 自己解释 provider Session，不能读取或伪造对方的 Session。共同输出只包含 Carry 当前消费的 `understanding` 与 `next_step` 草稿，不包含 Pi/Codex 分支、大一统 provider event、ACP Session 或 tool status。模型输出必须通过严格结构验证，并经当前 fence 与 writer token 提交 PostgreSQL 后才算成功；Agent settled、Codex thread idle、进程退出或任何协议终态都不能单独授权 Work 变化。
+
+Codex 缺失 `turn/completed` 时，adapter 只可在短期限内使用 `thread/read` 核对准确 turn 的只读状态；无法证明 `completed` 就保持 Unknown，不从 agent message 或 thread idle 猜测成功。Pi 与 Codex 必须通过同一产品 conformance suite，但不要求拥有相同 wire protocol 或内部事件模型。
 
 ### 6.3 恢复
 
@@ -738,6 +741,7 @@ Host 在执行中断线。系统保证只有一个有效 attempt，旧 attempt �
 - Kafka、Redis queue 或 Temporal；
 - Event Sourcing；
 - provider registry；
+- 把 ACP 或其他 Agent wire protocol 作为第一条执行旅程的核心合同；
 - 通用 webhook payload；
 - workflow DSL；
 - 持久 Plan、Step、Memory 或思维链；

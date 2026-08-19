@@ -524,6 +524,41 @@ textarea::placeholder {
   font-weight: 600;
 }
 
+/* Current understanding */
+
+.current-understanding {
+  margin-top: 2.25rem;
+  padding: 1.25rem;
+  background: var(--accent-tint);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-small);
+}
+.current-understanding h3,
+.next-step h4 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 800;
+}
+.current-understanding .empty-copy {
+  padding: 0.9rem 0 0;
+}
+.understanding-copy {
+  margin: 0.9rem 0 0;
+  line-height: 1.65;
+  white-space: pre-wrap;
+}
+.next-step {
+  margin-top: 1.1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+}
+.next-step p {
+  margin: 0.45rem 0 0;
+  color: var(--accent-deep);
+  font-weight: 650;
+  line-height: 1.55;
+}
+
 /* Messages */
 
 .message-section {

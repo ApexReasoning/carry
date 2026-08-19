@@ -89,6 +89,8 @@ func (s *Store) ListWorks(ctx context.Context, userID string, spaceID string) ([
 			WorkID: row.WorkID, SpaceID: row.SpaceID, Goal: row.Goal,
 			Lifecycle: work.Lifecycle(row.Lifecycle), OwnerUserID: row.OwnerUserID,
 			CreatorUserID: row.CreatorUserID, InputHeadSeq: row.InputHeadSeq,
+			AppliedInputSeq: row.AppliedInputSeq, CurrentRevision: row.CurrentRevision,
+			Understanding: valueOrEmpty(row.Understanding), NextStep: valueOrEmpty(row.NextStep),
 			CreatedAt: row.CreatedAt.Time,
 		})
 	}
@@ -231,6 +233,7 @@ func workFromCreateRow(row dbsqlc.CreateWorkRow) work.Work {
 		WorkID: row.WorkID, SpaceID: row.SpaceID, Goal: row.Goal,
 		Lifecycle: work.Lifecycle(row.Lifecycle), OwnerUserID: row.OwnerUserID,
 		CreatorUserID: row.CreatorUserID, InputHeadSeq: row.InputHeadSeq,
+		AppliedInputSeq: row.AppliedInputSeq, CurrentRevision: row.CurrentRevision,
 		CreatedAt: row.CreatedAt.Time,
 	}
 }
@@ -240,6 +243,7 @@ func workFromIdempotencyRow(row dbsqlc.FindWorkByCreateIdempotencyRow) work.Work
 		WorkID: row.WorkID, SpaceID: row.SpaceID, Goal: row.Goal,
 		Lifecycle: work.Lifecycle(row.Lifecycle), OwnerUserID: row.OwnerUserID,
 		CreatorUserID: row.CreatorUserID, InputHeadSeq: row.InputHeadSeq,
+		AppliedInputSeq: row.AppliedInputSeq, CurrentRevision: row.CurrentRevision,
 		CreatedAt: row.CreatedAt.Time,
 	}
 }
@@ -249,6 +253,8 @@ func workFromLoadRow(row dbsqlc.LoadWorkRow) work.Work {
 		WorkID: row.WorkID, SpaceID: row.SpaceID, Goal: row.Goal,
 		Lifecycle: work.Lifecycle(row.Lifecycle), OwnerUserID: row.OwnerUserID,
 		CreatorUserID: row.CreatorUserID, InputHeadSeq: row.InputHeadSeq,
+		AppliedInputSeq: row.AppliedInputSeq, CurrentRevision: row.CurrentRevision,
+		Understanding: valueOrEmpty(row.Understanding), NextStep: valueOrEmpty(row.NextStep),
 		CreatedAt: row.CreatedAt.Time,
 	}
 }

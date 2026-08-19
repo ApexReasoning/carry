@@ -233,6 +233,10 @@ components:
         - owner_user_id
         - creator_user_id
         - input_head_seq
+        - applied_input_seq
+        - current_revision
+        - understanding
+        - next_step
         - created_at
       properties:
         work_id:
@@ -254,6 +258,18 @@ components:
           type: integer
           format: int64
           minimum: 1
+        applied_input_seq:
+          type: integer
+          format: int64
+          minimum: 0
+        current_revision:
+          type: integer
+          format: int64
+          minimum: 0
+        understanding:
+          type: string
+        next_step:
+          type: string
         created_at:
           type: string
           format: date-time

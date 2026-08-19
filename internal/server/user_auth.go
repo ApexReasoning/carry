@@ -23,6 +23,16 @@ type memberAuthenticator struct {
 
 type memberContextKey struct{}
 
+func rejectMachinePrincipal(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.TLS != nil && len(request.TLS.PeerCertificates) != 0 {
+			writeAPIError(response, http.StatusUnauthorized, "Member route does not accept Machine authentication")
+			return
+		}
+		next.ServeHTTP(response, request)
+	})
+}
+
 func (a memberAuthenticator) requireMember(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		user, ok := a.authenticate(response, request)

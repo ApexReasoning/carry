@@ -37,14 +37,18 @@ type appendWorkMessageRequest struct {
 }
 
 type workWire struct {
-	WorkID        string         `json:"work_id"`
-	SpaceID       string         `json:"space_id"`
-	Goal          string         `json:"goal"`
-	Lifecycle     work.Lifecycle `json:"lifecycle"`
-	OwnerUserID   string         `json:"owner_user_id"`
-	CreatorUserID string         `json:"creator_user_id"`
-	InputHeadSeq  int64          `json:"input_head_seq"`
-	CreatedAt     time.Time      `json:"created_at"`
+	WorkID          string         `json:"work_id"`
+	SpaceID         string         `json:"space_id"`
+	Goal            string         `json:"goal"`
+	Lifecycle       work.Lifecycle `json:"lifecycle"`
+	OwnerUserID     string         `json:"owner_user_id"`
+	CreatorUserID   string         `json:"creator_user_id"`
+	InputHeadSeq    int64          `json:"input_head_seq"`
+	AppliedInputSeq int64          `json:"applied_input_seq"`
+	CurrentRevision int64          `json:"current_revision"`
+	Understanding   string         `json:"understanding"`
+	NextStep        string         `json:"next_step"`
+	CreatedAt       time.Time      `json:"created_at"`
 }
 
 type workMessageWire struct {
@@ -197,6 +201,8 @@ func workToWire(value work.Work) workWire {
 		WorkID: value.WorkID, SpaceID: value.SpaceID, Goal: value.Goal,
 		Lifecycle: value.Lifecycle, OwnerUserID: value.OwnerUserID,
 		CreatorUserID: value.CreatorUserID, InputHeadSeq: value.InputHeadSeq,
+		AppliedInputSeq: value.AppliedInputSeq, CurrentRevision: value.CurrentRevision,
+		Understanding: value.Understanding, NextStep: value.NextStep,
 		CreatedAt: value.CreatedAt,
 	}
 }

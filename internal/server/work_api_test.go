@@ -114,7 +114,8 @@ func workTestAPI(t *testing.T, commands WorkCommands, queries WorkQueries) http.
 	if err != nil {
 		t.Fatalf("compose member routes: %v", err)
 	}
-	machine, err := NewMachineRoutes(&recordingMachineRuntime{})
+	runtimeStore := &recordingMachineRuntime{}
+	machine, err := NewMachineRoutes(runtimeStore, runtimeStore)
 	if err != nil {
 		t.Fatalf("compose Machine routes: %v", err)
 	}

@@ -71,7 +71,18 @@ test("exchanges a member token without storing it and creates durable Work", asy
         path === `/v1/spaces/${spaceID}/works/${workID}`
       ) {
         return json({
-          work: { ...work(), input_head_seq: messageAdded ? 2 : 1 },
+          work: {
+            ...work(),
+            input_head_seq: messageAdded ? 2 : 1,
+            applied_input_seq: messageAdded ? 2 : 0,
+            current_revision: messageAdded ? 1 : 0,
+            understanding: messageAdded
+              ? "The renewal date is confirmed as 30 September."
+              : "",
+            next_step: messageAdded
+              ? "Prepare the renewal recommendation."
+              : "",
+          },
           messages: messageAdded ? [message()] : [],
         });
       }
@@ -108,6 +119,8 @@ test("exchanges a member token without storing it and creates durable Work", asy
   );
   await user.click(screen.getByRole("button", { name: "Add message" }));
   await screen.findByText("Renewal date is 30 September");
+  await screen.findByText("The renewal date is confirmed as 30 September.");
+  expect(screen.getByText("Prepare the renewal recommendation.")).toBeVisible();
 
   await waitFor(() => expect(requests.length).toBeGreaterThanOrEqual(6));
 });
@@ -268,6 +281,10 @@ function work(id = workID, goal = "Review customer renewals") {
     owner_user_id: "member-1",
     creator_user_id: "member-1",
     input_head_seq: 1,
+    applied_input_seq: 0,
+    current_revision: 0,
+    understanding: "",
+    next_step: "",
     created_at: "2026-08-19T00:00:00+08:00",
   };
 }

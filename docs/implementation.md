@@ -264,8 +264,8 @@ Split
 | --- | --- | --- |
 | 0. Foundation 与 Host enrollment | 两个二进制可运行，成员可以注册并启动 Host | 1–2 天 |
 | 1. First durable Work | 成员可以创建、查看和补充一份持久 Work | 1–2 天 |
-| 2. First native execution | 一个真实 Runtime 可以推进 Work | 1–2 天 |
-| 3. Runtime parity 与 recovery | 第二个 Runtime 通过同一合同并可安全接力 | 1–2 天 |
+| 2. Native execution parity | Pi 与 Codex 都可以通过同一合同推进 Work | 1–2 天 |
+| 3. Runtime recovery | Host 失败后新 attempt 可以安全接力 | 1–2 天 |
 | 4. Private Conversation | 私聊可以回答问题或直接形成 Work，且不泄漏原文 | 1–2 天 |
 | 5. Result 与 Needs You | 成员可以验收结果并只看到必须处理的事项 | 1 天 |
 | 6. Responsibility authority | 负责人转交和生命周期变化会正确 fence 旧执行 | 1–2 天 |
@@ -383,21 +383,21 @@ Split
 - Web 不保存 JavaScript 可读的长期 bearer，unsafe cross-origin 写入被拒绝；
 - PostgreSQL focused tests 实际运行，服务端重启后 Work、owner、Message 和序号不变。
 
-## 12. Node 2：First native execution
+## 12. Node 2：Native execution parity
 
 ### 用户结果
 
-成员要求 Carry 推进一份 Work，一个真实 Runtime 可以领取并更新 Work 当前理解。这次路径不需要任何仓库能力；这不是 Work 类型，admission、continuity 和 execution state 不得按 Git、软件、内容或 provider 分类。
+成员要求 Carry 推进一份 Work，Pi 与 Codex 都可以领取并更新同一 Work 当前理解。当前 Attempt 不请求 repository capability；这不是 Work 类型，admission、continuity 和 execution state 不得按 Git、软件、内容、provider 或 Runtime 分类。
 
 ### 进入时评估的候选 modules
 
 - Run：subject、attempt、lease 和 fence；
-- Host：claim、进程和 Runtime lifecycle；
+- Host：通用 claim、进程 supervision 和两个具体 adapter worker；
 - Work：单 coordinator、writer token 和 revision commit；
 - Agent API：准确 Run capability；
-- 第一个具体 Runtime adapter。
+- `agent/pi` 与 `agent/codex`：各自拥有原生进程协议。
 
-第一个 Runtime 在节点调研后选择，不为尚未实现的第二个 Runtime 预建 registry 或宽接口。
+Node 2 进入研究选择 Pi 0.84.2 documented RPC 与 Codex 0.148 app-server 同时直接实现。ACP v1、`pi-acp` 与 `codex-acp` 已完成对照，但不作为共同 Host boundary：它们没有消除终态、隔离和错误语义差异，还会增加额外 executable 与版本矩阵。两个 native adapter 出现后才提升 Host 已经真实消费的 `Execute` 与 `Diagnose` 语义；启动、原生消息循环、取消、关闭和清理由具体 adapter 拥有。Work、Run、PostgreSQL、Server 与通用 claim 不导入或保存 adapter identity。Host 为每个当前可用的具体 adapter 显式启动 worker，它们竞争同一通用 queue；claim 后不自动 fallback，也不把 provider Session、进程或模型当作 Work 连续性。
 
 ### 至少调研
 
@@ -411,17 +411,20 @@ Split
 ### 实现顺序
 
 1. Work 未处理输入扫描与唯一 coordinator Run；
-2. Run claim、attempt fence 和 late commit rejection；
+2. Run 通用 claim、attempt fence 和 late commit rejection；
 3. Agent API context/read/revision commit；
-4. 第一个 Runtime 的最小 Start/Send/Diagnose/Close；
-5. Work 的当前理解展示。
+4. 直接打通隔离的 Pi RPC 与 Codex app-server 执行，并严格解析 `understanding` 与 `next_step`；
+5. 从两个已运行 adapter 提升 Host 实际消费的 `Execute`/`Diagnose` 合同和 conformance suite；
+6. Host 为两个 adapter 运行相同 worker loop，Work 当前理解可被成员读取；
+7. 用短时 live canary 证明两个真实 Agent；Codex 缺失 `turn/completed` 时只用 `thread/read` 核对准确 turn，无法证明完成则保持 Unknown。
 
 ### 明确不做
 
-- 第二个 Runtime；
-- provider registry；
+- provider/runtime-based admission、claim eligibility 或 Work routing；
+- provider registry、catalog、factory 或自动 fallback；
+- ACP client、ACP wrapper 依赖或共同 Agent wire protocol；
 - model profile；
-- recovery framework；
+- recovery/resume framework；
 - Git checkout；
 - gVisor 默认化；
 - Child Run；
@@ -429,23 +432,25 @@ Split
 
 ### 关闭证据
 
-- 真实 Runtime 完成一条 Work journey；
+- Pi 与 Codex 分别完成同一条 Work journey 并通过共同 conformance suite；
+- adapter 的 settled、idle、进程退出或模型文本不能直接提交；只有严格结构验证和当前 fenced PostgreSQL revision commit 才算成功；
+- Codex terminal evidence 缺失时有界结束并保持 Unknown，不因已有 agent message 猜测成功；
+- core、PostgreSQL、Server 和通用 claim 没有 Pi/Codex/provider/runtime 分支或字段；
 - 同一 Work 只有一个 coordinator 和 writer；
 - stale writer 与 late attempt commit 被拒绝；
 - 当前 Attempt 不请求 repository capability，且该事实没有进入 Work schema、admission 或 lifecycle。
 
-## 13. Node 3：Runtime parity 与 recovery
+## 13. Node 3：Runtime recovery
 
 ### 用户结果
 
-第二个 Runtime 可以通过同一 Work 合同继续执行；Host 失败后新的 attempt 安全接力，旧 Host 不能晚到提交。
+Host 失败后新的 attempt 可以从持久 Work 安全接力，旧 Host 不能晚到提交；有可靠原生 Session 证据时可以恢复，没有时从 Work 重新开始。
 
 ### 进入时评估的候选 modules
 
-- Host-owned Runtime contract：只提升两个 adapter 共同被消费的能力；
-- 第二个具体 Runtime adapter；
 - Run recovery claim 与 attempt rotation；
-- provider-native opaque Session evidence。
+- Pi 与 Codex 各自的 opaque Session evidence；
+- Host-owned Runtime contract 中被两个 adapter 真正消费的 Resume 能力。
 
 ### 至少调研
 
@@ -458,12 +463,11 @@ Split
 
 ### 实现顺序
 
-1. 从第一个 adapter 提取 Host 已经真实消费的最小合同；
-2. 实现第二个 adapter；
-3. 两个 Runtime 的共同 conformance suite；
-4. 唯一 recovery claim 与 fence/credential rotation；
-5. Resume 原生 Session 或从持久 Work 新建 attempt；
-6. Runtime 切换和 late-host rejection journey。
+1. 唯一 recovery claim 与旧 attempt 终结；
+2. fence 与短期 credential rotation；
+3. 两个 adapter 各自验证原生 Session 证据并 Resume；
+4. 无可靠 Session 时从持久 Work 建立新 attempt；
+5. 分区旧 Host late-commit rejection journey。
 
 ### 明确不做
 
@@ -476,10 +480,9 @@ Split
 
 ### 关闭证据
 
-- Pi 与 Codex 通过同一产品合同；
-- 任一 Runtime 都能继续同一 Work；
-- recovery 总是轮换 attempt fence；
+- recovery 总是轮换 attempt fence 与 credential；
 - 分区旧 Host 的晚到提交被拒绝；
+- Pi/Codex Session 只由各自 adapter 解释；
 - 无法恢复 Session 时从持久 Work 继续而不伪造记忆。
 
 ## 14. Node 4：Private Conversation

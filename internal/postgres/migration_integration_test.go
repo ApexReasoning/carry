@@ -27,6 +27,9 @@ func TestMigrateCreatesCurrentFactsAndRejectsUnearnedWorkLifecycle(t *testing.T)
 		"machine_runtime_observations",
 		"works",
 		"work_messages",
+		"coordinator_runs",
+		"run_attempts",
+		"work_understanding_revisions",
 		"browser_sessions",
 	} {
 		var exists bool

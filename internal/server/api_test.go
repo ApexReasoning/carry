@@ -18,6 +18,7 @@ import (
 
 	"github.com/ApexReasoning/carry/internal/host"
 	"github.com/ApexReasoning/carry/internal/identity"
+	"github.com/ApexReasoning/carry/internal/run"
 	"github.com/ApexReasoning/carry/internal/space"
 	"github.com/ApexReasoning/carry/internal/work"
 )
@@ -105,12 +106,47 @@ func TestRuntimeReportRequiresActiveMachineCertificate(t *testing.T) {
 	}
 }
 
+func TestMachineClaimReturnsAttemptAuthorityWithoutRuntimeSelection(t *testing.T) {
+	t.Parallel()
+
+	authority, machineCertificate := testMachineCertificate(t, "machine-12")
+	runtimeStore := &recordingMachineRuntime{claim: run.Claim{
+		Coordinator: run.Coordinator{RunID: "run-4"}, AttemptID: "attempt-4", Fence: 3,
+		WriterToken: "writer-4", AgentCredential: "carry_agent_secret",
+		LeaseExpiresAt: time.Date(2026, time.August, 18, 17, 0, 0, 0, time.UTC),
+	}}
+	request := httptest.NewRequest(http.MethodPost, "/v1/host/runs/claim", nil)
+	request.TLS = &tls.ConnectionState{
+		PeerCertificates: []*x509.Certificate{machineCertificate},
+		VerifiedChains:   [][]*x509.Certificate{{machineCertificate}},
+	}
+	response := httptest.NewRecorder()
+
+	testAPI(t, authority, &recordingUserTokens{}, &recordingMachineEnrollments{}, runtimeStore).
+		ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body = %s", response.Code, http.StatusOK, response.Body.String())
+	}
+	if runtimeStore.claimMachineID != "machine-12" {
+		t.Fatalf("claim Machine = %q", runtimeStore.claimMachineID)
+	}
+	if !bytes.Contains(response.Body.Bytes(), []byte(`"agent_credential":"carry_agent_secret"`)) {
+		t.Fatalf("claim body = %s", response.Body.String())
+	}
+}
+
+type machineTestStore interface {
+	MachineRuntimeStore
+	MachineRunStore
+}
+
 func testAPI(
 	t *testing.T,
 	authority *host.CertificateAuthority,
 	tokens UserTokenAuthenticator,
 	machines MachineEnrollmentStore,
-	runtimes MachineRuntimeStore,
+	runtimes machineTestStore,
 ) http.Handler {
 	t.Helper()
 	sessions := unavailableBrowserSessions{}
@@ -121,7 +157,7 @@ func testAPI(
 	if err != nil {
 		t.Fatalf("compose member routes: %v", err)
 	}
-	machine, err := NewMachineRoutes(runtimes)
+	machine, err := NewMachineRoutes(runtimes, runtimes)
 	if err != nil {
 		t.Fatalf("compose Machine routes: %v", err)
 	}
@@ -140,7 +176,11 @@ func mustAPIWithReadiness(
 	machine *MachineRoutes,
 ) http.Handler {
 	t.Helper()
-	apiServer, err := NewAPI(readiness, member, machine)
+	agent, err := NewAgentRoutes(unavailableAgentRuns{})
+	if err != nil {
+		t.Fatalf("compose Agent routes: %v", err)
+	}
+	apiServer, err := NewAPI(readiness, member, machine, agent)
 	if err != nil {
 		t.Fatalf("compose API: %v", err)
 	}
@@ -232,6 +272,9 @@ func (*recordingMachineEnrollments) RevokeMachine(context.Context, string, strin
 type recordingMachineRuntime struct {
 	reportMachineID string
 	reportErr       error
+	claimMachineID  string
+	claim           run.Claim
+	claimErr        error
 }
 
 func (s *recordingMachineRuntime) ReplaceRuntimeObservations(_ context.Context, machineID string, _ []host.RuntimeObservation) error {
@@ -241,6 +284,41 @@ func (s *recordingMachineRuntime) ReplaceRuntimeObservations(_ context.Context, 
 
 func (*recordingMachineRuntime) LoadMachineStatus(context.Context, string) (host.MachineStatus, error) {
 	return host.MachineStatus{}, errors.New("not implemented")
+}
+
+func (s *recordingMachineRuntime) ClaimCoordinatorRun(_ context.Context, machineID string) (run.Claim, error) {
+	s.claimMachineID = machineID
+	if s.claimErr != nil {
+		return run.Claim{}, s.claimErr
+	}
+	if s.claim.RunID == "" {
+		return run.Claim{}, run.ErrNoPendingRun
+	}
+	return s.claim, nil
+}
+
+func (*recordingMachineRuntime) RenewRunAttempt(
+	context.Context,
+	string,
+	string,
+	string,
+	int64,
+) (time.Time, error) {
+	return time.Time{}, run.ErrStaleAttempt
+}
+
+type unavailableAgentRuns struct{}
+
+func (unavailableAgentRuns) LoadAttemptContext(context.Context, string, string, int64, string) (run.Context, error) {
+	return run.Context{}, run.ErrStaleAttempt
+}
+
+func (unavailableAgentRuns) CommitWorkUnderstanding(context.Context, run.CommitCommand) error {
+	return run.ErrStaleAttempt
+}
+
+func (unavailableAgentRuns) FinishUnresolvedAttempt(context.Context, run.FinishCommand) error {
+	return run.ErrStaleAttempt
 }
 
 type unavailableWorkCommands struct{}

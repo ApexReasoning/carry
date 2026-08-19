@@ -21,22 +21,33 @@ type Server struct {
 	readiness Readiness
 }
 
-// NewAPI composes the member and Machine route trees without merging their
-// authority or persistence contracts.
-func NewAPI(readiness Readiness, member *MemberRoutes, machine *MachineRoutes) (*Server, error) {
-	if member == nil || machine == nil {
-		return nil, errors.New("member and Machine routes are required")
+// NewAPI composes the member, Machine, and Agent route trees without merging
+// their authority or persistence contracts.
+func NewAPI(
+	readiness Readiness,
+	member *MemberRoutes,
+	machine *MachineRoutes,
+	agent *AgentRoutes,
+) (*Server, error) {
+	if member == nil || machine == nil || agent == nil {
+		return nil, errors.New("member, Machine, and Agent routes are required")
 	}
-	return newServer(readiness, member, machine), nil
+	return newServer(readiness, member, machine, agent), nil
 }
 
-func newServer(readiness Readiness, member *MemberRoutes, machine *MachineRoutes) *Server {
+func newServer(
+	readiness Readiness,
+	member *MemberRoutes,
+	machine *MachineRoutes,
+	agent *AgentRoutes,
+) *Server {
 	server := &Server{readiness: readiness}
 	router := chi.NewRouter()
 	router.Get("/healthz", server.health)
 	router.Route("/v1", func(versionOne chi.Router) {
 		member.mount(versionOne)
 		versionOne.Route("/host", machine.mount)
+		versionOne.Route("/agent", agent.mount)
 	})
 	// Fetch-Metadata and Origin checks protect browser mutations while CLI and
 	// Machine requests, which carry neither browser header, remain supported.

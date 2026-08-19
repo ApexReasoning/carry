@@ -38,14 +38,18 @@ func (err *outcomeUnknownError) Unwrap() error {
 }
 
 type workWire struct {
-	WorkID        string    `json:"work_id"`
-	SpaceID       string    `json:"space_id"`
-	Goal          string    `json:"goal"`
-	Lifecycle     string    `json:"lifecycle"`
-	OwnerUserID   string    `json:"owner_user_id"`
-	CreatorUserID string    `json:"creator_user_id"`
-	InputHeadSeq  int64     `json:"input_head_seq"`
-	CreatedAt     time.Time `json:"created_at"`
+	WorkID          string    `json:"work_id"`
+	SpaceID         string    `json:"space_id"`
+	Goal            string    `json:"goal"`
+	Lifecycle       string    `json:"lifecycle"`
+	OwnerUserID     string    `json:"owner_user_id"`
+	CreatorUserID   string    `json:"creator_user_id"`
+	InputHeadSeq    int64     `json:"input_head_seq"`
+	AppliedInputSeq int64     `json:"applied_input_seq"`
+	CurrentRevision int64     `json:"current_revision"`
+	Understanding   string    `json:"understanding"`
+	NextStep        string    `json:"next_step"`
+	CreatedAt       time.Time `json:"created_at"`
 }
 
 type messageWire struct {

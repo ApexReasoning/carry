@@ -30,6 +30,20 @@ export const zWork = z.object({
     .max(BigInt("9223372036854775807"), {
       error: "Invalid value: Expected int64 to be <= 9223372036854775807",
     }),
+  applied_input_seq: z.coerce
+    .bigint()
+    .gte(BigInt(0))
+    .max(BigInt("9223372036854775807"), {
+      error: "Invalid value: Expected int64 to be <= 9223372036854775807",
+    }),
+  current_revision: z.coerce
+    .bigint()
+    .gte(BigInt(0))
+    .max(BigInt("9223372036854775807"), {
+      error: "Invalid value: Expected int64 to be <= 9223372036854775807",
+    }),
+  understanding: z.string(),
+  next_step: z.string(),
   created_at: z.iso.datetime({ offset: true }),
 });
 

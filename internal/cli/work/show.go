@@ -32,6 +32,18 @@ func newShowCommand(configDirectory string, output io.Writer) *cobra.Command {
 			); err != nil {
 				return err
 			}
+			if details.Work.CurrentRevision == 0 {
+				if _, err := fmt.Fprintln(output, "Current understanding: not applied yet"); err != nil {
+					return err
+				}
+			} else if _, err := fmt.Fprintf(
+				output,
+				"Current understanding: %s\nNext step: %s\n",
+				details.Work.Understanding,
+				details.Work.NextStep,
+			); err != nil {
+				return err
+			}
 			if len(details.Messages) == 0 {
 				_, err = fmt.Fprintln(output, "Messages: none")
 				return err

@@ -92,6 +92,69 @@ func TestBrowserSessionAuthenticatesMemberRoute(t *testing.T) {
 	}
 }
 
+func TestMemberSurfaceRejectsMachineCertificateWithMemberCredentials(t *testing.T) {
+	t.Parallel()
+
+	authority, certificate := testMachineCertificate(t, "machine-18")
+	for _, testCase := range []struct {
+		name    string
+		method  string
+		path    string
+		add     func(*http.Request)
+		reached func(*recordingUserTokens, *recordingBrowserSessions) bool
+	}{
+		{
+			name: "member bearer", method: http.MethodGet, path: "/v1/me",
+			add: func(request *http.Request) {
+				request.Header.Set("Authorization", "Bearer member-token")
+			},
+			reached: func(tokens *recordingUserTokens, _ *recordingBrowserSessions) bool {
+				return tokens.authenticatedToken != ""
+			},
+		},
+		{
+			name: "browser session exchange", method: http.MethodPost, path: "/v1/browser/sessions",
+			add: func(request *http.Request) {
+				request.Header.Set("Authorization", "Bearer member-token")
+			},
+			reached: func(_ *recordingUserTokens, sessions *recordingBrowserSessions) bool {
+				return sessions.sourceToken != ""
+			},
+		},
+		{
+			name: "browser session revocation", method: http.MethodDelete, path: "/v1/browser/sessions/current",
+			add: func(request *http.Request) {
+				request.AddCookie(&http.Cookie{Name: browserSessionCookie, Value: "opaque-session-secret"})
+			},
+			reached: func(_ *recordingUserTokens, sessions *recordingBrowserSessions) bool {
+				return sessions.revokedSecret != ""
+			},
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			tokens := &recordingUserTokens{user: identity.AuthenticatedUser{UserID: "member-18"}}
+			sessions := &recordingBrowserSessions{created: identity.BrowserSession{Secret: "opaque-session-secret"}}
+			handler := memberSurfaceTestAPI(t, authority, tokens, sessions)
+			request := httptest.NewRequest(testCase.method, testCase.path, nil)
+			testCase.add(request)
+			request.TLS = &tls.ConnectionState{
+				PeerCertificates: []*x509.Certificate{certificate},
+				VerifiedChains:   [][]*x509.Certificate{{certificate}},
+			}
+			response := httptest.NewRecorder()
+
+			handler.ServeHTTP(response, request)
+
+			if response.Code != http.StatusUnauthorized {
+				t.Fatalf("status = %d, want %d; body = %s", response.Code, http.StatusUnauthorized, response.Body.String())
+			}
+			if testCase.reached(tokens, sessions) {
+				t.Fatal("mixed Machine/member principal reached member authority store")
+			}
+		})
+	}
+}
+
 func TestMachineRouteRejectsMemberCredentialsEvenWithValidCertificate(t *testing.T) {
 	t.Parallel()
 
@@ -123,7 +186,7 @@ func TestMachineRouteRejectsMemberCredentialsEvenWithValidCertificate(t *testing
 			if err != nil {
 				t.Fatalf("compose member routes: %v", err)
 			}
-			machine, err := NewMachineRoutes(runtimeStore)
+			machine, err := NewMachineRoutes(runtimeStore, runtimeStore)
 			if err != nil {
 				t.Fatalf("compose Machine routes: %v", err)
 			}
@@ -148,6 +211,28 @@ func TestMachineRouteRejectsMemberCredentialsEvenWithValidCertificate(t *testing
 	}
 }
 
+func memberSurfaceTestAPI(
+	t *testing.T,
+	authority *host.CertificateAuthority,
+	tokens UserTokenAuthenticator,
+	sessions BrowserSessionStore,
+) http.Handler {
+	t.Helper()
+	member, err := NewMemberRoutes(
+		tokens, sessions, emptyMemberships{}, &recordingMachineEnrollments{},
+		unavailableWorkCommands{}, unavailableWorkQueries{}, authority,
+	)
+	if err != nil {
+		t.Fatalf("compose member routes: %v", err)
+	}
+	runtimeStore := &recordingMachineRuntime{}
+	machine, err := NewMachineRoutes(runtimeStore, runtimeStore)
+	if err != nil {
+		t.Fatalf("compose Machine routes: %v", err)
+	}
+	return mustAPI(t, member, machine)
+}
+
 func browserTestAPI(t *testing.T, sessions BrowserSessionStore) http.Handler {
 	t.Helper()
 	authority := testAuthority(t)
@@ -158,7 +243,8 @@ func browserTestAPI(t *testing.T, sessions BrowserSessionStore) http.Handler {
 	if err != nil {
 		t.Fatalf("compose member routes: %v", err)
 	}
-	machine, err := NewMachineRoutes(&recordingMachineRuntime{})
+	runtimeStore := &recordingMachineRuntime{}
+	machine, err := NewMachineRoutes(runtimeStore, runtimeStore)
 	if err != nil {
 		t.Fatalf("compose Machine routes: %v", err)
 	}
@@ -169,6 +255,7 @@ type recordingBrowserSessions struct {
 	created             identity.BrowserSession
 	sourceToken         string
 	authenticatedSecret string
+	revokedSecret       string
 	user                identity.AuthenticatedUser
 }
 
@@ -192,7 +279,10 @@ func (s *recordingBrowserSessions) AuthenticateBrowserSession(
 	return s.user, nil
 }
 
-func (*recordingBrowserSessions) RevokeBrowserSession(context.Context, string) error { return nil }
+func (s *recordingBrowserSessions) RevokeBrowserSession(_ context.Context, secret string) error {
+	s.revokedSecret = secret
+	return nil
+}
 
 var _ MachineRuntimeStore = (*recordingMachineRuntime)(nil)
 var _ = host.MachineStatus{}

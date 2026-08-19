@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	"github.com/ApexReasoning/carry/internal/host"
+	"github.com/ApexReasoning/carry/internal/run"
 	"github.com/ApexReasoning/carry/internal/space"
 	"github.com/ApexReasoning/carry/internal/work"
 )
@@ -35,12 +36,14 @@ func writeStoreError(response http.ResponseWriter, err error) {
 		writeAPIError(response, http.StatusForbidden, err.Error())
 	case errors.Is(err, host.ErrMachineNotFound), errors.Is(err, work.ErrNotFound):
 		writeAPIError(response, http.StatusNotFound, err.Error())
+	case errors.Is(err, run.ErrStaleAttempt):
+		writeAPIError(response, http.StatusUnauthorized, "Agent credential is invalid or expired")
 	case errors.Is(err, host.ErrIdempotencyConflict), errors.Is(err, work.ErrIdempotencyConflict),
 		errors.Is(err, work.ErrNotOpen):
 		writeAPIError(response, http.StatusConflict, err.Error())
-	case errors.Is(err, host.ErrInvalidRuntimeReport),
-		errors.Is(err, work.ErrInvalidGoal), errors.Is(err, work.ErrInvalidMessage),
-		errors.Is(err, work.ErrInvalidIdempotency):
+	case errors.Is(err, host.ErrInvalidRuntimeReport), errors.Is(err, run.ErrInvalidDraft),
+		errors.Is(err, run.ErrInvalidOutcome), errors.Is(err, work.ErrInvalidGoal),
+		errors.Is(err, work.ErrInvalidMessage), errors.Is(err, work.ErrInvalidIdempotency):
 		writeAPIError(response, http.StatusBadRequest, err.Error())
 	default:
 		writeAPIError(response, http.StatusInternalServerError, "request failed")
