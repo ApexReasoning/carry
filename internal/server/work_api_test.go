@@ -3,8 +3,10 @@ package server
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/ApexReasoning/carry/internal/identity"
@@ -102,6 +104,67 @@ func TestAppendWorkMessageUsesAuthenticatedAuthor(t *testing.T) {
 	}
 }
 
+func TestAppendWorkMessageAcceptsWorstCaseEscapedValidEnvelope(t *testing.T) {
+	t.Parallel()
+	const (
+		spaceID = "2ba3dd27-1b41-453c-8057-91f31a0d13b1"
+		workID  = "3ce2b155-b998-458e-9e5e-f022ca509135"
+	)
+	text := strings.Repeat("\x00", 60*1024)
+	body, err := json.Marshal(struct {
+		Text string `json:"text"`
+	}{Text: text})
+	if err != nil {
+		t.Fatalf("encode escaped message: %v", err)
+	}
+	if len(body) <= 64<<10 {
+		t.Fatalf("escaped envelope size = %d, want above the prior command limit", len(body))
+	}
+	commands := &recordingWorkCommands{}
+	handler := workTestAPI(t, commands, &recordingWorkQueries{})
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/spaces/"+spaceID+"/works/"+workID+"/messages",
+		bytes.NewReader(body),
+	)
+	request.Header.Set("Authorization", "Bearer member-token")
+	request.Header.Set("Idempotency-Key", "escaped-message")
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body = %s", response.Code, http.StatusOK, response.Body.String())
+	}
+	if commands.append.Text != text {
+		t.Fatalf("decoded message bytes = %d, want %d", len(commands.append.Text), len(text))
+	}
+}
+
+func TestRetryWorkUsesAuthenticatedMemberAndIdempotency(t *testing.T) {
+	t.Parallel()
+	const (
+		spaceID = "2ba3dd27-1b41-453c-8057-91f31a0d13b1"
+		workID  = "3ce2b155-b998-458e-9e5e-f022ca509135"
+	)
+	commands := &recordingWorkCommands{}
+	handler := workTestAPI(t, commands, &recordingWorkQueries{})
+	request := httptest.NewRequest(http.MethodPost, "/v1/spaces/"+spaceID+"/works/"+workID+"/retry", nil)
+	request.Header.Set("Authorization", "Bearer member-token")
+	request.Header.Set("Idempotency-Key", "retry-renewal")
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d; body = %s", response.Code, http.StatusNoContent, response.Body.String())
+	}
+	if commands.retry.WorkID != workID || commands.retry.SpaceID != spaceID ||
+		commands.retry.RequestedBy != "member-9" || commands.retry.IdempotencyKey != "retry-renewal" {
+		t.Fatalf("retry command = %#v", commands.retry)
+	}
+}
+
 func workTestAPI(t *testing.T, commands WorkCommands, queries WorkQueries) http.Handler {
 	t.Helper()
 	authority := testAuthority(t)
@@ -126,6 +189,7 @@ type recordingWorkCommands struct {
 	message work.Message
 	create  work.CreateCommand
 	append  work.AppendMessageCommand
+	retry   work.RetryCommand
 }
 
 func (s *recordingWorkCommands) CreateWork(_ context.Context, command work.CreateCommand) (work.Work, error) {
@@ -136,6 +200,11 @@ func (s *recordingWorkCommands) CreateWork(_ context.Context, command work.Creat
 func (s *recordingWorkCommands) AppendWorkMessage(_ context.Context, command work.AppendMessageCommand) (work.Message, error) {
 	s.append = command
 	return s.message, nil
+}
+
+func (s *recordingWorkCommands) RequestWorkRetry(_ context.Context, command work.RetryCommand) error {
+	s.retry = command
+	return nil
 }
 
 type recordingWorkQueries struct {

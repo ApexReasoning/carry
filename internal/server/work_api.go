@@ -15,6 +15,7 @@ import (
 type WorkCommands interface {
 	CreateWork(context.Context, work.CreateCommand) (work.Work, error)
 	AppendWorkMessage(context.Context, work.AppendMessageCommand) (work.Message, error)
+	RequestWorkRetry(context.Context, work.RetryCommand) error
 }
 
 // WorkQueries loads Work facts under current Space membership.
@@ -46,6 +47,7 @@ type workWire struct {
 	Understanding     string         `json:"understanding"`
 	NextStep          string         `json:"next_step"`
 	HasUnappliedInput bool           `json:"has_unapplied_input"`
+	NeedsRetry        bool           `json:"needs_retry"`
 	CreatedAt         time.Time      `json:"created_at"`
 }
 
@@ -62,6 +64,7 @@ func (api workAPI) mount(router chi.Router) {
 	router.Get("/spaces/{spaceID}/works", api.list)
 	router.Get("/spaces/{spaceID}/works/{workID}", api.load)
 	router.Post("/spaces/{spaceID}/works/{workID}/messages", api.appendMessage)
+	router.Post("/spaces/{spaceID}/works/{workID}/retry", api.retry)
 }
 
 func (api workAPI) create(response http.ResponseWriter, request *http.Request) {
@@ -175,6 +178,32 @@ func (api workAPI) appendMessage(response http.ResponseWriter, request *http.Req
 	writeJSON(response, http.StatusOK, messageToWire(message))
 }
 
+func (api workAPI) retry(response http.ResponseWriter, request *http.Request) {
+	user, ok := currentMember(response, request)
+	if !ok {
+		return
+	}
+	spaceID, ok := pathUUID(response, request, "spaceID")
+	if !ok {
+		return
+	}
+	workID, ok := pathUUID(response, request, "workID")
+	if !ok {
+		return
+	}
+	idempotencyKey, ok := requireIdempotencyKey(response, request)
+	if !ok {
+		return
+	}
+	if err := api.commands.RequestWorkRetry(request.Context(), work.RetryCommand{
+		WorkID: workID, SpaceID: spaceID, RequestedBy: user.UserID, IdempotencyKey: idempotencyKey,
+	}); err != nil {
+		writeStoreError(response, err)
+		return
+	}
+	response.WriteHeader(http.StatusNoContent)
+}
+
 func pathUUID(response http.ResponseWriter, request *http.Request, name string) (string, bool) {
 	value := chi.URLParam(request, name)
 	if uuid.Validate(value) != nil {
@@ -199,7 +228,7 @@ func workToWire(value work.Work) workWire {
 		Lifecycle: value.Lifecycle, OwnerUserID: value.OwnerUserID,
 		CreatorUserID: value.CreatorUserID, Understanding: value.Understanding,
 		NextStep: value.NextStep, HasUnappliedInput: value.HasUnappliedInput,
-		CreatedAt: value.CreatedAt,
+		NeedsRetry: value.NeedsRetry, CreatedAt: value.CreatedAt,
 	}
 }
 

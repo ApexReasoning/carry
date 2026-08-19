@@ -8,6 +8,7 @@ export {
   loadCurrentMember,
   loadWork,
   type Options,
+  retryWork,
   revokeCurrentBrowserSession,
 } from "./sdk.gen";
 export type {
@@ -46,6 +47,11 @@ export type {
   LoadWorkResponses,
   Member,
   Membership,
+  RetryWorkData,
+  RetryWorkError,
+  RetryWorkErrors,
+  RetryWorkResponse,
+  RetryWorkResponses,
   RevokeCurrentBrowserSessionData,
   RevokeCurrentBrowserSessionError,
   RevokeCurrentBrowserSessionErrors,

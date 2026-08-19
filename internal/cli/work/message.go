@@ -23,7 +23,7 @@ func newMessageCommand(configDirectory string, output io.Writer) *cobra.Command 
 			if strings.TrimSpace(text) == "" {
 				return fmt.Errorf("--text is required")
 			}
-			client, selectedSpaceID, err := connect(configDirectory, spaceID)
+			client, selectedSpaceID, err := connect(command.Context(), configDirectory, spaceID)
 			if err != nil {
 				return err
 			}

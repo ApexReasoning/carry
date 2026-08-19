@@ -5,6 +5,8 @@ import (
 	"encoding/base64"
 	"net/http"
 
+	"github.com/ApexReasoning/carry/internal/space"
+
 	"github.com/ApexReasoning/carry/internal/identity/memberfile"
 )
 
@@ -12,6 +14,17 @@ type memberHTTP struct {
 	client    *http.Client
 	serverURL string
 	token     string
+}
+
+type memberInfo struct {
+	UserID string
+	Spaces []space.Membership
+}
+
+type membershipWire struct {
+	SpaceID           string `json:"space_id"`
+	Name              string `json:"name"`
+	CanEnrollMachines bool   `json:"can_enroll_machines"`
 }
 
 type enrollmentResponse struct {
@@ -30,6 +43,29 @@ func connectMember(credential memberfile.Credential) (*memberHTTP, error) {
 		return nil, err
 	}
 	return &memberHTTP{client: client, serverURL: serverURL, token: credential.Token}, nil
+}
+
+func (c *memberHTTP) loadInfo(ctx context.Context) (memberInfo, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, c.serverURL+"/v1/me", nil)
+	if err != nil {
+		return memberInfo{}, err
+	}
+	request.Header.Set("Authorization", "Bearer "+c.token)
+	var wire struct {
+		UserID string           `json:"user_id"`
+		Spaces []membershipWire `json:"spaces"`
+	}
+	if err := sendJSON(c.client, request, &wire); err != nil {
+		return memberInfo{}, err
+	}
+	info := memberInfo{UserID: wire.UserID, Spaces: make([]space.Membership, 0, len(wire.Spaces))}
+	for _, membership := range wire.Spaces {
+		info.Spaces = append(info.Spaces, space.Membership{
+			SpaceID: membership.SpaceID, Name: membership.Name,
+			CanEnrollMachines: membership.CanEnrollMachines,
+		})
+	}
+	return info, nil
 }
 
 func (c *memberHTTP) enrollMachine(

@@ -29,6 +29,10 @@ func pendingMessageIdentity(
 	return loadOrCreatePendingIdentity(configDirectory, []string{"message", spaceID, workID, text})
 }
 
+func pendingRetryIdentity(configDirectory string, spaceID string, workID string) (string, string, error) {
+	return loadOrCreatePendingIdentity(configDirectory, []string{"retry", spaceID, workID})
+}
+
 func loadOrCreatePendingIdentity(configDirectory string, command []string) (string, string, error) {
 	encodedCommand, err := json.Marshal(command)
 	if err != nil {

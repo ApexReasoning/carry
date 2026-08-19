@@ -294,7 +294,7 @@ active Attempt lease expires
 - 接管运行中的 turn；
 - Agent credential rotation；
 - provider checkpoint/event abstraction；
-- failed/unknown Run 自动重试；
+- failed/unknown Run 自动重试；成员只能在 Work 上显式 `Try again`；
 - claim 后切换 adapter。
 
 ### 关闭证据
@@ -303,7 +303,9 @@ active Attempt lease expires
 - expired lease 永远不能复活；
 - 旧 Host 三种 mutation 全部被拒绝；
 - 新 Attempt 从 Work context fresh Execute；
-- failed/unknown 保持 terminal；
+- failed/unknown 保持 terminal，且只有 active member 的幂等 `Try again` 允许一个 fresh Run；
+- User API 只公开 derived `needs_retry`，不公开 outcome、Run 或 retry generation；
+- recovery 前后 fixed Work context 完全相同；
 - 没有 provider/runtime/session state 进入 core。
 
 ## 12. Node 4：Private Conversation

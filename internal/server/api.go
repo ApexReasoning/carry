@@ -13,7 +13,9 @@ import (
 	"github.com/ApexReasoning/carry/internal/work"
 )
 
-const maxCommandBytes = 64 << 10
+// maxCommandBytes covers the worst-case JSON escaping of the largest valid native update.
+// Domain byte limits remain authoritative after decoding.
+const maxCommandBytes = 512 << 10
 
 func decodeJSON(response http.ResponseWriter, request *http.Request, destination any) bool {
 	request.Body = http.MaxBytesReader(response, request.Body, maxCommandBytes)
@@ -39,7 +41,7 @@ func writeStoreError(response http.ResponseWriter, err error) {
 	case errors.Is(err, run.ErrStaleAttempt):
 		writeAPIError(response, http.StatusConflict, "Run Attempt is stale or expired")
 	case errors.Is(err, host.ErrIdempotencyConflict), errors.Is(err, work.ErrIdempotencyConflict),
-		errors.Is(err, work.ErrNotOpen):
+		errors.Is(err, work.ErrNotOpen), errors.Is(err, work.ErrRetryNotNeeded):
 		writeAPIError(response, http.StatusConflict, err.Error())
 	case errors.Is(err, run.ErrInvalidUpdate), errors.Is(err, run.ErrInvalidOutcome), errors.Is(err, work.ErrInvalidGoal),
 		errors.Is(err, work.ErrInvalidMessage), errors.Is(err, work.ErrInvalidIdempotency):

@@ -1,13 +1,20 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 import {
   appendWorkMessage,
   createWork,
   listWorks,
   loadWork,
+  retryWork,
   type WorkDetails,
 } from "../../carry-api";
 import type { Member, Work } from "../../generated/types.gen";
+import {
+  clearPendingIdentity,
+  pendingCreateIdentity,
+  pendingMessageIdentity,
+  pendingRetryIdentity,
+} from "./work-pending";
 
 export function useWorkBoard(member: Member | null) {
   const [spaceID, setSpaceID] = useState<string | null>(null);
@@ -15,22 +22,14 @@ export function useWorkBoard(member: Member | null) {
   const [details, setDetails] = useState<WorkDetails | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const pendingCreate = useRef<{
-    spaceID: string;
-    goal: string;
-    idempotencyKey: string;
-  } | null>(null);
-  const pendingMessage = useRef<{
-    spaceID: string;
-    workID: string;
-    text: string;
-    idempotencyKey: string;
-  } | null>(null);
 
   useEffect(() => {
     let active = true;
     async function loadInitialSpace() {
-      const initialSpaceID = member?.spaces[0]?.space_id ?? null;
+      const initialSpaceID =
+        member?.spaces.length === 1
+          ? (member.spaces[0]?.space_id ?? null)
+          : null;
       try {
         const loadedWorks = initialSpaceID
           ? await listWorks(initialSpaceID)
@@ -51,6 +50,7 @@ export function useWorkBoard(member: Member | null) {
   }, [member]);
 
   async function selectSpace(selectedSpaceID: string) {
+    if (!selectedSpaceID) return;
     await run(async () => {
       setWorks(await listWorks(selectedSpaceID));
       setSpaceID(selectedSpaceID);
@@ -64,66 +64,90 @@ export function useWorkBoard(member: Member | null) {
   }
 
   async function addWork(goal: string): Promise<boolean> {
-    if (!spaceID) return false;
-    const previous = pendingCreate.current;
-    const command =
-      previous?.spaceID === spaceID && previous.goal === goal
-        ? previous
-        : { spaceID, goal, idempotencyKey: crypto.randomUUID() };
-    pendingCreate.current = command;
+    if (!spaceID || !member) return false;
+    const identity = await pendingCreateIdentity(
+      member.user_id,
+      spaceID,
+      goal,
+    ).catch((caught: unknown) => {
+      setError(errorMessage(caught));
+      return null;
+    });
+    if (!identity) return false;
 
     const failure = await run(async () => {
-      const created = await createWork(
-        command.spaceID,
-        command.goal,
-        command.idempotencyKey,
-      );
-      setWorks((current) => [
-        created,
-        ...current.filter((item) => item.work_id !== created.work_id),
-      ]);
-      setDetails({ work: created, messages: [] });
+      const created = await createWork(spaceID, goal, identity.idempotencyKey);
+      const reloaded = await loadWork(spaceID, created.work_id);
+      updateDetails(reloaded);
+      clearPendingIdentity(identity);
     });
-    if (failure) return false;
-    pendingCreate.current = null;
-    return true;
+    return failure === null;
   }
 
   async function addMessage(text: string): Promise<boolean> {
-    if (!spaceID || !details) return false;
+    if (!spaceID || !details || !member) return false;
     const workID = details.work.work_id;
-    const previous = pendingMessage.current;
-    const command =
-      previous?.spaceID === spaceID &&
-      previous.workID === workID &&
-      previous.text === text
-        ? previous
-        : {
-            spaceID,
-            workID,
-            text,
-            idempotencyKey: crypto.randomUUID(),
-          };
-    pendingMessage.current = command;
+    const identity = await pendingMessageIdentity(
+      member.user_id,
+      spaceID,
+      workID,
+      text,
+    ).catch((caught: unknown) => {
+      setError(errorMessage(caught));
+      return null;
+    });
+    if (!identity) return false;
 
     const failure = await run(async () => {
-      await appendWorkMessage(
-        command.spaceID,
-        command.workID,
-        command.text,
-        command.idempotencyKey,
-      );
-      const reloaded = await loadWork(command.spaceID, command.workID);
-      setDetails(reloaded);
-      setWorks((current) =>
-        current.map((item) =>
-          item.work_id === reloaded.work.work_id ? reloaded.work : item,
-        ),
-      );
+      await appendWorkMessage(spaceID, workID, text, identity.idempotencyKey);
+      const reloaded = await loadWork(spaceID, workID);
+      updateDetails(reloaded);
+      clearPendingIdentity(identity);
     });
-    if (failure) return false;
-    pendingMessage.current = null;
-    return true;
+    return failure === null;
+  }
+
+  async function retryCurrentWork(): Promise<void> {
+    if (!spaceID || !details || !member) return;
+    const workID = details.work.work_id;
+    const identity = await pendingRetryIdentity(
+      member.user_id,
+      spaceID,
+      workID,
+    ).catch((caught: unknown) => {
+      setError(errorMessage(caught));
+      return null;
+    });
+    if (!identity) return;
+
+    await run(async () => {
+      try {
+        await retryWork(spaceID, workID, identity.idempotencyKey);
+      } catch (caught) {
+        const reloaded = await loadWork(spaceID, workID);
+        updateDetails(reloaded);
+        if (reloaded.work.needs_retry) throw caught;
+        clearPendingIdentity(identity);
+        return;
+      }
+
+      const reloaded = await loadWork(spaceID, workID);
+      updateDetails(reloaded);
+      clearPendingIdentity(identity);
+      if (reloaded.work.needs_retry) {
+        throw new Error(
+          "The previous retry was reconciled, but this Work needs a new choice. Choose Try again once more.",
+        );
+      }
+    });
+  }
+
+  function updateDetails(reloaded: WorkDetails) {
+    setDetails(reloaded);
+    setWorks((current) => [
+      reloaded.work,
+      ...current.filter((item) => item.work_id !== reloaded.work.work_id),
+    ]);
   }
 
   async function run(operation: () => Promise<void>): Promise<unknown | null> {
@@ -150,6 +174,7 @@ export function useWorkBoard(member: Member | null) {
     selectWork,
     addWork,
     addMessage,
+    retryCurrentWork,
   };
 }
 

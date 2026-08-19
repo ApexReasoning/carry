@@ -46,6 +46,9 @@ type Run struct {
 	CurrentFence             int64
 	CreatedAt                pgtype.Timestamptz
 	CompletedAt              pgtype.Timestamptz
+	RetryRequestedAt         pgtype.Timestamptz
+	RetryRequestedByUserID   pgtype.UUID
+	RetryIdempotencyKey      *string
 }
 
 type RunAttempt struct {

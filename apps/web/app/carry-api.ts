@@ -6,9 +6,12 @@ import {
   listWorks as listWorksRequest,
   loadCurrentMember,
   loadWork as loadWorkRequest,
+  retryWork as retryWorkRequest,
   revokeCurrentBrowserSession,
 } from "./generated/sdk.gen";
 import type { Member, Work, WorkMessage } from "./generated/types.gen";
+
+export class MutationOutcomeUnknownError extends Error {}
 
 export type WorkDetails = {
   work: Work;
@@ -27,12 +30,16 @@ export async function establishBrowserSession(token: string): Promise<void> {
     ...sameOrigin,
     auth: token,
   });
-  requireSuccess(result.response, result.error, "Open Carry");
+  requireMutationSuccess(result.response, result.error, "Open Carry");
 }
 
 export async function closeBrowserSession(): Promise<void> {
   const result = await revokeCurrentBrowserSession(sameOrigin);
-  requireSuccess(result.response, result.error, "Close browser session");
+  requireMutationSuccess(
+    result.response,
+    result.error,
+    "Close browser session",
+  );
 }
 
 export async function currentMember(): Promise<Member | null> {
@@ -82,6 +89,19 @@ export async function loadWork(
   return requireData(result.data, result.response, result.error, "Load Work");
 }
 
+export async function retryWork(
+  spaceID: string,
+  workID: string,
+  idempotencyKey: string,
+): Promise<void> {
+  const result = await retryWorkRequest({
+    ...sameOrigin,
+    headers: { "Idempotency-Key": idempotencyKey },
+    path: { spaceID, workID },
+  });
+  requireMutationSuccess(result.response, result.error, "Retry Work");
+}
+
 export async function appendWorkMessage(
   spaceID: string,
   workID: string,
@@ -110,11 +130,25 @@ function requireMutationData<T>(
 ): T {
   if (!response && error) {
     const detail = error instanceof Error ? `: ${error.message}` : "";
-    throw new Error(
+    throw new MutationOutcomeUnknownError(
       `${action} outcome is unknown; retry the same command to reconcile${detail}`,
     );
   }
   return requireData(data, response, error, action);
+}
+
+function requireMutationSuccess(
+  response: Response | undefined,
+  error: unknown,
+  action: string,
+): void {
+  if (!response) {
+    const detail = error instanceof Error ? `: ${error.message}` : "";
+    throw new MutationOutcomeUnknownError(
+      `${action} outcome is unknown${detail}`,
+    );
+  }
+  requireSuccess(response, error, action);
 }
 
 function requireData<T>(

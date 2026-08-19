@@ -56,7 +56,7 @@ func run(ctx context.Context, configDirectory string, output io.Writer, flags lo
 	}
 	if err := memberfile.Save(configDirectory, memberfile.Credential{
 		ServerURL: serverURL, Token: flags.token, CACertificatePEM: string(caCertificatePEM),
-		UserID: info.UserID, Spaces: info.Spaces,
+		UserID: info.UserID,
 	}); err != nil {
 		return err
 	}

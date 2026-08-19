@@ -1,6 +1,6 @@
 openapi: 3.1.0
 info:
-  title: Carry Node 1 User API
+  title: Carry User API
   version: 0.1.0
 servers:
   - url: /
@@ -78,7 +78,7 @@ paths:
                 goal:
                   type: string
                   minLength: 1
-                  maxLength: 2000
+                  description: After trimming, 1–2000 UTF-8 bytes
       responses:
         "200":
           description: Created or idempotently replayed Work
@@ -138,7 +138,7 @@ paths:
                 text:
                   type: string
                   minLength: 1
-                  maxLength: 61440
+                  description: Non-blank and at most 61440 UTF-8 bytes
       responses:
         "200":
           description: Appended or idempotently replayed Work Message
@@ -147,6 +147,25 @@ paths:
               schema:
                 $ref: "#/components/schemas/WorkMessage"
         "401":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+  /v1/spaces/{spaceID}/works/{workID}/retry:
+    parameters:
+      - $ref: "#/components/parameters/SpaceID"
+      - $ref: "#/components/parameters/WorkID"
+    post:
+      operationId: retryWork
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "204":
+          description: Work retry requested or idempotently replayed
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
           $ref: "#/components/responses/Error"
         "404":
           $ref: "#/components/responses/Error"
@@ -235,6 +254,7 @@ components:
         - understanding
         - next_step
         - has_unapplied_input
+        - needs_retry
         - created_at
       properties:
         work_id:
@@ -258,6 +278,9 @@ components:
           type: string
         has_unapplied_input:
           type: boolean
+        needs_retry:
+          type: boolean
+          description: An active member must explicitly request a fresh attempt
         created_at:
           type: string
           format: date-time

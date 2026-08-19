@@ -87,7 +87,7 @@ func TestMachineClaimReturnsCompleteWorkContextWithoutSecondCredential(t *testin
 
 	authority, machineCertificate := testMachineCertificate(t, "machine-12")
 	runs := &recordingMachineRuns{claim: run.Claim{
-		RunID: "run-4", AttemptID: "attempt-4", WorkID: "work-4", SpaceID: "space-1", Fence: 3,
+		RunID: "run-4", AttemptID: "attempt-4", WorkID: "work-4", Fence: 3,
 		LeaseExpiresAt: time.Date(2026, time.August, 18, 17, 0, 0, 0, time.UTC),
 		Goal:           "Prepare renewal", CurrentUnderstanding: "Finance approved",
 		BaseUnderstandingVersion: 2, InputEndSeq: 4,
@@ -309,6 +309,10 @@ func (unavailableWorkCommands) CreateWork(context.Context, work.CreateCommand) (
 
 func (unavailableWorkCommands) AppendWorkMessage(context.Context, work.AppendMessageCommand) (work.Message, error) {
 	return work.Message{}, errors.New("not implemented")
+}
+
+func (unavailableWorkCommands) RequestWorkRetry(context.Context, work.RetryCommand) error {
+	return errors.New("not implemented")
 }
 
 type unavailableWorkQueries struct{}

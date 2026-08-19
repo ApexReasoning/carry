@@ -46,6 +46,31 @@ func TestPendingWorkIdentitySurvivesProcessReconstruction(t *testing.T) {
 	}
 }
 
+func TestPendingRetryIdentitySurvivesUntilTheExactRequestIsCleared(t *testing.T) {
+	directory := t.TempDir()
+	path, first, err := pendingRetryIdentity(directory, "space-1", "work-1")
+	if err != nil {
+		t.Fatalf("create pending retry identity: %v", err)
+	}
+	_, replayed, err := pendingRetryIdentity(directory, "space-1", "work-1")
+	if err != nil {
+		t.Fatalf("replay pending retry identity: %v", err)
+	}
+	if replayed != first {
+		t.Fatalf("replayed retry identity = %q, want %q", replayed, first)
+	}
+	if err := clearPendingIdentity(path); err != nil {
+		t.Fatalf("clear pending retry identity: %v", err)
+	}
+	_, next, err := pendingRetryIdentity(directory, "space-1", "work-1")
+	if err != nil {
+		t.Fatalf("create next retry identity: %v", err)
+	}
+	if next == first {
+		t.Fatal("new explicit retry choice reused the previous identity")
+	}
+}
+
 func TestPendingMessageIdentityIncludesUnmodifiedTextAndTarget(t *testing.T) {
 	directory := t.TempDir()
 	_, first, err := pendingMessageIdentity(directory, "space-1", "work-1", "  keep spacing  ")

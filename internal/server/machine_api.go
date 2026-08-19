@@ -43,19 +43,23 @@ type finishAttemptRequest struct {
 	Outcome run.State `json:"outcome"`
 }
 
+type runMessageWire struct {
+	AuthorUserID string `json:"author_user_id"`
+	Text         string `json:"text"`
+}
+
 type runClaimWire struct {
-	RunID                    string        `json:"run_id"`
-	AttemptID                string        `json:"attempt_id"`
-	WorkID                   string        `json:"work_id"`
-	SpaceID                  string        `json:"space_id"`
-	Fence                    int64         `json:"fence"`
-	LeaseExpiresAt           time.Time     `json:"lease_expires_at"`
-	Goal                     string        `json:"goal"`
-	CurrentUnderstanding     string        `json:"current_understanding"`
-	CurrentNextStep          string        `json:"current_next_step"`
-	BaseUnderstandingVersion int64         `json:"base_understanding_version"`
-	InputEndSeq              int64         `json:"input_end_seq"`
-	Messages                 []run.Message `json:"messages"`
+	RunID                    string           `json:"run_id"`
+	AttemptID                string           `json:"attempt_id"`
+	WorkID                   string           `json:"work_id"`
+	Fence                    int64            `json:"fence"`
+	LeaseExpiresAt           time.Time        `json:"lease_expires_at"`
+	Goal                     string           `json:"goal"`
+	CurrentUnderstanding     string           `json:"current_understanding"`
+	CurrentNextStep          string           `json:"current_next_step"`
+	BaseUnderstandingVersion int64            `json:"base_understanding_version"`
+	InputEndSeq              int64            `json:"input_end_seq"`
+	Messages                 []runMessageWire `json:"messages"`
 }
 
 func requireMachine(next http.Handler) http.Handler {
@@ -104,14 +108,18 @@ func (api machineAPI) claimRun(response http.ResponseWriter, request *http.Reque
 		writeStoreError(response, err)
 		return
 	}
+	messages := make([]runMessageWire, 0, len(claim.Messages))
+	for _, message := range claim.Messages {
+		messages = append(messages, runMessageWire{AuthorUserID: message.AuthorUserID, Text: message.Text})
+	}
 	response.Header().Set("Cache-Control", "no-store")
 	writeJSON(response, http.StatusOK, runClaimWire{
 		RunID: claim.RunID, AttemptID: claim.AttemptID, WorkID: claim.WorkID,
-		SpaceID: claim.SpaceID, Fence: claim.Fence, LeaseExpiresAt: claim.LeaseExpiresAt,
+		Fence: claim.Fence, LeaseExpiresAt: claim.LeaseExpiresAt,
 		Goal: claim.Goal, CurrentUnderstanding: claim.CurrentUnderstanding,
 		CurrentNextStep:          claim.CurrentNextStep,
 		BaseUnderstandingVersion: claim.BaseUnderstandingVersion,
-		InputEndSeq:              claim.InputEndSeq, Messages: claim.Messages,
+		InputEndSeq:              claim.InputEndSeq, Messages: messages,
 	})
 }
 

@@ -9,6 +9,7 @@ import (
 
 	"github.com/ApexReasoning/carry/internal/host/machinefile"
 	"github.com/ApexReasoning/carry/internal/identity/memberfile"
+	"github.com/ApexReasoning/carry/internal/space"
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 )
@@ -46,11 +47,18 @@ func runEnroll(ctx context.Context, configDirectory string, output io.Writer, fl
 	if err != nil {
 		return err
 	}
-	pending, err := loadOrCreatePendingEnrollment(configDirectory, member, flags)
+	connection, err := connectMember(member)
 	if err != nil {
 		return err
 	}
-	connection, err := connectMember(member)
+	info, err := connection.loadInfo(ctx)
+	if err != nil {
+		return fmt.Errorf("load current member: %w", err)
+	}
+	if info.UserID != member.UserID {
+		return errors.New("current member identity does not match the saved login")
+	}
+	pending, err := loadOrCreatePendingEnrollment(configDirectory, member, info.Spaces, flags)
 	if err != nil {
 		return err
 	}
@@ -81,6 +89,7 @@ func runEnroll(ctx context.Context, configDirectory string, output io.Writer, fl
 func loadOrCreatePendingEnrollment(
 	configDirectory string,
 	member memberfile.Credential,
+	memberships []space.Membership,
 	flags enrollFlags,
 ) (machinefile.PendingEnrollment, error) {
 	pending, err := machinefile.LoadPending(configDirectory)
@@ -97,12 +106,15 @@ func loadOrCreatePendingEnrollment(
 		if flags.displayName != "" && flags.displayName != pending.DisplayName {
 			return machinefile.PendingEnrollment{}, errors.New("--name does not match the pending Machine enrollment")
 		}
+		if _, err := enrollmentSpace(memberships, pending.SpaceID); err != nil {
+			return machinefile.PendingEnrollment{}, err
+		}
 		return pending, nil
 	}
 	if !errors.Is(err, os.ErrNotExist) {
 		return machinefile.PendingEnrollment{}, err
 	}
-	spaceID, err := enrollmentSpace(member, flags.spaceID)
+	spaceID, err := enrollmentSpace(memberships, flags.spaceID)
 	if err != nil {
 		return machinefile.PendingEnrollment{}, err
 	}
@@ -129,12 +141,17 @@ func loadOrCreatePendingEnrollment(
 	return pending, nil
 }
 
-func enrollmentSpace(member memberfile.Credential, requested string) (string, error) {
+func enrollmentSpace(memberships []space.Membership, requested string) (string, error) {
 	if requested != "" {
-		return requested, nil
+		for _, membership := range memberships {
+			if membership.SpaceID == requested && membership.CanEnrollMachines {
+				return requested, nil
+			}
+		}
+		return "", errors.New("current member cannot enroll a Machine in the selected Space")
 	}
 	var selected string
-	for _, membership := range member.Spaces {
+	for _, membership := range memberships {
 		if !membership.CanEnrollMachines {
 			continue
 		}

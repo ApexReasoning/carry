@@ -53,7 +53,11 @@ func (s *Store) CreateWork(ctx context.Context, command work.CreateCommand) (wor
 		if !bytes.Equal(existing.CreateRequestDigest, digest[:]) {
 			return work.Work{}, work.ErrIdempotencyConflict
 		}
-		result := workFromIdempotencyRow(existing)
+		needsRetry, loadErr := queries.WorkNeedsRetry(ctx, existing.WorkID)
+		if loadErr != nil {
+			return work.Work{}, fmt.Errorf("load Work retry state: %w", loadErr)
+		}
+		result := workFromIdempotencyRow(existing, needsRetry)
 		if err := transaction.Commit(ctx); err != nil {
 			return work.Work{}, fmt.Errorf("commit idempotent work creation: %w", err)
 		}
@@ -85,12 +89,18 @@ func (s *Store) ListWorks(ctx context.Context, userID string, spaceID string) ([
 	}
 	works := make([]work.Work, 0, len(rows))
 	for _, row := range rows {
+		needsRetry, retryErr := queries.WorkNeedsRetry(ctx, row.WorkID)
+		if retryErr != nil {
+			return nil, fmt.Errorf("load Work retry state: %w", retryErr)
+		}
 		works = append(works, work.Work{
 			WorkID: row.WorkID, SpaceID: row.SpaceID, Goal: row.Goal,
 			Lifecycle: work.Lifecycle(row.Lifecycle), OwnerUserID: row.OwnerUserID,
-			CreatorUserID: row.CreatorUserID,
-			Understanding: textValue(row.Understanding), NextStep: textValue(row.NextStep),
+			CreatorUserID:     row.CreatorUserID,
+			Understanding:     textValue(row.Understanding),
+			NextStep:          textValue(row.NextStep),
 			HasUnappliedInput: row.AppliedInputSeq < row.InputHeadSeq,
+			NeedsRetry:        needsRetry,
 			CreatedAt:         row.CreatedAt.Time,
 		})
 	}
@@ -117,6 +127,10 @@ func (s *Store) LoadWork(ctx context.Context, userID string, spaceID string, wor
 	if err != nil {
 		return work.Details{}, fmt.Errorf("load work: %w", err)
 	}
+	needsRetry, err := queries.WorkNeedsRetry(ctx, workID)
+	if err != nil {
+		return work.Details{}, fmt.Errorf("load Work retry state: %w", err)
+	}
 	messageRows, err := queries.ListWorkMessages(ctx, workID)
 	if err != nil {
 		return work.Details{}, fmt.Errorf("list work messages: %w", err)
@@ -129,7 +143,7 @@ func (s *Store) LoadWork(ctx context.Context, userID string, spaceID string, wor
 			InputSeq: message.InputSeq, CreatedAt: message.CreatedAt.Time,
 		})
 	}
-	result := work.Details{Work: workFromLoadRow(row), Messages: messages}
+	result := work.Details{Work: workFromLoadRow(row, needsRetry), Messages: messages}
 	if err := transaction.Commit(ctx); err != nil {
 		return work.Details{}, fmt.Errorf("commit work load: %w", err)
 	}
@@ -238,23 +252,27 @@ func workFromCreateRow(row dbsqlc.CreateWorkRow) work.Work {
 	}
 }
 
-func workFromIdempotencyRow(row dbsqlc.FindWorkByCreateIdempotencyRow) work.Work {
-	return work.Work{
-		WorkID: row.WorkID, SpaceID: row.SpaceID, Goal: row.Goal,
-		Lifecycle: work.Lifecycle(row.Lifecycle), OwnerUserID: row.OwnerUserID,
-		CreatorUserID:     row.CreatorUserID,
-		HasUnappliedInput: true,
-		CreatedAt:         row.CreatedAt.Time,
-	}
-}
-
-func workFromLoadRow(row dbsqlc.LoadWorkRow) work.Work {
+func workFromIdempotencyRow(row dbsqlc.FindWorkByCreateIdempotencyRow, needsRetry bool) work.Work {
 	return work.Work{
 		WorkID: row.WorkID, SpaceID: row.SpaceID, Goal: row.Goal,
 		Lifecycle: work.Lifecycle(row.Lifecycle), OwnerUserID: row.OwnerUserID,
 		CreatorUserID: row.CreatorUserID,
 		Understanding: textValue(row.Understanding), NextStep: textValue(row.NextStep),
 		HasUnappliedInput: row.AppliedInputSeq < row.InputHeadSeq,
+		NeedsRetry:        needsRetry,
+		CreatedAt:         row.CreatedAt.Time,
+	}
+}
+
+func workFromLoadRow(row dbsqlc.LoadWorkRow, needsRetry bool) work.Work {
+	return work.Work{
+		WorkID: row.WorkID, SpaceID: row.SpaceID, Goal: row.Goal,
+		Lifecycle: work.Lifecycle(row.Lifecycle), OwnerUserID: row.OwnerUserID,
+		CreatorUserID:     row.CreatorUserID,
+		Understanding:     textValue(row.Understanding),
+		NextStep:          textValue(row.NextStep),
+		HasUnappliedInput: row.AppliedInputSeq < row.InputHeadSeq,
+		NeedsRetry:        needsRetry,
 		CreatedAt:         row.CreatedAt.Time,
 	}
 }

@@ -29,6 +29,10 @@ export type Work = {
   understanding: string;
   next_step: string;
   has_unapplied_input: boolean;
+  /**
+   * An active member must explicitly request a fresh attempt
+   */
+  needs_retry: boolean;
   created_at: string;
 };
 
@@ -162,6 +166,9 @@ export type ListWorksResponse = ListWorksResponses[keyof ListWorksResponses];
 
 export type CreateWorkData = {
   body: {
+    /**
+     * After trimming, 1–2000 UTF-8 bytes
+     */
     goal: string;
   };
   headers: {
@@ -237,6 +244,9 @@ export type LoadWorkResponse = LoadWorkResponses[keyof LoadWorkResponses];
 
 export type AppendWorkMessageData = {
   body: {
+    /**
+     * Non-blank and at most 61440 UTF-8 bytes
+     */
     text: string;
   };
   headers: {
@@ -277,3 +287,46 @@ export type AppendWorkMessageResponses = {
 
 export type AppendWorkMessageResponse =
   AppendWorkMessageResponses[keyof AppendWorkMessageResponses];
+
+export type RetryWorkData = {
+  body?: never;
+  headers: {
+    "Idempotency-Key": string;
+  };
+  path: {
+    spaceID: string;
+    workID: string;
+  };
+  query?: never;
+  url: "/v1/spaces/{spaceID}/works/{workID}/retry";
+};
+
+export type RetryWorkErrors = {
+  /**
+   * Request rejected
+   */
+  401: ApiError;
+  /**
+   * Request rejected
+   */
+  403: ApiError;
+  /**
+   * Request rejected
+   */
+  404: ApiError;
+  /**
+   * Request rejected
+   */
+  409: ApiError;
+};
+
+export type RetryWorkError = RetryWorkErrors[keyof RetryWorkErrors];
+
+export type RetryWorkResponses = {
+  /**
+   * Work retry requested or idempotently replayed
+   */
+  204: void;
+};
+
+export type RetryWorkResponse = RetryWorkResponses[keyof RetryWorkResponses];

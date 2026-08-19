@@ -29,8 +29,8 @@ const (
 
 // Message is member-authored Work input included in one fixed Run range.
 type Message struct {
-	AuthorUserID string `json:"author_user_id"`
-	Text         string `json:"text"`
+	AuthorUserID string
+	Text         string
 }
 
 // Claim is the complete immutable descriptor granted to one Machine Attempt.
@@ -38,7 +38,6 @@ type Claim struct {
 	RunID                    string
 	AttemptID                string
 	WorkID                   string
-	SpaceID                  string
 	Fence                    int64
 	LeaseExpiresAt           time.Time
 	Goal                     string

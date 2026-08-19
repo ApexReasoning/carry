@@ -16,14 +16,14 @@ func TestPendingEnrollmentReusesIdentityAfterResponseLoss(t *testing.T) {
 	directory := t.TempDir()
 	member := memberfile.Credential{
 		ServerURL: "https://carry.example.com", CACertificatePEM: "test-ca", UserID: "user-1",
-		Spaces: []space.Membership{{SpaceID: "space-1", CanEnrollMachines: true}},
 	}
+	memberships := []space.Membership{{SpaceID: "space-1", CanEnrollMachines: true}}
 	flags := enrollFlags{displayName: "test-host"}
-	first, err := loadOrCreatePendingEnrollment(directory, member, flags)
+	first, err := loadOrCreatePendingEnrollment(directory, member, memberships, flags)
 	if err != nil {
 		t.Fatalf("create pending enrollment: %v", err)
 	}
-	second, err := loadOrCreatePendingEnrollment(directory, member, flags)
+	second, err := loadOrCreatePendingEnrollment(directory, member, memberships, flags)
 	if err != nil {
 		t.Fatalf("resume pending enrollment: %v", err)
 	}
@@ -47,17 +47,17 @@ func TestPendingEnrollmentRejectsChangedCommand(t *testing.T) {
 	directory := t.TempDir()
 	member := memberfile.Credential{
 		ServerURL: "https://carry.example.com", CACertificatePEM: "test-ca", UserID: "user-1",
-		Spaces: []space.Membership{{SpaceID: "space-1", CanEnrollMachines: true}},
 	}
-	if _, err := loadOrCreatePendingEnrollment(directory, member, enrollFlags{displayName: "first"}); err != nil {
+	memberships := []space.Membership{{SpaceID: "space-1", CanEnrollMachines: true}}
+	if _, err := loadOrCreatePendingEnrollment(directory, member, memberships, enrollFlags{displayName: "first"}); err != nil {
 		t.Fatalf("create pending enrollment: %v", err)
 	}
-	if _, err := loadOrCreatePendingEnrollment(directory, member, enrollFlags{displayName: "second"}); err == nil {
+	if _, err := loadOrCreatePendingEnrollment(directory, member, memberships, enrollFlags{displayName: "second"}); err == nil {
 		t.Fatal("changed display name accepted for pending enrollment")
 	}
 	otherMember := member
 	otherMember.UserID = "user-2"
-	if _, err := loadOrCreatePendingEnrollment(directory, otherMember, enrollFlags{}); err == nil {
+	if _, err := loadOrCreatePendingEnrollment(directory, otherMember, memberships, enrollFlags{}); err == nil {
 		t.Fatal("different member accepted for pending enrollment")
 	}
 }
@@ -65,14 +65,14 @@ func TestPendingEnrollmentRejectsChangedCommand(t *testing.T) {
 func TestEnrollmentSpaceRequiresChoiceWhenSeveralAreAllowed(t *testing.T) {
 	t.Parallel()
 
-	member := memberfile.Credential{Spaces: []space.Membership{
+	memberships := []space.Membership{
 		{SpaceID: "space-1", CanEnrollMachines: true},
 		{SpaceID: "space-2", CanEnrollMachines: true},
-	}}
-	if _, err := enrollmentSpace(member, ""); err == nil {
+	}
+	if _, err := enrollmentSpace(memberships, ""); err == nil {
 		t.Fatal("multiple enrollment Spaces accepted without --space")
 	}
-	selected, err := enrollmentSpace(member, "space-2")
+	selected, err := enrollmentSpace(memberships, "space-2")
 	if err != nil {
 		t.Fatalf("explicit Space rejected: %v", err)
 	}

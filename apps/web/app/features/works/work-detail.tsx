@@ -1,6 +1,7 @@
 import { type SubmitEvent, useState } from "react";
 
 import type { WorkDetails } from "../../carry-api";
+import { messageInputError } from "./work-input";
 import { formatWorkDate, formatWorkTime } from "./work-time";
 
 type WorkDetailProps = {
@@ -8,6 +9,7 @@ type WorkDetailProps = {
   busy: boolean;
   currentMemberID: string;
   onMessage: (text: string) => Promise<boolean>;
+  onRetry: () => Promise<void>;
 };
 
 export function WorkDetail({
@@ -15,16 +17,19 @@ export function WorkDetail({
   busy,
   currentMemberID,
   onMessage,
+  onRetry,
 }: WorkDetailProps) {
   const [text, setText] = useState("");
+  const [error, setError] = useState<string | null>(null);
 
   async function submit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!text.trim()) {
-      return;
-    }
+    const validationError = messageInputError(text);
+    setError(validationError);
+    if (validationError) return;
     if (await onMessage(text)) {
       setText("");
+      setError(null);
     }
   }
 
@@ -59,6 +64,24 @@ export function WorkDetail({
           </div>
         </dl>
       </header>
+
+      {details.work.needs_retry ? (
+        <section className="current-understanding" aria-live="polite">
+          <h3>Carry needs your choice</h3>
+          <p className="empty-copy">
+            Carry could not confirm an update for this Work. It will not try
+            again until you choose to.
+          </p>
+          <button
+            className="secondary-button"
+            type="button"
+            disabled={busy}
+            onClick={() => void onRetry()}
+          >
+            {busy ? "Trying again…" : "Try again"}
+          </button>
+        </section>
+      ) : null}
 
       <section
         className="current-understanding"
@@ -119,13 +142,20 @@ export function WorkDetail({
           id="work-message"
           name="work-message"
           rows={3}
-          maxLength={61_440}
           placeholder="Facts, corrections, or answers Carry should keep with this Work"
           value={text}
-          onChange={(event) => setText(event.target.value)}
+          onChange={(event) => {
+            setText(event.target.value);
+            setError(null);
+          }}
           disabled={busy}
           required
         />
+        {error ? (
+          <p className="alert" role="alert">
+            {error}
+          </p>
+        ) : null}
         <button
           className="secondary-button"
           type="submit"

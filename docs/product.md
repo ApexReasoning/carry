@@ -172,6 +172,8 @@ Work 保存 Carry 对以下问题的最新有效理解：
 
 新的消息被记录，不等于已经反映到当前理解。产品只表达“新信息尚未应用”；在没有独立活动事实时，不推断或描述后台处理状态，也不向普通成员暴露 input sequence、revision、Run、Attempt、lease 或 fence。
 
+如果一次原生推进已经明确结束但没有形成可确认更新，Work 会显示需要成员选择是否重新推进。Carry 不自动重放 Failed 或 Unknown；成员显式选择 `Try again` 后，才允许从同一持久 Work 创建一次新的推进。成员不需要理解 Run、Attempt 或终态分类。
+
 ### 消息与协作
 
 成员可以在 Work 中补充事实、纠正 Carry、回答问题、提出限制或评论结果。
@@ -318,7 +320,7 @@ Carry 必须区分：
 
 Host 或 Agent 失败后，Carry 依靠持久 Work 和数据库 authority 继续。lease 过期只撤销旧执行的提交权，不证明旧进程死亡。
 
-在当前没有外部 tool 后果的原生执行旅程中，安全恢复是创建新 Attempt 并从 Work 重新执行。原生 Session 恢复只有在成本或时延成为真实产品问题、且不需要把 provider state 提升进核心时才加入。
+在当前没有外部 tool 后果的原生执行旅程中，lease 中断的安全恢复是创建新 Attempt 并从 Work 重新执行。已经明确记录为 Failed 或 Unknown 的推进保持终态，不会自动重放；成员可以在 Work 上显式选择重新推进。原生 Session 恢复只有在成本或时延成为真实产品问题、且不需要把 provider state 提升进核心时才加入。
 
 ## 产品拒绝项
 
@@ -346,6 +348,7 @@ Carry 正在等待 Alice 回复
 Carry 将在下周一继续
 这是当前结果
 Carry 需要你的决定
+Carry 没有形成可确认的更新；由你选择是否重新推进
 这次操作可能已经发生，结果尚不确定
 ```
 

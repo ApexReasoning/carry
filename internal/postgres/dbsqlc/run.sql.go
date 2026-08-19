@@ -195,6 +195,25 @@ func (q *Queries) ExtendRunAttemptLease(ctx context.Context, arg ExtendRunAttemp
 	return lease_expires_at, err
 }
 
+const findRunRetryByIdempotency = `-- name: FindRunRetryByIdempotency :one
+SELECT retry_requested_by_user_id::text
+FROM runs
+WHERE work_id = $1
+  AND retry_idempotency_key = $2::text
+`
+
+type FindRunRetryByIdempotencyParams struct {
+	WorkID              string
+	RetryIdempotencyKey string
+}
+
+func (q *Queries) FindRunRetryByIdempotency(ctx context.Context, arg FindRunRetryByIdempotencyParams) (string, error) {
+	row := q.db.QueryRow(ctx, findRunRetryByIdempotency, arg.WorkID, arg.RetryIdempotencyKey)
+	var retry_requested_by_user_id string
+	err := row.Scan(&retry_requested_by_user_id)
+	return retry_requested_by_user_id, err
+}
+
 const finishRun = `-- name: FinishRun :execrows
 UPDATE runs
 SET state = $1, completed_at = clock_timestamp()
@@ -494,6 +513,43 @@ func (q *Queries) LockExpiredRunForClaim(ctx context.Context, spaceID string) (L
 	return i, err
 }
 
+const lockRetryableRun = `-- name: LockRetryableRun :one
+SELECT run_id
+FROM runs
+WHERE work_id = $1
+  AND state IN ('failed', 'unknown')
+  AND retry_requested_at IS NULL
+ORDER BY completed_at DESC, run_id DESC
+LIMIT 1
+FOR UPDATE
+`
+
+func (q *Queries) LockRetryableRun(ctx context.Context, workID string) (string, error) {
+	row := q.db.QueryRow(ctx, lockRetryableRun, workID)
+	var run_id string
+	err := row.Scan(&run_id)
+	return run_id, err
+}
+
+const lockWorkForRetry = `-- name: LockWorkForRetry :one
+SELECT lifecycle
+FROM works
+WHERE work_id = $1 AND space_id = $2
+FOR UPDATE
+`
+
+type LockWorkForRetryParams struct {
+	WorkID  string
+	SpaceID string
+}
+
+func (q *Queries) LockWorkForRetry(ctx context.Context, arg LockWorkForRetryParams) (string, error) {
+	row := q.db.QueryRow(ctx, lockWorkForRetry, arg.WorkID, arg.SpaceID)
+	var lifecycle string
+	err := row.Scan(&lifecycle)
+	return lifecycle, err
+}
+
 const lockWorkForRunClaim = `-- name: LockWorkForRunClaim :one
 SELECT
     work.work_id,
@@ -513,7 +569,10 @@ WHERE
         SELECT 1
         FROM runs AS run
         WHERE run.work_id = work.work_id
-          AND run.state IN ('active', 'failed', 'unknown')
+          AND (
+              run.state = 'active'
+              OR (run.state IN ('failed', 'unknown') AND run.retry_requested_at IS NULL)
+          )
     )
 ORDER BY work.created_at, work.work_id
 LIMIT 1
@@ -545,6 +604,31 @@ func (q *Queries) LockWorkForRunClaim(ctx context.Context, spaceID string) (Lock
 		&i.UnderstandingVersion,
 	)
 	return i, err
+}
+
+const requestRunRetry = `-- name: RequestRunRetry :execrows
+UPDATE runs
+SET
+    retry_requested_at = clock_timestamp(),
+    retry_requested_by_user_id = $1::uuid,
+    retry_idempotency_key = $2::text
+WHERE run_id = $3
+  AND state IN ('failed', 'unknown')
+  AND retry_requested_at IS NULL
+`
+
+type RequestRunRetryParams struct {
+	RequestedByUserID   string
+	RetryIdempotencyKey string
+	RunID               string
+}
+
+func (q *Queries) RequestRunRetry(ctx context.Context, arg RequestRunRetryParams) (int64, error) {
+	result, err := q.db.Exec(ctx, requestRunRetry, arg.RequestedByUserID, arg.RetryIdempotencyKey, arg.RunID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const rotateRunFence = `-- name: RotateRunFence :one

@@ -56,25 +56,23 @@ func (api browserSessionAPI) revokeCurrent(response http.ResponseWriter, request
 		writeAPIError(response, http.StatusUnauthorized, "browser session authentication is required")
 		return
 	}
-	cookie, err := request.Cookie(browserSessionCookie)
-	if err != nil || cookie.Value == "" {
-		writeAPIError(response, http.StatusUnauthorized, "browser session authentication is required")
-		return
-	}
-	user, err := api.store.AuthenticateBrowserSession(request.Context(), cookie.Value)
-	if _, ok := authenticatedUserResult(response, user, err); !ok {
-		return
-	}
-	if err := api.store.RevokeBrowserSession(request.Context(), cookie.Value); err != nil {
-		writeAPIError(response, http.StatusInternalServerError, "revoke browser session")
-		return
-	}
+	// Expire the browser credential before database I/O so even a server-side
+	// revocation failure stops this browser from presenting the old secret.
 	response.Header().Set("Cache-Control", "no-store")
 	http.SetCookie(response, &http.Cookie{
 		Name: browserSessionCookie, Value: "", Path: "/",
 		Expires: time.Unix(1, 0), MaxAge: -1,
 		HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode,
 	})
+	cookie, err := request.Cookie(browserSessionCookie)
+	if err != nil || cookie.Value == "" {
+		response.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if err := api.store.RevokeBrowserSession(request.Context(), cookie.Value); err != nil {
+		writeAPIError(response, http.StatusInternalServerError, "revoke browser session")
+		return
+	}
 	response.WriteHeader(http.StatusNoContent)
 }
 

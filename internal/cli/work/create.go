@@ -20,7 +20,7 @@ func newCreateCommand(configDirectory string, output io.Writer) *cobra.Command {
 			if goal == "" {
 				return fmt.Errorf("--goal is required")
 			}
-			client, selectedSpaceID, err := connect(configDirectory, spaceID)
+			client, selectedSpaceID, err := connect(command.Context(), configDirectory, spaceID)
 			if err != nil {
 				return err
 			}

@@ -50,7 +50,7 @@ func TestMigrateCreatesCurrentFactsAndRejectsUnearnedWorkLifecycle(t *testing.T)
 	}
 
 	store := NewStore(pool)
-	bootstrap, err := store.Bootstrap(ctx, BootstrapCommand{
+	bootstrap, err := bootstrapForTest(ctx, store, BootstrapCommand{
 		DisplayName: "Migration Owner", SpaceName: "Migration Space",
 		TokenExpiresAt: time.Now().Add(time.Hour),
 	})

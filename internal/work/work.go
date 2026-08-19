@@ -20,6 +20,7 @@ var (
 	ErrInvalidMessage      = errors.New("work message must contain between 1 and 61440 bytes")
 	ErrInvalidIdempotency  = errors.New("idempotency key must contain between 1 and 255 bytes")
 	ErrIdempotencyConflict = errors.New("idempotency key refers to different work input")
+	ErrRetryNotNeeded      = errors.New("work does not need retry")
 	ErrNotFound            = errors.New("work not found")
 	ErrNotOpen             = errors.New("work is not open")
 )
@@ -43,6 +44,13 @@ type AppendMessageCommand struct {
 	IdempotencyKey string
 }
 
+type RetryCommand struct {
+	WorkID         string
+	SpaceID        string
+	RequestedBy    string
+	IdempotencyKey string
+}
+
 type Work struct {
 	WorkID            string
 	SpaceID           string
@@ -53,6 +61,7 @@ type Work struct {
 	Understanding     string
 	NextStep          string
 	HasUnappliedInput bool
+	NeedsRetry        bool
 	CreatedAt         time.Time
 }
 

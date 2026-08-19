@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/ApexReasoning/carry/internal/identity/memberfile"
+	"github.com/ApexReasoning/carry/internal/space"
 )
 
 const maxResponseBytes = 1 << 20
@@ -37,6 +38,17 @@ func (err *outcomeUnknownError) Unwrap() error {
 	return err.cause
 }
 
+type memberInfo struct {
+	UserID string
+	Spaces []space.Membership
+}
+
+type membershipWire struct {
+	SpaceID           string `json:"space_id"`
+	Name              string `json:"name"`
+	CanEnrollMachines bool   `json:"can_enroll_machines"`
+}
+
 type workWire struct {
 	WorkID            string    `json:"work_id"`
 	SpaceID           string    `json:"space_id"`
@@ -47,6 +59,7 @@ type workWire struct {
 	Understanding     string    `json:"understanding"`
 	NextStep          string    `json:"next_step"`
 	HasUnappliedInput bool      `json:"has_unapplied_input"`
+	NeedsRetry        bool      `json:"needs_retry"`
 	CreatedAt         time.Time `json:"created_at"`
 }
 
@@ -86,6 +99,24 @@ func connectMember(credential memberfile.Credential) (*memberHTTP, error) {
 	return &memberHTTP{origin: origin, token: credential.Token, client: client}, nil
 }
 
+func (client *memberHTTP) loadInfo(ctx context.Context) (memberInfo, error) {
+	var wire struct {
+		UserID string           `json:"user_id"`
+		Spaces []membershipWire `json:"spaces"`
+	}
+	if err := client.sendJSON(ctx, http.MethodGet, "/v1/me", "", nil, &wire); err != nil {
+		return memberInfo{}, err
+	}
+	info := memberInfo{UserID: wire.UserID, Spaces: make([]space.Membership, 0, len(wire.Spaces))}
+	for _, membership := range wire.Spaces {
+		info.Spaces = append(info.Spaces, space.Membership{
+			SpaceID: membership.SpaceID, Name: membership.Name,
+			CanEnrollMachines: membership.CanEnrollMachines,
+		})
+	}
+	return info, nil
+}
+
 func (client *memberHTTP) create(
 	ctx context.Context,
 	spaceID string,
@@ -122,6 +153,14 @@ func (client *memberHTTP) load(ctx context.Context, spaceID string, workID strin
 		"", nil, &result,
 	)
 	return result, err
+}
+
+func (client *memberHTTP) retry(ctx context.Context, spaceID string, workID string, idempotencyKey string) error {
+	return client.sendJSON(
+		ctx, http.MethodPost,
+		"/v1/spaces/"+url.PathEscape(spaceID)+"/works/"+url.PathEscape(workID)+"/retry",
+		idempotencyKey, nil, nil,
+	)
 }
 
 func (client *memberHTTP) appendMessage(

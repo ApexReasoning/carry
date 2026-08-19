@@ -27,6 +27,7 @@ export const zWork = z.object({
   understanding: z.string(),
   next_step: z.string(),
   has_unapplied_input: z.boolean(),
+  needs_retry: z.boolean(),
   created_at: z.iso.datetime({ offset: true }),
 });
 
@@ -71,7 +72,7 @@ export const zListWorksResponse = z.object({
 });
 
 export const zCreateWorkBody = z.object({
-  goal: z.string().min(1).max(2000),
+  goal: z.string().min(1),
 });
 
 export const zCreateWorkHeaders = z.object({
@@ -101,7 +102,7 @@ export const zLoadWorkResponse = z.object({
 });
 
 export const zAppendWorkMessageBody = z.object({
-  text: z.string().min(1).max(61440),
+  text: z.string().min(1),
 });
 
 export const zAppendWorkMessageHeaders = z.object({
@@ -117,3 +118,17 @@ export const zAppendWorkMessagePath = z.object({
  * Appended or idempotently replayed Work Message
  */
 export const zAppendWorkMessageResponse = zWorkMessage;
+
+export const zRetryWorkHeaders = z.object({
+  "Idempotency-Key": z.string().min(1).max(255),
+});
+
+export const zRetryWorkPath = z.object({
+  spaceID: z.uuid(),
+  workID: z.uuid(),
+});
+
+/**
+ * Work retry requested or idempotently replayed
+ */
+export const zRetryWorkResponse = z.void();

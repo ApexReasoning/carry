@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -67,6 +68,28 @@ func TestCrossSiteBrowserSessionExchangeIsRejectedBeforeStore(t *testing.T) {
 	}
 	if sessions.sourceToken != "" {
 		t.Fatal("cross-site request reached browser session store")
+	}
+}
+
+func TestBrowserSessionRevocationExpiresCookieBeforeStoreFailure(t *testing.T) {
+	t.Parallel()
+	sessions := &recordingBrowserSessions{revokeErr: errors.New("database unavailable")}
+	handler := browserTestAPI(t, sessions)
+	request := httptest.NewRequest(http.MethodDelete, "/v1/browser/sessions/current", nil)
+	request.AddCookie(&http.Cookie{Name: browserSessionCookie, Value: "opaque-session-secret"})
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusInternalServerError)
+	}
+	cookies := response.Result().Cookies()
+	if len(cookies) != 1 || cookies[0].Name != browserSessionCookie || cookies[0].MaxAge >= 0 {
+		t.Fatalf("expired cookies = %#v", cookies)
+	}
+	if sessions.revokedSecret != "opaque-session-secret" {
+		t.Fatalf("revoked secret = %q", sessions.revokedSecret)
 	}
 }
 
@@ -256,6 +279,7 @@ type recordingBrowserSessions struct {
 	sourceToken         string
 	authenticatedSecret string
 	revokedSecret       string
+	revokeErr           error
 	user                identity.AuthenticatedUser
 }
 
@@ -281,7 +305,7 @@ func (s *recordingBrowserSessions) AuthenticateBrowserSession(
 
 func (s *recordingBrowserSessions) RevokeBrowserSession(_ context.Context, secret string) error {
 	s.revokedSecret = secret
-	return nil
+	return s.revokeErr
 }
 
 var _ MachineRunStore = (*recordingMachineRuns)(nil)

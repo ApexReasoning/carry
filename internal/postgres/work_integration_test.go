@@ -20,7 +20,7 @@ func TestConcurrentWorkCreationReturnsOneDurableWork(t *testing.T) {
 	ctx := context.Background()
 	pool := openMigratedTestPool(t, ctx)
 	store := NewStore(pool)
-	bootstrap, err := store.Bootstrap(ctx, BootstrapCommand{
+	bootstrap, err := bootstrapForTest(ctx, store, BootstrapCommand{
 		DisplayName: "Mae", SpaceName: "Supply Operations", TokenExpiresAt: time.Now().Add(time.Hour),
 	})
 	if err != nil {
@@ -104,7 +104,7 @@ func TestConcurrentWorkMessagesReceiveContinuousInputSequence(t *testing.T) {
 	ctx := context.Background()
 	pool := openMigratedTestPool(t, ctx)
 	store := NewStore(pool)
-	bootstrap, err := store.Bootstrap(ctx, BootstrapCommand{
+	bootstrap, err := bootstrapForTest(ctx, store, BootstrapCommand{
 		DisplayName: "Lillian", SpaceName: "Customer Research", TokenExpiresAt: time.Now().Add(time.Hour),
 	})
 	if err != nil {
@@ -195,7 +195,7 @@ func TestLoadWorkHoldsAConsistentHeadAndMessageSnapshot(t *testing.T) {
 	ctx := context.Background()
 	pool := openMigratedTestPool(t, ctx)
 	store := NewStore(pool)
-	bootstrap, err := store.Bootstrap(ctx, BootstrapCommand{
+	bootstrap, err := bootstrapForTest(ctx, store, BootstrapCommand{
 		DisplayName: "June", SpaceName: "Renewal Planning", TokenExpiresAt: time.Now().Add(time.Hour),
 	})
 	if err != nil {
@@ -269,7 +269,7 @@ func TestWorkAccessRequiresCurrentSpaceMembership(t *testing.T) {
 	ctx := context.Background()
 	pool := openMigratedTestPool(t, ctx)
 	store := NewStore(pool)
-	bootstrap, err := store.Bootstrap(ctx, BootstrapCommand{
+	bootstrap, err := bootstrapForTest(ctx, store, BootstrapCommand{
 		DisplayName: "Annie", SpaceName: "Field Research", TokenExpiresAt: time.Now().Add(time.Hour),
 	})
 	if err != nil {

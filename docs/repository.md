@@ -373,7 +373,7 @@ V1 默认按三个失败 owner 分组，但不把 job 数量写成永久上限�
 make check-go
 ```
 
-该 target 负责证明格式与 module 文件干净、generated code 可重建、Go 静态检查和测试通过、真实 PostgreSQL 集成测试实际运行，并且 `carry-server` 与 `carry` 可以构建。具体命令只在 Makefile 和工具配置中维护。
+该 target 负责证明全部手写 Go（包括 `cmd/`、`internal/`、`e2e/`、`scripts/` 与仍保留的 `experiments/`）格式与 module 文件干净、generated code 可重建、Go 静态检查和测试通过、真实 PostgreSQL 集成测试实际运行，并且 `carry-server` 与 `carry` 可以构建。具体命令只在 Makefile 和工具配置中维护。
 
 ### `web`
 

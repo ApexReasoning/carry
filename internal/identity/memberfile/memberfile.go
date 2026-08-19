@@ -5,17 +5,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-
-	"github.com/ApexReasoning/carry/internal/space"
 )
 
 // Credential is the local member principal used only by member-authorized CLI paths.
 type Credential struct {
-	ServerURL        string             `json:"server_url"`
-	Token            string             `json:"token"`
-	CACertificatePEM string             `json:"ca_certificate_pem"`
-	UserID           string             `json:"user_id"`
-	Spaces           []space.Membership `json:"spaces"`
+	ServerURL        string `json:"server_url"`
+	Token            string `json:"token"`
+	CACertificatePEM string `json:"ca_certificate_pem"`
+	UserID           string `json:"user_id"`
 }
 
 // Save atomically publishes a mode-0600 member credential.

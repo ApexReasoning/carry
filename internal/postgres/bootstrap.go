@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -30,6 +31,10 @@ type BootstrapCommand struct {
 	DisplayName    string
 	SpaceName      string
 	TokenExpiresAt time.Time
+	UserID         string
+	SpaceID        string
+	TokenID        string
+	UserToken      string
 }
 
 type BootstrapResult struct {
@@ -38,28 +43,40 @@ type BootstrapResult struct {
 	UserToken string
 }
 
+// PrepareBootstrap creates the valid bootstrap identity before persistence begins.
+func PrepareBootstrap(displayName string, spaceName string, tokenExpiresAt time.Time) (BootstrapCommand, error) {
+	displayName = strings.TrimSpace(displayName)
+	spaceName = strings.TrimSpace(spaceName)
+	if displayName == "" {
+		return BootstrapCommand{}, errors.New("display name is required")
+	}
+	if spaceName == "" {
+		return BootstrapCommand{}, errors.New("space name is required")
+	}
+	if !tokenExpiresAt.After(time.Now()) {
+		return BootstrapCommand{}, errors.New("token expiry must be in the future")
+	}
+	token, err := identity.NewUserToken()
+	if err != nil {
+		return BootstrapCommand{}, err
+	}
+	return BootstrapCommand{
+		DisplayName: displayName, SpaceName: spaceName,
+		TokenExpiresAt: tokenExpiresAt.UTC().Truncate(time.Microsecond),
+		UserID:         uuid.NewString(), SpaceID: uuid.NewString(), TokenID: uuid.NewString(), UserToken: token.Secret,
+	}, nil
+}
+
 func (s *Store) Bootstrap(ctx context.Context, command BootstrapCommand) (BootstrapResult, error) {
 	displayName := strings.TrimSpace(command.DisplayName)
 	spaceName := strings.TrimSpace(command.SpaceName)
-	if displayName == "" {
-		return BootstrapResult{}, errors.New("display name is required")
+	if displayName == "" || spaceName == "" || !command.TokenExpiresAt.After(time.Now()) ||
+		uuid.Validate(command.UserID) != nil || uuid.Validate(command.SpaceID) != nil ||
+		uuid.Validate(command.TokenID) != nil || !strings.HasPrefix(command.UserToken, "carry_user_") {
+		return BootstrapResult{}, errors.New("prepared bootstrap identity is invalid")
 	}
-	if spaceName == "" {
-		return BootstrapResult{}, errors.New("space name is required")
-	}
-	if !command.TokenExpiresAt.After(time.Now()) {
-		return BootstrapResult{}, errors.New("token expiry must be in the future")
-	}
-
-	token, err := identity.NewUserToken()
-	if err != nil {
-		return BootstrapResult{}, err
-	}
-	result := BootstrapResult{
-		UserID:    uuid.NewString(),
-		SpaceID:   uuid.NewString(),
-		UserToken: token.Secret,
-	}
+	tokenHash := identity.HashUserToken(command.UserToken)
+	result := BootstrapResult{UserID: command.UserID, SpaceID: command.SpaceID, UserToken: command.UserToken}
 
 	transaction, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -79,26 +96,43 @@ func (s *Store) Bootstrap(ctx context.Context, command BootstrapCommand) (Bootst
 		return BootstrapResult{}, fmt.Errorf("check bootstrap state: %w", err)
 	}
 	if alreadyBootstrapped {
-		return BootstrapResult{}, ErrAlreadyBootstrapped
+		existing, loadErr := queries.LoadPreparedBootstrap(ctx, dbsqlc.LoadPreparedBootstrapParams{
+			UserID: command.UserID, SpaceID: command.SpaceID, TokenID: command.TokenID,
+		})
+		if errors.Is(loadErr, pgx.ErrNoRows) {
+			return BootstrapResult{}, ErrAlreadyBootstrapped
+		}
+		if loadErr != nil {
+			return BootstrapResult{}, fmt.Errorf("load prepared bootstrap: %w", loadErr)
+		}
+		if existing.DisplayName != displayName || existing.SpaceName != spaceName ||
+			!existing.CanEnrollMachines || !bytes.Equal(existing.TokenHash, tokenHash[:]) ||
+			!existing.ExpiresAt.Time.Equal(command.TokenExpiresAt.UTC()) {
+			return BootstrapResult{}, ErrAlreadyBootstrapped
+		}
+		if err := transaction.Commit(ctx); err != nil {
+			return BootstrapResult{}, fmt.Errorf("commit idempotent bootstrap: %w", err)
+		}
+		return result, nil
 	}
 
 	if err := queries.CreateBootstrapUser(ctx, dbsqlc.CreateBootstrapUserParams{
-		UserID: result.UserID, DisplayName: displayName,
+		UserID: command.UserID, DisplayName: displayName,
 	}); err != nil {
 		return BootstrapResult{}, fmt.Errorf("create bootstrap user: %w", err)
 	}
 	if err := queries.CreateBootstrapSpace(ctx, dbsqlc.CreateBootstrapSpaceParams{
-		SpaceID: result.SpaceID, Name: spaceName,
+		SpaceID: command.SpaceID, Name: spaceName,
 	}); err != nil {
 		return BootstrapResult{}, fmt.Errorf("create bootstrap Space: %w", err)
 	}
 	if err := queries.CreateBootstrapMembership(ctx, dbsqlc.CreateBootstrapMembershipParams{
-		SpaceID: result.SpaceID, UserID: result.UserID,
+		SpaceID: command.SpaceID, UserID: command.UserID,
 	}); err != nil {
 		return BootstrapResult{}, fmt.Errorf("create bootstrap membership: %w", err)
 	}
 	if err := queries.CreateUserToken(ctx, dbsqlc.CreateUserTokenParams{
-		TokenID: uuid.NewString(), UserID: result.UserID, TokenHash: token.Hash[:],
+		TokenID: command.TokenID, UserID: command.UserID, TokenHash: tokenHash[:],
 		ExpiresAt: pgtype.Timestamptz{Time: command.TokenExpiresAt.UTC(), Valid: true},
 	}); err != nil {
 		return BootstrapResult{}, fmt.Errorf("create bootstrap token: %w", err)

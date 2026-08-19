@@ -21,19 +21,23 @@ type machineHTTP struct {
 	serverURL string
 }
 
+type runMessageWire struct {
+	AuthorUserID string `json:"author_user_id"`
+	Text         string `json:"text"`
+}
+
 type runClaimWire struct {
-	RunID                    string        `json:"run_id"`
-	AttemptID                string        `json:"attempt_id"`
-	WorkID                   string        `json:"work_id"`
-	SpaceID                  string        `json:"space_id"`
-	Fence                    int64         `json:"fence"`
-	LeaseExpiresAt           time.Time     `json:"lease_expires_at"`
-	Goal                     string        `json:"goal"`
-	CurrentUnderstanding     string        `json:"current_understanding"`
-	CurrentNextStep          string        `json:"current_next_step"`
-	BaseUnderstandingVersion int64         `json:"base_understanding_version"`
-	InputEndSeq              int64         `json:"input_end_seq"`
-	Messages                 []run.Message `json:"messages"`
+	RunID                    string           `json:"run_id"`
+	AttemptID                string           `json:"attempt_id"`
+	WorkID                   string           `json:"work_id"`
+	Fence                    int64            `json:"fence"`
+	LeaseExpiresAt           time.Time        `json:"lease_expires_at"`
+	Goal                     string           `json:"goal"`
+	CurrentUnderstanding     string           `json:"current_understanding"`
+	CurrentNextStep          string           `json:"current_next_step"`
+	BaseUnderstandingVersion int64            `json:"base_understanding_version"`
+	InputEndSeq              int64            `json:"input_end_seq"`
+	Messages                 []runMessageWire `json:"messages"`
 }
 
 func connectMachine(credential machinefile.Credential) (*machineHTTP, error) {
@@ -79,13 +83,17 @@ func (c *machineHTTP) Claim(ctx context.Context) (run.Claim, error) {
 	if err := json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&wire); err != nil {
 		return run.Claim{}, fmt.Errorf("decode Run claim: %w", err)
 	}
+	messages := make([]run.Message, 0, len(wire.Messages))
+	for _, message := range wire.Messages {
+		messages = append(messages, run.Message{AuthorUserID: message.AuthorUserID, Text: message.Text})
+	}
 	return run.Claim{
 		RunID: wire.RunID, AttemptID: wire.AttemptID, WorkID: wire.WorkID,
-		SpaceID: wire.SpaceID, Fence: wire.Fence, LeaseExpiresAt: wire.LeaseExpiresAt,
+		Fence: wire.Fence, LeaseExpiresAt: wire.LeaseExpiresAt,
 		Goal: wire.Goal, CurrentUnderstanding: wire.CurrentUnderstanding,
 		CurrentNextStep:          wire.CurrentNextStep,
 		BaseUnderstandingVersion: wire.BaseUnderstandingVersion,
-		InputEndSeq:              wire.InputEndSeq, Messages: wire.Messages,
+		InputEndSeq:              wire.InputEndSeq, Messages: messages,
 	}, nil
 }
 

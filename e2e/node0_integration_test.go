@@ -138,14 +138,64 @@ var sharedBootstrap struct {
 func bootstrapCarry(t *testing.T, root string, carryServer string, databaseURL string) string {
 	t.Helper()
 	sharedBootstrap.once.Do(func() {
-		sharedBootstrap.output, sharedBootstrap.err = runError(
-			root,
-			[]string{"CARRY_DATABASE_URL=" + databaseURL},
-			carryServer,
+		credentialFile := filepath.Join(filepath.Dir(carryServer), "bootstrap-credential.json")
+		arguments := []string{
 			"bootstrap",
 			"--display-name", "Carry Member",
 			"--space", "Carry Space",
+			"--credential-file", credentialFile,
+		}
+		// Discard the first stdout result after the database commit. The durable
+		// credential must make the exact retry recoverable.
+		_, sharedBootstrap.err = runError(
+			root, []string{"CARRY_DATABASE_URL=" + databaseURL}, carryServer, arguments...,
 		)
+		if sharedBootstrap.err != nil {
+			return
+		}
+		credential, err := os.ReadFile(credentialFile)
+		if err != nil {
+			sharedBootstrap.err = fmt.Errorf("read durable bootstrap credential: %w", err)
+			return
+		}
+		var durable struct {
+			UserID    string `json:"user_id"`
+			SpaceID   string `json:"space_id"`
+			UserToken string `json:"user_token"`
+		}
+		if err := json.Unmarshal(credential, &durable); err != nil {
+			sharedBootstrap.err = fmt.Errorf("decode durable bootstrap credential: %w", err)
+			return
+		}
+		replayed, replayErr := runError(
+			root, []string{"CARRY_DATABASE_URL=" + databaseURL}, carryServer, arguments...,
+		)
+		if replayErr != nil {
+			sharedBootstrap.err = replayErr
+			return
+		}
+		var replayedResult struct {
+			UserID    string `json:"user_id"`
+			SpaceID   string `json:"space_id"`
+			UserToken string `json:"user_token"`
+		}
+		if err := json.Unmarshal([]byte(replayed), &replayedResult); err != nil {
+			sharedBootstrap.err = fmt.Errorf("decode replayed bootstrap result: %w", err)
+			return
+		}
+		if replayedResult != durable {
+			sharedBootstrap.err = fmt.Errorf("replayed bootstrap result differs from durable credential")
+			return
+		}
+		sharedBootstrap.output = string(credential)
+		info, err := os.Stat(credentialFile)
+		if err != nil {
+			sharedBootstrap.err = fmt.Errorf("stat bootstrap credential: %w", err)
+			return
+		}
+		if info.Mode().Perm() != 0o600 {
+			sharedBootstrap.err = fmt.Errorf("bootstrap credential mode = %o, want 600", info.Mode().Perm())
+		}
 	})
 	if sharedBootstrap.err != nil {
 		t.Fatalf("bootstrap Carry: %v\n%s", sharedBootstrap.err, sharedBootstrap.output)

@@ -23,8 +23,14 @@ type memberHTTP struct {
 }
 
 type memberInfo struct {
-	UserID string             `json:"user_id"`
-	Spaces []space.Membership `json:"spaces"`
+	UserID string
+	Spaces []space.Membership
+}
+
+type membershipWire struct {
+	SpaceID           string `json:"space_id"`
+	Name              string `json:"name"`
+	CanEnrollMachines bool   `json:"can_enroll_machines"`
 }
 
 func newMemberHTTP(serverURL string, caCertificatePEM string, token string) (*memberHTTP, error) {
@@ -64,9 +70,19 @@ func (c *memberHTTP) loadInfo(ctx context.Context) (memberInfo, error) {
 		limited, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
 		return memberInfo{}, fmt.Errorf("GET /v1/me returned %s: %s", response.Status, strings.TrimSpace(string(limited)))
 	}
-	var info memberInfo
-	if err := json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&info); err != nil {
+	var wire struct {
+		UserID string           `json:"user_id"`
+		Spaces []membershipWire `json:"spaces"`
+	}
+	if err := json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&wire); err != nil {
 		return memberInfo{}, fmt.Errorf("decode member information: %w", err)
+	}
+	info := memberInfo{UserID: wire.UserID, Spaces: make([]space.Membership, 0, len(wire.Spaces))}
+	for _, membership := range wire.Spaces {
+		info.Spaces = append(info.Spaces, space.Membership{
+			SpaceID: membership.SpaceID, Name: membership.Name,
+			CanEnrollMachines: membership.CanEnrollMachines,
+		})
 	}
 	return info, nil
 }

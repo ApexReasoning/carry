@@ -33,7 +33,7 @@ func TestConcurrentBootstrapCreatesOneSpace(t *testing.T) {
 	for _, command := range commands {
 		go func() {
 			defer wait.Done()
-			_, err := store.Bootstrap(ctx, command)
+			_, err := bootstrapForTest(ctx, store, command)
 			results <- err
 		}()
 	}
@@ -70,7 +70,7 @@ func TestBootstrapTokenAuthenticatesMember(t *testing.T) {
 	pool := openMigratedTestPool(t, ctx)
 	store := NewStore(pool)
 
-	result, err := store.Bootstrap(ctx, BootstrapCommand{
+	result, err := bootstrapForTest(ctx, store, BootstrapCommand{
 		DisplayName:    "Katherine",
 		SpaceName:      "Flight Research",
 		TokenExpiresAt: time.Now().Add(24 * time.Hour),
@@ -89,6 +89,14 @@ func TestBootstrapTokenAuthenticatesMember(t *testing.T) {
 	if _, err := store.AuthenticateUserToken(ctx, "carry_user_not-a-token"); !errors.Is(err, identity.ErrUnauthenticated) {
 		t.Fatalf("invalid token error = %v, want identity.ErrUnauthenticated", err)
 	}
+}
+
+func bootstrapForTest(ctx context.Context, store *Store, requested BootstrapCommand) (BootstrapResult, error) {
+	prepared, err := PrepareBootstrap(requested.DisplayName, requested.SpaceName, requested.TokenExpiresAt)
+	if err != nil {
+		return BootstrapResult{}, err
+	}
+	return store.Bootstrap(ctx, prepared)
 }
 
 func openMigratedTestPool(t *testing.T, ctx context.Context) *pgxpool.Pool {

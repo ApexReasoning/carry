@@ -27,6 +27,9 @@ import type {
   LoadWorkData,
   LoadWorkErrors,
   LoadWorkResponses,
+  RetryWorkData,
+  RetryWorkErrors,
+  RetryWorkResponses,
   RevokeCurrentBrowserSessionData,
   RevokeCurrentBrowserSessionErrors,
   RevokeCurrentBrowserSessionResponses,
@@ -38,6 +41,7 @@ import {
   zListWorksResponse,
   zLoadCurrentMemberResponse,
   zLoadWorkResponse,
+  zRetryWorkResponse,
   zRevokeCurrentBrowserSessionResponse,
 } from "./zod.gen";
 
@@ -228,4 +232,26 @@ export const appendWorkMessage = <ThrowOnError extends boolean = false>(
       "Content-Type": "application/json",
       ...options.headers,
     },
+  });
+
+export const retryWork = <ThrowOnError extends boolean = false>(
+  options: Options<RetryWorkData, ThrowOnError>,
+): RequestResult<RetryWorkResponses, RetryWorkErrors, ThrowOnError> =>
+  (options.client ?? client).post<
+    RetryWorkResponses,
+    RetryWorkErrors,
+    ThrowOnError
+  >({
+    responseValidator: async (data) =>
+      await zRetryWorkResponse.parseAsync(data),
+    security: [
+      { scheme: "bearer", type: "http" },
+      {
+        in: "cookie",
+        name: "__Host-carry_session",
+        type: "apiKey",
+      },
+    ],
+    url: "/v1/spaces/{spaceID}/works/{workID}/retry",
+    ...options,
   });

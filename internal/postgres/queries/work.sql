@@ -29,27 +29,36 @@ ON CONFLICT (space_id, creator_user_id, create_idempotency_key) DO NOTHING
 RETURNING work_id, space_id, goal, lifecycle, owner_user_id, creator_user_id, created_at;
 
 -- name: FindWorkByCreateIdempotency :one
-SELECT work_id, space_id, goal, lifecycle, owner_user_id, creator_user_id,
-    created_at, create_request_digest
-FROM works
+SELECT work.work_id, work.space_id, work.goal, work.lifecycle, work.owner_user_id, work.creator_user_id,
+    work.input_head_seq, work.applied_input_seq, work.understanding_version, work.understanding, work.next_step,
+    work.created_at, work.create_request_digest
+FROM works AS work
 WHERE
-    space_id = sqlc.arg(space_id)
-    AND creator_user_id = sqlc.arg(creator_user_id)
-    AND create_idempotency_key = sqlc.arg(create_idempotency_key);
+    work.space_id = sqlc.arg(space_id)
+    AND work.creator_user_id = sqlc.arg(creator_user_id)
+    AND work.create_idempotency_key = sqlc.arg(create_idempotency_key);
 
 -- name: ListWorks :many
-SELECT work_id, space_id, goal, lifecycle, owner_user_id, creator_user_id,
-    input_head_seq, applied_input_seq, understanding_version, understanding, next_step, created_at
-FROM works
-WHERE space_id = sqlc.arg(space_id)
-ORDER BY created_at DESC, work_id DESC;
+SELECT work.work_id, work.space_id, work.goal, work.lifecycle, work.owner_user_id, work.creator_user_id,
+    work.input_head_seq, work.applied_input_seq, work.understanding_version, work.understanding, work.next_step, work.created_at
+FROM works AS work
+WHERE work.space_id = sqlc.arg(space_id)
+ORDER BY work.created_at DESC, work.work_id DESC;
 
 -- name: LoadWork :one
-SELECT work_id, space_id, goal, lifecycle, owner_user_id, creator_user_id,
-    input_head_seq, applied_input_seq, understanding_version, understanding, next_step, created_at
-FROM works
-WHERE space_id = sqlc.arg(space_id) AND work_id = sqlc.arg(work_id)
-FOR SHARE;
+SELECT work.work_id, work.space_id, work.goal, work.lifecycle, work.owner_user_id, work.creator_user_id,
+    work.input_head_seq, work.applied_input_seq, work.understanding_version, work.understanding, work.next_step, work.created_at
+FROM works AS work
+WHERE work.space_id = sqlc.arg(space_id) AND work.work_id = sqlc.arg(work_id)
+FOR SHARE OF work;
+
+-- name: WorkNeedsRetry :one
+SELECT EXISTS (
+    SELECT 1 FROM runs
+    WHERE work_id = sqlc.arg(work_id)
+      AND state IN ('failed', 'unknown')
+      AND retry_requested_at IS NULL
+);
 
 -- name: LockWork :one
 SELECT work_id, space_id, goal, lifecycle, owner_user_id, creator_user_id,

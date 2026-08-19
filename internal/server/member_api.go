@@ -16,6 +16,12 @@ type memberAPI struct {
 	memberships MembershipReader
 }
 
+type membershipWire struct {
+	SpaceID           string `json:"space_id"`
+	Name              string `json:"name"`
+	CanEnrollMachines bool   `json:"can_enroll_machines"`
+}
+
 func (api memberAPI) me(response http.ResponseWriter, request *http.Request) {
 	user, ok := currentMember(response, request)
 	if !ok {
@@ -26,9 +32,16 @@ func (api memberAPI) me(response http.ResponseWriter, request *http.Request) {
 		writeAPIError(response, http.StatusInternalServerError, "load memberships")
 		return
 	}
+	spaces := make([]membershipWire, 0, len(memberships))
+	for _, membership := range memberships {
+		spaces = append(spaces, membershipWire{
+			SpaceID: membership.SpaceID, Name: membership.Name,
+			CanEnrollMachines: membership.CanEnrollMachines,
+		})
+	}
 	response.Header().Set("Cache-Control", "no-store")
 	writeJSON(response, http.StatusOK, struct {
-		UserID string             `json:"user_id"`
-		Spaces []space.Membership `json:"spaces"`
-	}{UserID: user.UserID, Spaces: memberships})
+		UserID string           `json:"user_id"`
+		Spaces []membershipWire `json:"spaces"`
+	}{UserID: user.UserID, Spaces: spaces})
 }

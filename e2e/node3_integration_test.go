@@ -80,10 +80,16 @@ func TestInterruptedHostWorkContinuesWithNewAttempt(t *testing.T) {
 	writeRecoveryPi(t, filepath.Join(binDirectory, "pi"))
 	firstStarted := filepath.Join(temporary, "first-attempt-started")
 	firstSelected := filepath.Join(temporary, "first-attempt-selected")
+	firstPrompt := filepath.Join(temporary, "first-attempt-prompt.json")
+	secondPrompt := filepath.Join(temporary, "second-attempt-prompt.json")
+	terminalSelected := filepath.Join(temporary, "terminal-attempt-selected")
 	hostEnvironment := append(clientEnvironment,
 		"PATH="+binDirectory,
 		"CARRY_FAKE_PI_FIRST_STARTED="+firstStarted,
 		"CARRY_FAKE_PI_FIRST_SELECTED="+firstSelected,
+		"CARRY_FAKE_PI_FIRST_PROMPT="+firstPrompt,
+		"CARRY_FAKE_PI_SECOND_PROMPT="+secondPrompt,
+		"CARRY_FAKE_PI_TERMINAL_SELECTED="+terminalSelected,
 	)
 
 	firstHost := exec.Command(carry, "host", "start")
@@ -144,6 +150,81 @@ func TestInterruptedHostWorkContinuesWithNewAttempt(t *testing.T) {
 		t, root, carry, clientEnvironment, workID,
 		"Recovered after Host interruption.", secondLog,
 	)
+	firstPromptBytes, err := os.ReadFile(firstPrompt)
+	if err != nil {
+		t.Fatalf("read first recovery prompt: %v", err)
+	}
+	secondPromptBytes, err := os.ReadFile(secondPrompt)
+	if err != nil {
+		t.Fatalf("read second recovery prompt: %v", err)
+	}
+	if !bytes.Equal(firstPromptBytes, secondPromptBytes) {
+		t.Fatalf("recovery prompt changed:\nfirst: %s\nsecond: %s", firstPromptBytes, secondPromptBytes)
+	}
+	for _, promptPath := range []string{firstPrompt, secondPrompt} {
+		info, statErr := os.Stat(promptPath)
+		if statErr != nil {
+			t.Fatalf("stat recovery prompt %s: %v", promptPath, statErr)
+		}
+		if info.Mode().Perm() != 0o600 {
+			t.Fatalf("recovery prompt %s mode = %o, want 600", promptPath, info.Mode().Perm())
+		}
+	}
+
+	terminalCreated := run(t, root, clientEnvironment, carry, "work", "create",
+		"--goal", "Require explicit retry after a terminal native failure",
+	)
+	terminalFields := strings.Fields(strings.SplitN(terminalCreated, "\n", 2)[0])
+	if len(terminalFields) != 3 {
+		t.Fatalf("terminal Work create output = %q", terminalCreated)
+	}
+	terminalWorkID := terminalFields[2]
+	waitForWorkUnderstanding(
+		t, root, carry, clientEnvironment, terminalWorkID,
+		"It will not try again until a member runs", secondLog,
+	)
+	var attemptsBefore int
+	if err := pool.QueryRow(context.Background(), `
+		select count(*)
+		from run_attempts as attempt
+		join runs as run on run.run_id = attempt.run_id
+		where run.work_id = $1
+	`, terminalWorkID).Scan(&attemptsBefore); err != nil {
+		t.Fatalf("count terminal Attempts: %v", err)
+	}
+	time.Sleep(500 * time.Millisecond)
+	var attemptsWithoutRetry int
+	if err := pool.QueryRow(context.Background(), `
+		select count(*)
+		from run_attempts as attempt
+		join runs as run on run.run_id = attempt.run_id
+		where run.work_id = $1
+	`, terminalWorkID).Scan(&attemptsWithoutRetry); err != nil {
+		t.Fatalf("recount terminal Attempts: %v", err)
+	}
+	if attemptsBefore != 1 || attemptsWithoutRetry != 1 {
+		t.Fatalf("terminal Work Attempts before explicit retry = %d then %d", attemptsBefore, attemptsWithoutRetry)
+	}
+	retryOutput := run(t, root, clientEnvironment, carry, "work", "retry", terminalWorkID)
+	if !strings.Contains(retryOutput, "Carry will try Work") {
+		t.Fatalf("retry output = %q", retryOutput)
+	}
+	waitForWorkUnderstanding(
+		t, root, carry, clientEnvironment, terminalWorkID,
+		"Retried only after the member choice.", secondLog,
+	)
+	var terminalStates string
+	if err := pool.QueryRow(context.Background(), `
+		select string_agg(state, ',' order by created_at)
+		from runs
+		where work_id = $1
+	`, terminalWorkID).Scan(&terminalStates); err != nil {
+		t.Fatalf("load terminal retry states: %v", err)
+	}
+	if terminalStates != "unknown,succeeded" {
+		t.Fatalf("terminal retry states = %q", terminalStates)
+	}
+
 	cancelSecond()
 	_ = secondHost.Wait()
 
@@ -208,17 +289,33 @@ func writeRecoveryPi(t *testing.T, path string) {
 	t.Helper()
 	script := `#!/bin/sh
 set -eu
+umask 077
 if [ "${1:-}" = "--version" ]; then
   printf '%s\n' '0.84.2'
   exit 0
 fi
 IFS= read -r prompt
+case "$prompt" in
+  *"Require explicit retry after a terminal native failure"*)
+    if [ ! -e "$CARRY_FAKE_PI_TERMINAL_SELECTED" ]; then
+      : > "$CARRY_FAKE_PI_TERMINAL_SELECTED"
+      exit 1
+    fi
+    printf '%s\n' \
+      '{"id":"carry-prompt","type":"response","command":"prompt","success":true}' \
+      '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"{\"understanding\":\"Retried only after the member choice.\",\"next_step\":\"Continue the explicitly authorized fresh Run.\"}"}],"stopReason":"stop"}}' \
+      '{"type":"agent_settled"}'
+    exit 0
+    ;;
+esac
 if [ ! -e "$CARRY_FAKE_PI_FIRST_SELECTED" ]; then
+  printf '%s' "$prompt" > "$CARRY_FAKE_PI_FIRST_PROMPT"
   : > "$CARRY_FAKE_PI_FIRST_SELECTED"
   : > "$CARRY_FAKE_PI_FIRST_STARTED"
   IFS= read -r wait_for_parent || true
   exit 0
 fi
+printf '%s' "$prompt" > "$CARRY_FAKE_PI_SECOND_PROMPT"
 printf '%s\n' \
   '{"id":"carry-prompt","type":"response","command":"prompt","success":true}' \
   '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"{\"understanding\":\"Recovered after Host interruption.\",\"next_step\":\"Continue from the durable Work context.\"}"}],"stopReason":"stop"}}' \

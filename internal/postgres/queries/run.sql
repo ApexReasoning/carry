@@ -50,7 +50,10 @@ WHERE
         SELECT 1
         FROM runs AS run
         WHERE run.work_id = work.work_id
-          AND run.state IN ('active', 'failed', 'unknown')
+          AND (
+              run.state = 'active'
+              OR (run.state IN ('failed', 'unknown') AND run.retry_requested_at IS NULL)
+          )
     )
 ORDER BY work.created_at, work.work_id
 LIMIT 1
@@ -240,3 +243,35 @@ WHERE attempt_id = sqlc.arg(attempt_id) AND state = 'active';
 UPDATE runs
 SET state = sqlc.arg(outcome), completed_at = clock_timestamp()
 WHERE run_id = sqlc.arg(run_id) AND state = 'active';
+
+-- name: LockWorkForRetry :one
+SELECT lifecycle
+FROM works
+WHERE work_id = sqlc.arg(work_id) AND space_id = sqlc.arg(space_id)
+FOR UPDATE;
+
+-- name: FindRunRetryByIdempotency :one
+SELECT retry_requested_by_user_id::text
+FROM runs
+WHERE work_id = sqlc.arg(work_id)
+  AND retry_idempotency_key = sqlc.arg(retry_idempotency_key)::text;
+
+-- name: LockRetryableRun :one
+SELECT run_id
+FROM runs
+WHERE work_id = sqlc.arg(work_id)
+  AND state IN ('failed', 'unknown')
+  AND retry_requested_at IS NULL
+ORDER BY completed_at DESC, run_id DESC
+LIMIT 1
+FOR UPDATE;
+
+-- name: RequestRunRetry :execrows
+UPDATE runs
+SET
+    retry_requested_at = clock_timestamp(),
+    retry_requested_by_user_id = sqlc.arg(requested_by_user_id)::uuid,
+    retry_idempotency_key = sqlc.arg(retry_idempotency_key)::text
+WHERE run_id = sqlc.arg(run_id)
+  AND state IN ('failed', 'unknown')
+  AND retry_requested_at IS NULL;

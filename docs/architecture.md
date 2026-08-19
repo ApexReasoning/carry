@@ -174,6 +174,8 @@ Work Messages 按准确顺序追加。Run 固定本次要应用到哪里的输�
 
 Work 保留内部 `understanding_version` 作为 CAS，不把 version 提升成用户可见对象。
 
+Work 查询还可以派生 `needs_retry`：存在一个尚未被成员明确允许重新推进的 terminal Failed/Unknown Run。它不是新的 Work lifecycle，也不公开 terminal outcome、Run identity 或 retry generation。
+
 提交时 PostgreSQL 原子检查：
 
 - Work 仍可执行；
@@ -264,9 +266,9 @@ lease 过期只撤销旧 Attempt 的提交权，不证明旧进程停止或失�
 
 新 Attempt 总是从 Work fresh Execute。旧 Host 的 renew、commit 和 finish 都被拒绝。
 
-明确记录为 Failed 或 Unknown 的 Run 不自动恢复。当前无 tool、Action 或外部后果的 native execution 可以安全重新推理；因此核心不保存 opaque completion evidence，不上传 native Session locator，也不定义 Resume/Discard。
+明确记录为 Failed 或 Unknown 的 Run 不自动恢复。Run 保存成员是否已经明确请求 fresh retry 的时间、成员和幂等 identity；这是一条 Run causality fact，不是新的 owner。只有 active Space member 通过 Work 的 `Try again` 明确请求后，后续 claim 才能创建新的 Run。旧 Run 和 Attempt 保持 terminal，旧 authority 不复活。
 
-如果未来模型成本或时延证明原生终态重取有产品价值，优先让同一 Machine 的 concrete adapter 用本地、Run-keyed 状态自然优化；只有跨 Machine 持久化成为真实需求时才重新设计服务端合同。
+当前无 tool、Action 或外部后果的 native execution 可以安全重新推理；因此核心不保存 opaque completion evidence，不上传 native Session locator，也不定义 Resume/Discard。如果未来模型成本或时延证明原生终态重取有产品价值，优先让同一 Machine 的 concrete adapter 用本地、Run-keyed 状态自然优化；只有跨 Machine 持久化成为真实需求时才重新设计服务端合同。
 
 ## 8. Native Agent adapters
 
@@ -293,6 +295,7 @@ User API 只表达成员旅程：
 - 读取当前成员与 Spaces；
 - 创建、列出、读取 Work；
 - 追加 Work Message；
+- 对需要成员选择的 Work 显式请求重新推进；
 - enrollment/revocation Machine。
 
 User Work response 包含：
@@ -301,6 +304,7 @@ User Work response 包含：
 - owner、creator；
 - current understanding 与 next step；
 - 是否仍有新信息待 Carry 应用；
+- 是否需要成员显式选择重新推进；
 - created time。
 
 它不公开 input head、applied input、revision number、Run、Attempt 或 Runtime。
@@ -318,6 +322,7 @@ Web 使用 `protocol/user/v1/openapi.yaml` 生成 client。CLI 与 Web 不复制
 | Renew | Machine、exact active Attempt、current fence、unexpired old lease |
 | Commit understanding | Machine、Attempt/fence/lease、Work base version/range、Work update、terminal states |
 | Finish unresolved | Machine、Attempt/fence/lease、terminal Run/Attempt outcome |
+| Request Work retry | Membership、Open Work、唯一未请求 retry 的 terminal Run、成员与幂等 identity |
 | Revoke Machine | 成员权限、Machine revocation；后续 Host mutation 由条件更新拒绝 |
 
 所有网络和 native Agent I/O 都在数据库事务外发生。
@@ -433,6 +438,7 @@ protocol/
 - expired Attempt 不能 renew 复活；
 - recovery 增加 fence，旧 Host 不能 commit 或 finish；
 - Work 运行期间到达的新消息不会被旧 range 错误标记已应用；
+- Failed/Unknown 不自动 replay，active member 的幂等 `Try again` 才允许一个 fresh Run；
 - Commit 直接更新 Work 当前理解，不创建 revision row；
 - revoked Machine 不能领取或修改执行；
 - Pi 与 Codex 分别通过同一 execution conformance；

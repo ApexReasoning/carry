@@ -9,7 +9,6 @@ import (
 	"net/url"
 	"testing"
 
-	"github.com/ApexReasoning/carry/internal/identity/memberfile"
 	"github.com/ApexReasoning/carry/internal/space"
 )
 
@@ -56,7 +55,7 @@ func TestMutationRetriesResponseLossWithSameIdentityAndBytes(t *testing.T) {
 			StatusCode: http.StatusOK,
 			Header:     make(http.Header),
 			Body: io.NopCloser(bytes.NewBufferString(
-				`{"work_id":"11111111-1111-4111-8111-111111111111","space_id":"22222222-2222-4222-8222-222222222222","goal":"Review renewals","lifecycle":"open","owner_user_id":"member-1","creator_user_id":"member-1","understanding":"","next_step":"","has_unapplied_input":true,"created_at":"2026-08-18T16:00:00Z"}`,
+				`{"work_id":"11111111-1111-4111-8111-111111111111","space_id":"22222222-2222-4222-8222-222222222222","goal":"Review renewals","lifecycle":"open","owner_user_id":"member-1","creator_user_id":"member-1","understanding":"","next_step":"","has_unapplied_input":true,"needs_retry":false,"created_at":"2026-08-18T16:00:00Z"}`,
 			)),
 			Request: request,
 		}, nil
@@ -126,24 +125,24 @@ func TestMutationReportsUnknownAfterResponsesRemainLost(t *testing.T) {
 	}
 }
 
-func TestSelectSpaceUsesOnlyCredentialMemberships(t *testing.T) {
+func TestSelectSpaceUsesCurrentMemberships(t *testing.T) {
 	t.Parallel()
 
-	credential := memberfile.Credential{Spaces: []space.Membership{
+	memberships := []space.Membership{
 		{SpaceID: "11111111-1111-4111-8111-111111111111", Name: "Research"},
 		{SpaceID: "22222222-2222-4222-8222-222222222222", Name: "Operations"},
-	}}
-	selected, err := selectSpace(credential, "22222222-2222-4222-8222-222222222222")
+	}
+	selected, err := selectSpace(memberships, "22222222-2222-4222-8222-222222222222")
 	if err != nil {
 		t.Fatalf("select Space: %v", err)
 	}
 	if selected != "22222222-2222-4222-8222-222222222222" {
 		t.Fatalf("selected Space = %q", selected)
 	}
-	if _, err := selectSpace(credential, "33333333-3333-4333-8333-333333333333"); err == nil {
-		t.Fatal("selected Space outside member credential")
+	if _, err := selectSpace(memberships, "33333333-3333-4333-8333-333333333333"); err == nil {
+		t.Fatal("selected Space outside current memberships")
 	}
-	if _, err := selectSpace(credential, ""); err == nil {
+	if _, err := selectSpace(memberships, ""); err == nil {
 		t.Fatal("multiple Spaces did not require explicit selection")
 	}
 }

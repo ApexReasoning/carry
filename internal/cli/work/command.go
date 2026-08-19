@@ -1,16 +1,18 @@
 package work
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"strings"
 
 	"github.com/ApexReasoning/carry/internal/identity/memberfile"
+	"github.com/ApexReasoning/carry/internal/space"
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 )
 
-// NewCommand creates the member Work command group.
+// NewCommand creates the member Work command group, including explicit retry.
 func NewCommand(configDirectory string, output io.Writer) *cobra.Command {
 	command := &cobra.Command{
 		Use:   "work",
@@ -25,43 +27,48 @@ func NewCommand(configDirectory string, output io.Writer) *cobra.Command {
 		newListCommand(configDirectory, output),
 		newShowCommand(configDirectory, output),
 		newMessageCommand(configDirectory, output),
+		newRetryCommand(configDirectory, output),
 	)
 	return command
 }
 
-func connect(configDirectory string, requestedSpaceID string) (*memberHTTP, string, error) {
+func connect(ctx context.Context, configDirectory string, requestedSpaceID string) (*memberHTTP, string, error) {
 	credential, err := memberfile.Load(configDirectory)
 	if err != nil {
 		return nil, "", fmt.Errorf("load member login: %w", err)
-	}
-	spaceID, err := selectSpace(credential, requestedSpaceID)
-	if err != nil {
-		return nil, "", err
 	}
 	client, err := connectMember(credential)
 	if err != nil {
 		return nil, "", fmt.Errorf("connect to Carry: %w", err)
 	}
+	info, err := client.loadInfo(ctx)
+	if err != nil {
+		return nil, "", fmt.Errorf("load current member: %w", err)
+	}
+	spaceID, err := selectSpace(info.Spaces, requestedSpaceID)
+	if err != nil {
+		return nil, "", err
+	}
 	return client, spaceID, nil
 }
 
-func selectSpace(credential memberfile.Credential, requestedSpaceID string) (string, error) {
+func selectSpace(memberships []space.Membership, requestedSpaceID string) (string, error) {
 	requestedSpaceID = strings.TrimSpace(requestedSpaceID)
 	if requestedSpaceID != "" {
 		if uuid.Validate(requestedSpaceID) != nil {
 			return "", errorsInvalidSpaceID()
 		}
-		for _, membership := range credential.Spaces {
+		for _, membership := range memberships {
 			if membership.SpaceID == requestedSpaceID {
 				return requestedSpaceID, nil
 			}
 		}
 		return "", fmt.Errorf("current member does not belong to Space %s", requestedSpaceID)
 	}
-	if len(credential.Spaces) == 1 {
-		return credential.Spaces[0].SpaceID, nil
+	if len(memberships) == 1 {
+		return memberships[0].SpaceID, nil
 	}
-	if len(credential.Spaces) == 0 {
+	if len(memberships) == 0 {
 		return "", fmt.Errorf("current member has no Space; run carry login again")
 	}
 	return "", fmt.Errorf("member belongs to multiple Spaces; select one with --space")

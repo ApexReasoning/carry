@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/ApexReasoning/carry/internal/host"
 	"github.com/ApexReasoning/carry/internal/postgres/dbsqlc"
 	"github.com/ApexReasoning/carry/internal/run"
+	"github.com/ApexReasoning/carry/internal/work"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
@@ -54,7 +56,7 @@ func (s *Store) ClaimRun(ctx context.Context, machineID string) (run.Claim, erro
 			return run.Claim{}, fmt.Errorf("rotate Run fence: %w", rotateErr)
 		}
 		claim = run.Claim{
-			RunID: expired.RunID, WorkID: expired.WorkID, SpaceID: expired.SpaceID,
+			RunID: expired.RunID, WorkID: expired.WorkID,
 			Fence: fence, Goal: expired.Goal,
 			CurrentUnderstanding:     textValue(expired.Understanding),
 			CurrentNextStep:          textValue(expired.NextStep),
@@ -72,7 +74,7 @@ func (s *Store) ClaimRun(ctx context.Context, machineID string) (run.Claim, erro
 		}
 		inputStartSeq = work.AppliedInputSeq + 1
 		claim = run.Claim{
-			RunID: uuid.NewString(), WorkID: work.WorkID, SpaceID: work.SpaceID, Fence: 1,
+			RunID: uuid.NewString(), WorkID: work.WorkID, Fence: 1,
 			Goal: work.Goal, CurrentUnderstanding: textValue(work.Understanding),
 			CurrentNextStep:          textValue(work.NextStep),
 			BaseUnderstandingVersion: work.UnderstandingVersion,
@@ -263,6 +265,76 @@ func (s *Store) FinishUnresolvedAttempt(ctx context.Context, command run.FinishC
 	}
 	if err := transaction.Commit(ctx); err != nil {
 		return fmt.Errorf("commit unresolved Attempt finish: %w", err)
+	}
+	return nil
+}
+
+// RequestWorkRetry records an active member's explicit permission to create a fresh Run.
+func (s *Store) RequestWorkRetry(ctx context.Context, command work.RetryCommand) error {
+	if strings.TrimSpace(command.WorkID) == "" || strings.TrimSpace(command.SpaceID) == "" ||
+		strings.TrimSpace(command.RequestedBy) == "" {
+		return errors.New("work, space, and requesting member are required")
+	}
+	if err := work.ValidateIdempotencyKey(command.IdempotencyKey); err != nil {
+		return err
+	}
+	transaction, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin Work retry request: %w", err)
+	}
+	defer func() { _ = transaction.Rollback(context.Background()) }()
+	queries := s.queries.WithTx(transaction)
+	if err := lockActiveWorkMembership(ctx, queries, command.SpaceID, command.RequestedBy); err != nil {
+		return err
+	}
+	lifecycle, err := queries.LockWorkForRetry(ctx, dbsqlc.LockWorkForRetryParams{
+		WorkID: command.WorkID, SpaceID: command.SpaceID,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return work.ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("lock Work for retry: %w", err)
+	}
+	if work.Lifecycle(lifecycle) != work.LifecycleOpen {
+		return work.ErrNotOpen
+	}
+
+	existingRequester, err := queries.FindRunRetryByIdempotency(ctx, dbsqlc.FindRunRetryByIdempotencyParams{
+		WorkID: command.WorkID, RetryIdempotencyKey: command.IdempotencyKey,
+	})
+	if err == nil {
+		if existingRequester != command.RequestedBy {
+			return work.ErrIdempotencyConflict
+		}
+		if err := transaction.Commit(ctx); err != nil {
+			return fmt.Errorf("commit idempotent Work retry: %w", err)
+		}
+		return nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("load idempotent Work retry: %w", err)
+	}
+
+	retryableRunID, err := queries.LockRetryableRun(ctx, command.WorkID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return work.ErrRetryNotNeeded
+	}
+	if err != nil {
+		return fmt.Errorf("lock retryable Run: %w", err)
+	}
+	rows, err := queries.RequestRunRetry(ctx, dbsqlc.RequestRunRetryParams{
+		RequestedByUserID: command.RequestedBy, RetryIdempotencyKey: command.IdempotencyKey,
+		RunID: retryableRunID,
+	})
+	if err != nil {
+		return fmt.Errorf("request Run retry: %w", err)
+	}
+	if rows != 1 {
+		return work.ErrRetryNotNeeded
+	}
+	if err := transaction.Commit(ctx); err != nil {
+		return fmt.Errorf("commit Work retry request: %w", err)
 	}
 	return nil
 }

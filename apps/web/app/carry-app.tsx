@@ -35,6 +35,31 @@ export function App() {
       </main>
     );
   }
+  if (session.phase === "signing-out") {
+    return (
+      <main className="center-state">
+        <p className="brand-mark">
+          Carry<span className="brand-dot">.</span>
+        </p>
+        <p className="center-state-copy">
+          Your Work is hidden on this browser.
+        </p>
+        {session.error ? (
+          <p className="alert" role="alert">
+            {session.error}
+          </p>
+        ) : null}
+        <button
+          className="ghost-button"
+          type="button"
+          onClick={() => void session.finishSignOut()}
+          disabled={session.busy}
+        >
+          {session.busy ? "Signing out…" : "Finish signing out"}
+        </button>
+      </main>
+    );
+  }
   if (session.phase === "login") {
     return (
       <MemberEntry
@@ -69,6 +94,9 @@ export function App() {
                 onChange={(event) => void board.selectSpace(event.target.value)}
                 disabled={busy}
               >
+                <option value="" disabled>
+                  Choose a Space
+                </option>
                 {session.member.spaces.map((space) => (
                   <option key={space.space_id} value={space.space_id}>
                     {space.name}
@@ -103,9 +131,9 @@ export function App() {
             happened, and comes back when your judgement is needed.
           </p>
         </div>
-        {board.error ? (
+        {session.error || board.error ? (
           <p className="alert global-alert" role="alert">
-            {board.error}
+            {session.error ?? board.error}
           </p>
         ) : null}
         {board.spaceID ? (
@@ -124,9 +152,14 @@ export function App() {
                 busy={busy}
                 currentMemberID={session.member.user_id}
                 onMessage={board.addMessage}
+                onRetry={board.retryCurrentWork}
               />
             </div>
           </>
+        ) : session.member.spaces.length > 1 ? (
+          <p className="empty-panel">
+            Choose a Space before opening shared Work.
+          </p>
         ) : (
           <p className="empty-panel">
             This member does not belong to a Space yet. Ask a Space owner to add

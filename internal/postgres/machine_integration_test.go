@@ -21,7 +21,7 @@ func TestMachineEnrollmentRequiresPermissionAndIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 	pool := openMigratedTestPool(t, ctx)
 	store := NewStore(pool)
-	bootstrap, err := store.Bootstrap(ctx, BootstrapCommand{
+	bootstrap, err := bootstrapForTest(ctx, store, BootstrapCommand{
 		DisplayName:    "Dorothy",
 		SpaceName:      "Compiler Research",
 		TokenExpiresAt: time.Now().Add(time.Hour),
@@ -89,7 +89,7 @@ func TestConcurrentMachineEnrollmentReturnsTheDurableWinner(t *testing.T) {
 	ctx := context.Background()
 	pool := openMigratedTestPool(t, ctx)
 	store := NewStore(pool)
-	bootstrap, err := store.Bootstrap(ctx, BootstrapCommand{
+	bootstrap, err := bootstrapForTest(ctx, store, BootstrapCommand{
 		DisplayName: "Margaret", SpaceName: "Materials Lab", TokenExpiresAt: time.Now().Add(time.Hour),
 	})
 	if err != nil {
@@ -147,7 +147,7 @@ func TestMachineEnrollmentPermissionLockSerializesRevocation(t *testing.T) {
 	ctx := context.Background()
 	pool := openMigratedTestPool(t, ctx)
 	store := NewStore(pool)
-	bootstrap, err := store.Bootstrap(ctx, BootstrapCommand{
+	bootstrap, err := bootstrapForTest(ctx, store, BootstrapCommand{
 		DisplayName: "Katherine", SpaceName: "Flight Controls", TokenExpiresAt: time.Now().Add(time.Hour),
 	})
 	if err != nil {

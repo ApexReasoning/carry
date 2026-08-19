@@ -153,13 +153,14 @@ func (q *Queries) CreateWorkMessage(ctx context.Context, arg CreateWorkMessagePa
 }
 
 const findWorkByCreateIdempotency = `-- name: FindWorkByCreateIdempotency :one
-SELECT work_id, space_id, goal, lifecycle, owner_user_id, creator_user_id,
-    created_at, create_request_digest
-FROM works
+SELECT work.work_id, work.space_id, work.goal, work.lifecycle, work.owner_user_id, work.creator_user_id,
+    work.input_head_seq, work.applied_input_seq, work.understanding_version, work.understanding, work.next_step,
+    work.created_at, work.create_request_digest
+FROM works AS work
 WHERE
-    space_id = $1
-    AND creator_user_id = $2
-    AND create_idempotency_key = $3
+    work.space_id = $1
+    AND work.creator_user_id = $2
+    AND work.create_idempotency_key = $3
 `
 
 type FindWorkByCreateIdempotencyParams struct {
@@ -169,14 +170,19 @@ type FindWorkByCreateIdempotencyParams struct {
 }
 
 type FindWorkByCreateIdempotencyRow struct {
-	WorkID              string
-	SpaceID             string
-	Goal                string
-	Lifecycle           string
-	OwnerUserID         string
-	CreatorUserID       string
-	CreatedAt           pgtype.Timestamptz
-	CreateRequestDigest []byte
+	WorkID               string
+	SpaceID              string
+	Goal                 string
+	Lifecycle            string
+	OwnerUserID          string
+	CreatorUserID        string
+	InputHeadSeq         int64
+	AppliedInputSeq      int64
+	UnderstandingVersion int64
+	Understanding        *string
+	NextStep             *string
+	CreatedAt            pgtype.Timestamptz
+	CreateRequestDigest  []byte
 }
 
 func (q *Queries) FindWorkByCreateIdempotency(ctx context.Context, arg FindWorkByCreateIdempotencyParams) (FindWorkByCreateIdempotencyRow, error) {
@@ -189,6 +195,11 @@ func (q *Queries) FindWorkByCreateIdempotency(ctx context.Context, arg FindWorkB
 		&i.Lifecycle,
 		&i.OwnerUserID,
 		&i.CreatorUserID,
+		&i.InputHeadSeq,
+		&i.AppliedInputSeq,
+		&i.UnderstandingVersion,
+		&i.Understanding,
+		&i.NextStep,
 		&i.CreatedAt,
 		&i.CreateRequestDigest,
 	)
@@ -279,11 +290,11 @@ func (q *Queries) ListWorkMessages(ctx context.Context, workID string) ([]ListWo
 }
 
 const listWorks = `-- name: ListWorks :many
-SELECT work_id, space_id, goal, lifecycle, owner_user_id, creator_user_id,
-    input_head_seq, applied_input_seq, understanding_version, understanding, next_step, created_at
-FROM works
-WHERE space_id = $1
-ORDER BY created_at DESC, work_id DESC
+SELECT work.work_id, work.space_id, work.goal, work.lifecycle, work.owner_user_id, work.creator_user_id,
+    work.input_head_seq, work.applied_input_seq, work.understanding_version, work.understanding, work.next_step, work.created_at
+FROM works AS work
+WHERE work.space_id = $1
+ORDER BY work.created_at DESC, work.work_id DESC
 `
 
 type ListWorksRow struct {
@@ -335,11 +346,11 @@ func (q *Queries) ListWorks(ctx context.Context, spaceID string) ([]ListWorksRow
 }
 
 const loadWork = `-- name: LoadWork :one
-SELECT work_id, space_id, goal, lifecycle, owner_user_id, creator_user_id,
-    input_head_seq, applied_input_seq, understanding_version, understanding, next_step, created_at
-FROM works
-WHERE space_id = $1 AND work_id = $2
-FOR SHARE
+SELECT work.work_id, work.space_id, work.goal, work.lifecycle, work.owner_user_id, work.creator_user_id,
+    work.input_head_seq, work.applied_input_seq, work.understanding_version, work.understanding, work.next_step, work.created_at
+FROM works AS work
+WHERE work.space_id = $1 AND work.work_id = $2
+FOR SHARE OF work
 `
 
 type LoadWorkParams struct {
@@ -450,4 +461,20 @@ func (q *Queries) LockWork(ctx context.Context, arg LockWorkParams) (LockWorkRow
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const workNeedsRetry = `-- name: WorkNeedsRetry :one
+SELECT EXISTS (
+    SELECT 1 FROM runs
+    WHERE work_id = $1
+      AND state IN ('failed', 'unknown')
+      AND retry_requested_at IS NULL
+)
+`
+
+func (q *Queries) WorkNeedsRetry(ctx context.Context, workID string) (bool, error) {
+	row := q.db.QueryRow(ctx, workNeedsRetry, workID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
 }

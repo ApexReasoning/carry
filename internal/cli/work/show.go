@@ -18,7 +18,7 @@ func newShowCommand(configDirectory string, output io.Writer) *cobra.Command {
 			if err := validateWorkID(workID); err != nil {
 				return err
 			}
-			client, selectedSpaceID, err := connect(configDirectory, spaceID)
+			client, selectedSpaceID, err := connect(command.Context(), configDirectory, spaceID)
 			if err != nil {
 				return err
 			}
@@ -46,6 +46,11 @@ func newShowCommand(configDirectory string, output io.Writer) *cobra.Command {
 			}
 			if details.Work.HasUnappliedInput && details.Work.Understanding != "" {
 				if _, err := fmt.Fprintln(output, "New information: not applied yet"); err != nil {
+					return err
+				}
+			}
+			if details.Work.NeedsRetry {
+				if _, err := fmt.Fprintln(output, "Carry could not confirm an update. It will not try again until a member runs `carry work retry`."); err != nil {
 					return err
 				}
 			}

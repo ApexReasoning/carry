@@ -110,6 +110,50 @@ func (q *Queries) IsBootstrapped(ctx context.Context) (bool, error) {
 	return exists, err
 }
 
+const loadPreparedBootstrap = `-- name: LoadPreparedBootstrap :one
+SELECT
+    carry_user.display_name,
+    space.name AS space_name,
+    membership.can_enroll_machines,
+    user_token.token_hash,
+    user_token.expires_at
+FROM carry_users AS carry_user
+JOIN space_memberships AS membership ON membership.user_id = carry_user.user_id
+JOIN spaces AS space ON space.space_id = membership.space_id
+JOIN user_tokens AS user_token ON user_token.user_id = carry_user.user_id
+WHERE
+    carry_user.user_id = $1
+    AND space.space_id = $2
+    AND user_token.token_id = $3
+`
+
+type LoadPreparedBootstrapParams struct {
+	UserID  string
+	SpaceID string
+	TokenID string
+}
+
+type LoadPreparedBootstrapRow struct {
+	DisplayName       string
+	SpaceName         string
+	CanEnrollMachines bool
+	TokenHash         []byte
+	ExpiresAt         pgtype.Timestamptz
+}
+
+func (q *Queries) LoadPreparedBootstrap(ctx context.Context, arg LoadPreparedBootstrapParams) (LoadPreparedBootstrapRow, error) {
+	row := q.db.QueryRow(ctx, loadPreparedBootstrap, arg.UserID, arg.SpaceID, arg.TokenID)
+	var i LoadPreparedBootstrapRow
+	err := row.Scan(
+		&i.DisplayName,
+		&i.SpaceName,
+		&i.CanEnrollMachines,
+		&i.TokenHash,
+		&i.ExpiresAt,
+	)
+	return i, err
+}
+
 const lockBootstrap = `-- name: LockBootstrap :exec
 SELECT pg_advisory_xact_lock($1::bigint)
 `

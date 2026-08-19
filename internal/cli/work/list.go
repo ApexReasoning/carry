@@ -14,7 +14,7 @@ func newListCommand(configDirectory string, output io.Writer) *cobra.Command {
 		Short: "List Work in a Space",
 		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
-			client, selectedSpaceID, err := connect(configDirectory, spaceID)
+			client, selectedSpaceID, err := connect(command.Context(), configDirectory, spaceID)
 			if err != nil {
 				return err
 			}

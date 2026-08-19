@@ -1,3 +1,5 @@
+/// <reference types="node" />
+
 import { expect, test } from "@playwright/test";
 
 test("member creates and continues durable Work without browser bearer storage", async ({

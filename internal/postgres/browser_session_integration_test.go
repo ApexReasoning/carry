@@ -15,7 +15,7 @@ func TestBrowserSessionStoresOnlyHashAndFollowsSourceTokenRevocation(t *testing.
 	ctx := context.Background()
 	pool := openMigratedTestPool(t, ctx)
 	store := NewStore(pool)
-	bootstrap, err := store.Bootstrap(ctx, BootstrapCommand{
+	bootstrap, err := bootstrapForTest(ctx, store, BootstrapCommand{
 		DisplayName: "Mary", SpaceName: "Browser Research", TokenExpiresAt: time.Now().Add(time.Hour),
 	})
 	if err != nil {
@@ -59,7 +59,7 @@ func TestBrowserSessionCanBeRevoked(t *testing.T) {
 	ctx := context.Background()
 	pool := openMigratedTestPool(t, ctx)
 	store := NewStore(pool)
-	bootstrap, err := store.Bootstrap(ctx, BootstrapCommand{
+	bootstrap, err := bootstrapForTest(ctx, store, BootstrapCommand{
 		DisplayName: "Betty", SpaceName: "Session Research", TokenExpiresAt: time.Now().Add(time.Hour),
 	})
 	if err != nil {

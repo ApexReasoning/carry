@@ -27,10 +27,11 @@ type config struct {
 }
 
 type bootstrapConfig struct {
-	databaseURL string
-	displayName string
-	spaceName   string
-	tokenTTL    time.Duration
+	databaseURL    string
+	displayName    string
+	spaceName      string
+	tokenTTL       time.Duration
+	credentialFile string
 }
 
 func main() {
@@ -75,6 +76,7 @@ func parseBootstrapConfig(arguments []string, stderr io.Writer) (bootstrapConfig
 	flags.StringVar(&parsed.displayName, "display-name", "", "initial member display name")
 	flags.StringVar(&parsed.spaceName, "space", "", "initial Space name")
 	flags.DurationVar(&parsed.tokenTTL, "token-ttl", 90*24*time.Hour, "initial member token lifetime")
+	flags.StringVar(&parsed.credentialFile, "credential-file", "", "durable initial member credential file")
 	if err := flags.Parse(arguments); err != nil {
 		return bootstrapConfig{}, fmt.Errorf("parse bootstrap flags: %w", err)
 	}
@@ -92,6 +94,9 @@ func parseBootstrapConfig(arguments []string, stderr io.Writer) (bootstrapConfig
 	}
 	if parsed.tokenTTL <= 0 {
 		return bootstrapConfig{}, errors.New("--token-ttl must be positive")
+	}
+	if strings.TrimSpace(parsed.credentialFile) == "" {
+		return bootstrapConfig{}, errors.New("--credential-file is required")
 	}
 	return parsed, nil
 }
@@ -190,6 +195,12 @@ func run(ctx context.Context, arguments []string, stdout io.Writer, stderr io.Wr
 }
 
 func bootstrap(ctx context.Context, parsed bootstrapConfig, stdout io.Writer) error {
+	command, err := loadOrCreateBootstrapCredential(
+		parsed.credentialFile, parsed.displayName, parsed.spaceName, time.Now().Add(parsed.tokenTTL),
+	)
+	if err != nil {
+		return fmt.Errorf("prepare bootstrap credential: %w", err)
+	}
 	pool, err := carrypostgres.Open(ctx, parsed.databaseURL)
 	if err != nil {
 		return fmt.Errorf("open PostgreSQL for bootstrap: %w", err)
@@ -199,11 +210,7 @@ func bootstrap(ctx context.Context, parsed bootstrapConfig, stdout io.Writer) er
 		return fmt.Errorf("migrate PostgreSQL for bootstrap: %w", err)
 	}
 
-	result, err := carrypostgres.NewStore(pool).Bootstrap(ctx, carrypostgres.BootstrapCommand{
-		DisplayName:    parsed.displayName,
-		SpaceName:      parsed.spaceName,
-		TokenExpiresAt: time.Now().Add(parsed.tokenTTL),
-	})
+	result, err := carrypostgres.NewStore(pool).Bootstrap(ctx, command)
 	if err != nil {
 		return fmt.Errorf("bootstrap Carry: %w", err)
 	}
