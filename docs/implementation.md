@@ -279,7 +279,7 @@ CI/service account、共享 automation token、Machine enrollment token、通用
 
 成员运行 `carry host connect`，在 Browser 中检查准确 public key fingerprint、Space 与显示名后批准这台 Machine；之后可以查看持久 inventory、远程 revoke、本地 cleanup 并重新连接一台新 Machine。
 
-Node 进入时优先重新走查 Multica 当前 Add a computer、browser sign-in、daemon diagnostics 与 deletion/re-registration 操作链路，并与 Tailscale device、GitHub/GitLab runner、OpenHands 和至少一个相关一手产品比较。详细源码与 Loop 考古留到 Node entry；只吸收产品确认和恢复优点，不复制 heartbeat、online/offline、last-seen、Runtime/provider/version、capacity 或 shared PAT 模型。
+Node 进入时优先重新走查 Multica 当前 Add a computer、browser sign-in、daemon diagnostics 与 deletion/re-registration 操作链路，并与 Tailscale device、GitHub/GitLab runner、OpenHands 和至少一个相关一手产品比较。详细源码与 Loop 考古留到 Node entry；只吸收产品确认和恢复优点，不复制 heartbeat、online/offline、last-seen、Runtime/provider/version、capacity 或 shared PAT 模型。DeepSeek Harness 的 sandbox seam 只作为诚实表达 enforcement、runner failure 与 denial 的对照：Node 12 的 remote revoke 继续只证明服务端 certificate authority，不引入 sandbox、plugin 或 Session owner。
 
 ### 关闭证据
 
@@ -313,13 +313,15 @@ Node 进入时优先重新走查 Multica 当前 Add a computer、browser sign-in
 
 第一条 fixture 应是跨领域且可直接判断的真实问题，例如比较若干厂商当前条款并区分 observed fact、Carry inference 与未知缺口。引用仍属于 Work 当前内容；URL、网页文本和模型输出不能产生 authority，也不因“被引用”升级成 Evidence 或 Artifact owner。
 
+Node 进入实现前必须把研究授权和 provider submission 冻结为现有 Work/Run owner 的 typed facts：PostgreSQL 固定 authorizing member、Work、canonical research question、concrete provider audience、披露与成本边界、expiry、request identity 与 payload digest，并只把 immutable、Attempt-scoped facts 交给当前 Host。具体 caller 在网络 I/O 前机械验证每个 query 未扩大边界；Prompt、tool schema、manifest、credential presence 或模型自述不能补齐权限。这个合同不预建 Capability、Tool、Plugin 或 Action owner。
+
 ### 关闭证据
 
 - 新用户不需要 repository、Git、channel 或 provider/tool 配置即可从委托走到 cited result review；
 - authority 固定 authorizing member、Work、允许披露的 canonical research question、concrete external audience 与有效期；模型生成的附加 query 只能在该边界内收窄，不能扩大披露；
 - provider 的 retention/logging 边界在授权前可检查；未明确授权的 Work Message、私人 Conversation、credential 与内部 authority facts 不进入外部请求；
 - 每条关键外部主张有可打开来源，来源缺失、冲突、超时与部分失败保持显式；
-- 请求与返回有界，恶意网页内容不能改变 actor、Space、Work、credential 或 external consequence；
+- 请求与返回有界，恶意网页内容不能改变 actor、Space、Work、credential 或 external consequence；provider submission 区分 prepared、accepted、rejected、response received 与 Unknown，只有 provider idempotency 或直接 reconciliation 证据证明安全时才以同一 request identity 和完全相同 payload 重试；
 - Pi/Codex 完成同一产品 journey，但保留 concrete adapter 做法；
 - 能力是只读的，不产生外部写操作、长期 bytes、通用 browser、MCP/plugin registry 或 capability marketplace。
 
@@ -402,7 +404,7 @@ Node 进入时从一个用户确认的 concrete provider journey 推导 native a
 
 Carry 提出一个准确、单一类型的外部写操作，由正确成员检查固定 target 与 parameters 后批准，唯一 fenced worker 执行，响应丢失保持 Unknown。
 
-Action identity 只能由独立授权与 consequence lifecycle 赚得。Node entry 从一个用户确认的真实后果选择 typed command；如果一条旅程同时包含 repository authorization、code mutation、branch、PR、CI 与 merge，就拆分而不是建立 generic command JSON、universal approval engine 或 provider registry。
+Action identity 只能由独立授权与 consequence lifecycle 赚得。Node entry 从一个用户确认的真实后果选择 typed command；如果一条旅程同时包含 repository authorization、code mutation、branch、PR、CI 与 merge，就拆分而不是建立 generic command JSON、universal approval engine 或 provider registry。批准必须绑定已经持久、已经展示的 exact proposal identity 与 target/parameters digest，不能批准一份重新渲染的参数副本；执行事实区分尚未 dispatch 与已经 dispatch 但 outcome 未观察，后者在 reconciliation 前不得盲目重试。
 
 ## 23. M7 gate：V1
 
@@ -425,7 +427,7 @@ Action identity 只能由独立授权与 consequence lifecycle 赚得。Node ent
 
 - recurrence：用户反复重建 future continuation，并且 missed/overlap/catch-up 行为需要独立产品承诺；
 - second channel：第一渠道已经证明真正共享的 delivery semantics；
-- managed Carry Cloud execution：团队无需自有 Machine 的 journey 已经赚得 sandbox、provider credential、privacy 与 operations 边界；
+- managed Carry Cloud execution：团队无需自有 Machine 的 journey 已经赚得 sandbox、provider credential、privacy 与 operations 边界；所有观察或修改同一 workspace 的 filesystem、subprocess、terminal、LSP 与 browser capability 绑定同一个 execution-world identity，混合 local/remote world 必须拒绝而不是静默组合；sandbox 分别声明 filesystem、network、process、secret 与 host access 的 enforcement，`partial` 不能作为 `full`；当时从 DeepSeek Harness 的 per-call policy、wrapped argv 与 enforcement fact 重新推导，不复制其 plugin/Session 架构；
 - Passkey/MFA、secondary email、企业 SSO/SCIM 或 admin recovery：真实安全或组织旅程要求；
 - Event：第一条没有明确 Conversation/Work target 的授权生产来源；
 - Artifact：第一份必须长期保存的 immutable bytes；

@@ -332,6 +332,8 @@ Conversation Reply:  reply + nullable delegation_goal
 
 Codex 缓冲结束但缺少准确 terminal notification 时，只可有界只读核对；不能证明完成则 Finish Unknown。Pi prompt 或 Codex `turn/start` 在 subprocess 启动后发生 write failure 时，request 可能已经部分或完整送达，同样归类为 Unknown，不能猜成 Failed。Host 不在 claim 后切换到另一 adapter。
 
+Adapter cancellation、subprocess kill、temporary-directory cleanup 或 native Session discard 只回收本地资源，不能撤回已经发送给 provider 的 bytes、证明远端工作停止、撤销 PostgreSQL authority 或把 Unknown 改写成 Failed。未来 Attempt 能产生外部后果时，持久事实必须区分“尚未 dispatch”与“已经 dispatch 但 outcome 未观察”，并区分 worker 报告与服务端 recovery 合成；只有这些事实与后续 reconciliation 可以决定 retry safety。
+
 ## 10. User API
 
 User API 只表达成员旅程：

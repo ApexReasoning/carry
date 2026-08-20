@@ -346,7 +346,9 @@ return fmt.Errorf("claim Run %s: %w", runID, err)
 
 创建进程、listener、socket、临时目录或文件的 owner 同时负责关闭。
 
-成功的 `Close` 应可重复调用。失败的 cleanup 不能忘记尚未完成的责任。
+成功的 `Close` 应可重复调用。失败的 cleanup 不能忘记尚未完成的责任。Teardown 必须等待 quiescence，而不只是发出终止请求：先关闭 listener/notification 入口，再 signal 或 kill，并等待进程或资源确实退出，避免晚到 completion 重新进入已经关闭的 owner。
+
+Cleanup 只证明本 owner 的本地资源已经释放，不能证明外部 emission 已撤回、远端执行已停止或数据库 authority 已失效；这些事实必须分别由 typed outcome、reconciliation 或 fence 证明。
 
 ### Transaction
 
