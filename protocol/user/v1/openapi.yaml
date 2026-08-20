@@ -85,6 +85,92 @@ paths:
           $ref: "#/components/responses/Error"
         "409":
           $ref: "#/components/responses/Error"
+  /v1/auth/google/start:
+    post:
+      operationId: startGoogleLogin
+      security: []
+      responses:
+        "303":
+          description: Redirect to the fixed Google authorization endpoint
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
+            Location:
+              schema:
+                type: string
+                format: uri
+        "400":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "500":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+  /v1/auth/google/callback:
+    get:
+      operationId: completeGoogleLogin
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/OAuthState"
+        - $ref: "#/components/parameters/OAuthCode"
+        - $ref: "#/components/parameters/OAuthError"
+      responses:
+        "303":
+          description: >-
+            Redirect to a fixed clean Carry URL after consuming the callback
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
+            Location:
+              schema:
+                type: string
+                format: uri
+        "400":
+          $ref: "#/components/responses/Error"
+  /v1/auth/github/start:
+    post:
+      operationId: startGitHubLogin
+      security: []
+      responses:
+        "303":
+          description: Redirect to the fixed GitHub authorization endpoint
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
+            Location:
+              schema:
+                type: string
+                format: uri
+        "400":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "500":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+  /v1/auth/github/callback:
+    get:
+      operationId: completeGitHubLogin
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/OAuthState"
+        - $ref: "#/components/parameters/OAuthCode"
+        - $ref: "#/components/parameters/OAuthError"
+      responses:
+        "303":
+          description: >-
+            Redirect to a fixed clean Carry URL after consuming the callback
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
+            Location:
+              schema:
+                type: string
+                format: uri
+        "400":
+          $ref: "#/components/responses/Error"
   /v1/browser/sessions/current:
     delete:
       operationId: revokeCurrentBrowserSession
@@ -515,6 +601,30 @@ components:
       in: cookie
       name: __Host-carry_session
   parameters:
+    OAuthState:
+      name: state
+      in: query
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 255
+    OAuthCode:
+      name: code
+      in: query
+      required: false
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 4096
+    OAuthError:
+      name: error
+      in: query
+      required: false
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 255
     SpaceID:
       name: spaceID
       in: path

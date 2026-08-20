@@ -188,8 +188,10 @@ func memberSurfaceTestAPI(
 	}
 	identityRoutes, err := NewUserIdentityRoutes(
 		emailLogin,
+		unavailableExternalLogin{},
 		sessions,
 		credentials,
+		testExternalOrigin(t),
 		NewRequestSource(nil),
 		emptyMemberships{},
 	)

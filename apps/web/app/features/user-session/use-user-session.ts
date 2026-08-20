@@ -42,7 +42,7 @@ export function useUserSession() {
   useEffect(() => {
     let active = true;
     async function restore() {
-      setError(null);
+      setError(takeExternalSignInStatus());
       if (hasPendingSignOut()) {
         setUser(null);
         setPhase("signing-out");
@@ -209,6 +209,28 @@ export function useUserSession() {
     signOut,
     finishSignOut: () => finishSignOut(),
   };
+}
+
+function takeExternalSignInStatus(): string | null {
+  const url = new URL(window.location.href);
+  const status = url.searchParams.get("sign_in");
+  if (status === null) return null;
+  url.searchParams.delete("sign_in");
+  window.history.replaceState(
+    null,
+    "",
+    `${url.pathname}${url.search}${url.hash}`,
+  );
+  switch (status) {
+    case "cancelled":
+      return "Sign-in was cancelled. Start again when you’re ready.";
+    case "unavailable":
+      return "Carry could not confirm sign-in. Start a fresh sign-in.";
+    case "invalid":
+      return "This sign-in link is invalid or expired. Start again.";
+    default:
+      return "Carry could not confirm sign-in. Start again.";
+  }
 }
 
 function errorMessage(value: unknown): string {

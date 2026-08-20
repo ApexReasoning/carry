@@ -229,8 +229,10 @@ func emailTestAPIWithSources(
 	}
 	identityRoutes, err := NewUserIdentityRoutes(
 		emailLogin,
+		unavailableExternalLogin{},
 		sessions,
 		credentials,
+		testExternalOrigin(t),
 		requestSources,
 		emptyMemberships{},
 	)

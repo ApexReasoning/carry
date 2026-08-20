@@ -94,7 +94,7 @@ PostgreSQL 拥有事务、唯一 winner、lease、fence、幂等和恢复裁决�
 
 | Owner | 持久事实 | 当前消费者 |
 | --- | --- | --- |
-| Identity | User、邮箱 proof、User token、Browser Session | User API、Web、CLI |
+| Identity | User、邮箱/Google/GitHub proof、短期登录事务、User token、Browser Session | User API、Web、CLI |
 | Space | Membership、Machine enrollment 权限 | User API、Host enrollment |
 | Work | 目标、负责人、消息、当前理解、阶段结果检查与接受事实 | 成员、执行路径 |
 | Conversation | 成员与 Carry 的私人消息、reply claim、private-side Work consequence | 准确成员、受限 Machine claim |
@@ -123,7 +123,13 @@ Resend 是官方 Cloud 的唯一 concrete 邮件 adapter。发送意图先持久
 
 成功 verify 在同一权威 transaction 中建立或读取 User、消费 challenge 并建立一个 Browser Session。Session cookie credential 由稳定 session identity 与 server-keyed MAC 组成，服务端可以在 exact committed replay 中重现同一 credential；PostgreSQL 保存 session identity、User、expiry 与 revocation，不保存可直接使用的 secret。Cookie 使用 `__Host-`、Secure、HttpOnly、SameSite Strict 与 Path `/`，logout 撤销准确 Session，stale cookie fail closed。
 
-新 email User 在创建首个 Space 前允许没有 display name 和 Membership。`/v1/me` 的 User 与当前 Memberships 是 Web routing 的唯一事实；不增加 profile-completed、onboarding-state 或 default-Space。
+Google 和 GitHub authentication 继续属于 Identity，不建立 OAuth/provider owner 或 registry。Google identity 只按 canonical issuer 与 case-sensitive `sub` 保存；GitHub identity 只按每次用短期 access token 调用 authenticated `/user` 得到的正整数 ID 保存。provider email、login、name、node ID 和 token 都不能选择 User、查询 `email_identities`、修改 display name 或产生 Membership。
+
+每次 external login 由一个十分钟、provider-fixed 的 PostgreSQL transaction 与一个 `__Host-`、Secure、HttpOnly、SameSite Lax 的临时 browser binding 共同保护。Identity root 用不同 MAC domain 从 transaction identity 分别派生 state、binding、Google nonce 和 PKCE verifier；数据库不保存这些 plaintext 或 provider code/token。callback 先原子 claim exact response digest，唯一 winner 才在事务外 exchange；Google 验证 ID-token signature/JWKS、issuer、exact audience、expiry、issued time 与 nonce，GitHub 每次重新读取 `/user`。provider identity、User、现有 Browser Session 与 transaction completion 同事务提交；exact committed replay 只恢复同一仍有效 Session，不重做 provider I/O。provider exchange ambiguity 终结为 Unknown，不重放 code，也不建立 Carry authority；本地 completion response loss 则先用独立有界 context 重新读取同一 provider 与 callback digest，已提交时恢复准确 Session，未提交时才收敛为 Unknown。
+
+OAuth callback URI 只从必填 canonical HTTPS external origin 和固定 Google/GitHub callback path 构造；Host 不匹配时 fail closed，`Forwarded`/`X-Forwarded-Host`/`X-Forwarded-Proto` 不改变它。两种 concrete client 固定官方 endpoint、bounded timeout/body、禁用 redirect；启动不做 provider discovery 或网络调用。GitHub 不请求 email/repository/organization scope，Google 只请求 `openid`，两者都使用 authorization code + PKCE S256。
+
+新 User 在创建首个 Space 前允许没有 display name 和 Membership。`/v1/me` 的 User 与当前 Memberships 是 Web routing 的唯一事实；不增加 profile-completed、onboarding-state 或 default-Space。
 
 现有 User token 与 operator bootstrap 只为已发布 CLI 的过渡消费者保留到 Node 11。Browser 不再接受 token exchange；User token 和 Browser Session 都不能作为 Machine credential。
 
@@ -331,6 +337,7 @@ Codex 缓冲结束但缺少准确 terminal notification 时，只可有界只读
 User API 只表达成员旅程：
 
 - 请求/重发邮箱 code，并验证准确 challenge 以建立 Browser Session；
+- 从 same-origin POST 开始 Google/GitHub login，并在固定 callback 消费 provider proof 以建立同一种 Browser Session；
 - 撤销当前 Browser Session；
 - 读取当前 User 与 Spaces；
 - authenticated User 显式创建首个 Space；
@@ -362,6 +369,7 @@ Web 使用 `protocol/user/v1/openapi.yaml` 生成 client。CLI 与 Web 不复制
 
 | 行为 | 同一事务中完成 |
 | --- | --- |
+| 完成 Google/GitHub login | exact callback claim、provider identity、User、Browser Session、transaction completion |
 | 创建 Work | Membership、目标、首任负责人、幂等身份、初始待应用状态 |
 | 追加 Work Message | Membership、Work lock、连续输入顺序、真实作者、幂等 |
 | 追加 private Conversation message | Membership、Conversation lock、请求重放、单一 outstanding turn、连续顺序、reply claim |
@@ -387,6 +395,9 @@ carry_users
 email_identities
 email_login_challenges
 email_login_attempts
+google_identities
+github_identities
+external_login_transactions
 spaces
 space_memberships
 user_tokens
@@ -457,7 +468,7 @@ protocol/
 - PostgreSQL 实现并保留完整 use-case transaction，不暴露 CRUD repository，也不把一个必须原子的决定拆成 server/domain 多次调用；
 - Work、Conversation 与 Run handler 如果只把一个 exact command 翻译给一个完整 PostgreSQL use case，可以直接调用它；不为形式对称增加 forwarding Service；
 - `cmd/carry-server` 与 `internal/cli` 显式组合实现；
-- Node 6 的 concrete Resend HTTP implementation 只留在 `cmd/carry-server`；一个 caller 和一个实现不赚得独立 adapter package、provider interface hierarchy、registry 或 fallback；
+- Node 6 的 concrete Resend HTTP implementation 与 Node 7 两个 concrete Google/GitHub client 只留在 `cmd/carry-server`；固定官方 endpoint，不建立 adapter package、provider interface hierarchy、registry 或 fallback；
 - 不建立 common、utils、platform、integration、registry、resource、runtime、orchestrator 或 readmodel；
 - 删除最后一个消费者时同时删除 package、route、query、generated code、test 和文档。
 
@@ -489,6 +500,9 @@ protocol/
 - revoked Machine 不能领取或修改执行；
 - Pi 与 Codex 分别通过同一 execution conformance；
 - User API 的 Work summaries 与消息历史有界分页，只公开派生 `needs_review` 与同一 current detail 中的 opaque review identity，不暴露内部 sequence/version/Run/Attempt；
+- Google/GitHub state、browser binding、PKCE、Google nonce、provider proof、denial/outage、callback replay 与同 subject 并发保持一个 exchange winner 和准确 committed Session；
+- 相同邮箱或相同字面 subject 的 email/Google/GitHub identity 保持不同 User，且不能产生 Membership；
+- provider code/token/ID token 不进入数据库、Carry cookie、clean redirect URL 或 browser storage；
 - credential-bearing response 都是 `no-store`；
 - PostgreSQL focused tests 使用真实隔离数据库，缺失数据库不是 pass。
 

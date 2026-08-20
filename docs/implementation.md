@@ -193,10 +193,12 @@ Google/GitHub、method linking、邀请、成员密码、Passkey、CLI credentia
 
 Google 使用稳定 `(issuer, sub)`，GitHub 使用稳定 numeric user ID。provider email 只作为 provider fact；相同邮箱不能自动关联、合并 User 或产生现有 Space Membership。
 
+两种方法从 same-origin POST 开始，使用 provider-fixed、数据库过期的一次性 transaction、独立 browser binding、state 与 PKCE S256；Google 另验证 nonce 和完整 ID token。callback URI 只来自必填 canonical HTTPS external origin 与固定 route，不能由 request/forwarded host、`return_to` 或 provider 内容改变。provider 网络 I/O 在 transaction 外；exact callback 只有一个 exchange winner，ambiguous exchange 终结 Unknown，provider identity、User、现有 Browser Session 与 completion 原子提交，committed response-loss replay 不再次访问 provider。
+
 ### 关闭证据
 
 - Google 与 GitHub 各有真实 Browser signup、repeat login、logout、denial、state/nonce、callback replay 和 provider outage 证据；
-- provider subject collision fail closed，provider access token 不成为 Carry Session 或长期产品 credential；
+- provider subject collision fail closed，provider access token 不成为 Carry Session 或长期产品 credential；Google 只请求 `openid`，GitHub 不请求 email/repository/organization scope；
 - 三种首发方法在 Milestone 边界同时可用，但没有 method linking 时，相同邮箱仍保持分离身份并清楚提示下一步；
 - 外部 provider 不能建立或扩大 Space authority。
 

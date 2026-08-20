@@ -115,11 +115,6 @@ VALUES (sqlc.arg(user_id), NULL);
 INSERT INTO email_identities (canonical_email, user_id)
 VALUES (sqlc.arg(canonical_email), sqlc.arg(user_id));
 
--- name: CreateEmailBrowserSession :one
-INSERT INTO browser_sessions (session_id, user_id, expires_at)
-VALUES (sqlc.arg(session_id), sqlc.arg(user_id), transaction_timestamp() + interval '30 days')
-RETURNING *;
-
 -- name: ConsumeEmailChallenge :execrows
 UPDATE email_login_challenges
 SET
@@ -144,11 +139,6 @@ INSERT INTO email_login_attempts (
     sqlc.arg(request_digest),
     'succeeded'
 );
-
--- name: LoadBrowserSessionByID :one
-SELECT session_id, user_id, expires_at, revoked_at
-FROM browser_sessions
-WHERE session_id = sqlc.arg(session_id);
 
 -- name: EmailLoginDatabaseTime :one
 SELECT transaction_timestamp()::timestamptz;

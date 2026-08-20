@@ -343,8 +343,10 @@ func testUserRoutes(t *testing.T, authority *machine.CertificateAuthority) *User
 	}
 	identityRoutes, err := NewUserIdentityRoutes(
 		emailLogin,
+		unavailableExternalLogin{},
 		sessions,
 		credentials,
+		testExternalOrigin(t),
 		NewRequestSource(nil),
 		emptyMemberships{},
 	)
@@ -391,6 +393,33 @@ func testMachineEnrollment(t *testing.T, persistence machine.EnrollmentPersisten
 		t.Fatalf("compose test Machine enrollment: %v", err)
 	}
 	return enrollment
+}
+
+type unavailableExternalLogin struct{}
+
+func (unavailableExternalLogin) StartGoogle(context.Context) (identity.ExternalLoginStart, error) {
+	return identity.ExternalLoginStart{}, errors.New("not implemented")
+}
+
+func (unavailableExternalLogin) StartGitHub(context.Context) (identity.ExternalLoginStart, error) {
+	return identity.ExternalLoginStart{}, errors.New("not implemented")
+}
+
+func (unavailableExternalLogin) CompleteGoogle(context.Context, identity.ExternalLoginCallback) (identity.BrowserSession, error) {
+	return identity.BrowserSession{}, errors.New("not implemented")
+}
+
+func (unavailableExternalLogin) CompleteGitHub(context.Context, identity.ExternalLoginCallback) (identity.BrowserSession, error) {
+	return identity.BrowserSession{}, errors.New("not implemented")
+}
+
+func testExternalOrigin(t *testing.T) ExternalOrigin {
+	t.Helper()
+	origin, err := ParseExternalOrigin("https://carry.example")
+	if err != nil {
+		t.Fatalf("parse external origin: %v", err)
+	}
+	return origin
 }
 
 type unavailableFirstSpaces struct{}

@@ -8,7 +8,7 @@ Carry 是团队可以长期托付工作的 AI 同事。
 
 Carry 不是聊天机器人、任务清单、工作流编辑器、Agent 管理平台或只面向研发团队的自动化工具。它的价值不是完成一次模型调用，而是让一份责任跨越时间、成员、工具、模型和机器后仍然可理解、可纠正、可继续。
 
-除明确标注为未来方向的段落外，本文件描述当前 M1 基线与正在建设的 Node 6 邮箱身份/首个 Space 合同。后续 Node 的顺序和进入条件只由 `docs/implementation.md` 定义；未来方向不是当前 API、状态或用户承诺。
+除明确标注为未来方向的段落外，本文件描述当前 M1 基线与 Node 6–7 的公开身份、首个 Space 合同。后续 Node 的顺序和进入条件只由 `docs/implementation.md` 定义；未来方向不是当前 API、状态或用户承诺。
 
 ## 设计哲学：克制与自由
 
@@ -119,6 +119,10 @@ Work
 
 验证码只在五分钟内有效，最多接受五次唯一错误尝试；resend 创建新验证码并永久使旧验证码失效。邮件 provider 接受请求不等于送达、进入 inbox 或已读，响应丢失保持 Unknown。OTP、Session 和 member bearer 不进入 URL、browser storage 或日志。
 
+Google 和 GitHub 与邮箱方法最终只建立或找回 User，并签发同一种 Carry Browser Session。Google 的稳定身份是经过签名、issuer、audience、expiry、issued time 与一次性 nonce 验证后的 `(https://accounts.google.com, sub)`；GitHub 的稳定身份是每次 code exchange 后通过 authenticated `/user` 重新读取的正整数 numeric ID。两种方法都使用 browser-bound one-time state 与 PKCE S256；provider code、token、nonce 和 verifier 不成为 Carry credential，也不长期保存。
+
+三种方法当前彼此独立。相同邮箱、相同字符串 subject 或 provider profile 不能自动关联、合并 User、选择邮箱 identity 或产生 Membership；用户必须使用之前的方法回到原有 Work，Node 8 才提供双方 fresh proof 后的显式 linking。provider login 成功后的无 Membership User 继续现有显式创建首个 Space 旅程，不建立默认 Space。
+
 当前 logout 只撤销准确 Browser Session；旧 cookie fail closed。现有 member bearer 和 operator bootstrap 只为已发布 CLI 过渡保留到 Node 11，不再是 Browser 或官方 Cloud onboarding truth。
 
 ## Space
@@ -207,7 +211,7 @@ Review identity 是绑定内部 understanding version 与内容 digest 的不透
 ## 未来产品方向（当前尚未实现）
 
 - 官方云端是主要产品形态，自托管是同一产品的部署选项；两者共享 User、Space、Membership、Browser Session 与隐私语义，不以共享 token 或无用户模式换取部署简单；
-- Google、GitHub、显式 method linking/recovery 和成员邀请按 `docs/implementation.md` 后续 Node 进入；相同邮箱不能让未来 provider identity 自动关联、合并 User 或产生 Membership；
+- 显式 method linking/recovery 和成员邀请按 `docs/implementation.md` 后续 Node 进入；相同邮箱不能让 provider identity 自动关联、合并 User 或产生 Membership；
 - 只有独立结果确实需要历史正文、独立引用及接受、修改或撤回生命周期时，才考虑 Result identity；
 - 第一条未来继续优先是 Work 的一个明确时间条件，不预建 Timer；
 - Pause、Close、Reopen、负责人转交、渠道、第三方能力和外部 Action 按 `docs/implementation.md` 的后续 journey 逐条重新设计。

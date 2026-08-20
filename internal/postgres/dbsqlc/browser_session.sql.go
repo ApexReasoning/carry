@@ -7,6 +7,8 @@ package dbsqlc
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const authenticateBrowserSession = `-- name: AuthenticateBrowserSession :one
@@ -32,6 +34,82 @@ func (q *Queries) AuthenticateBrowserSession(ctx context.Context, sessionID stri
 	row := q.db.QueryRow(ctx, authenticateBrowserSession, sessionID)
 	var i AuthenticateBrowserSessionRow
 	err := row.Scan(&i.UserID, &i.DisplayName)
+	return i, err
+}
+
+const createBrowserSession = `-- name: CreateBrowserSession :one
+INSERT INTO browser_sessions (session_id, user_id, expires_at)
+VALUES ($1, $2, transaction_timestamp() + interval '30 days')
+RETURNING user_id, created_at, expires_at, revoked_at, session_id
+`
+
+type CreateBrowserSessionParams struct {
+	SessionID string
+	UserID    string
+}
+
+func (q *Queries) CreateBrowserSession(ctx context.Context, arg CreateBrowserSessionParams) (BrowserSession, error) {
+	row := q.db.QueryRow(ctx, createBrowserSession, arg.SessionID, arg.UserID)
+	var i BrowserSession
+	err := row.Scan(
+		&i.UserID,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+		&i.RevokedAt,
+		&i.SessionID,
+	)
+	return i, err
+}
+
+const loadActiveBrowserSessionByID = `-- name: LoadActiveBrowserSessionByID :one
+SELECT session_id, user_id, expires_at, revoked_at
+FROM browser_sessions
+WHERE session_id = $1
+    AND revoked_at IS NULL
+    AND expires_at > transaction_timestamp()
+`
+
+type LoadActiveBrowserSessionByIDRow struct {
+	SessionID string
+	UserID    string
+	ExpiresAt pgtype.Timestamptz
+	RevokedAt pgtype.Timestamptz
+}
+
+func (q *Queries) LoadActiveBrowserSessionByID(ctx context.Context, sessionID string) (LoadActiveBrowserSessionByIDRow, error) {
+	row := q.db.QueryRow(ctx, loadActiveBrowserSessionByID, sessionID)
+	var i LoadActiveBrowserSessionByIDRow
+	err := row.Scan(
+		&i.SessionID,
+		&i.UserID,
+		&i.ExpiresAt,
+		&i.RevokedAt,
+	)
+	return i, err
+}
+
+const loadBrowserSessionByID = `-- name: LoadBrowserSessionByID :one
+SELECT session_id, user_id, expires_at, revoked_at
+FROM browser_sessions
+WHERE session_id = $1
+`
+
+type LoadBrowserSessionByIDRow struct {
+	SessionID string
+	UserID    string
+	ExpiresAt pgtype.Timestamptz
+	RevokedAt pgtype.Timestamptz
+}
+
+func (q *Queries) LoadBrowserSessionByID(ctx context.Context, sessionID string) (LoadBrowserSessionByIDRow, error) {
+	row := q.db.QueryRow(ctx, loadBrowserSessionByID, sessionID)
+	var i LoadBrowserSessionByIDRow
+	err := row.Scan(
+		&i.SessionID,
+		&i.UserID,
+		&i.ExpiresAt,
+		&i.RevokedAt,
+	)
 	return i, err
 }
 

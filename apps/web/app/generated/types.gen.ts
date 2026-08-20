@@ -104,6 +104,12 @@ export type WorkMessage = {
   created_at: string;
 };
 
+export type OAuthState = string;
+
+export type OAuthCode = string;
+
+export type OAuthError = string;
+
 export type SpaceId = string;
 
 export type WorkId = string;
@@ -208,6 +214,106 @@ export type VerifyEmailCodeResponses = {
 
 export type VerifyEmailCodeResponse =
   VerifyEmailCodeResponses[keyof VerifyEmailCodeResponses];
+
+export type StartGoogleLoginData = {
+  body?: never;
+  path?: never;
+  query?: never;
+  url: "/v1/auth/google/start";
+};
+
+export type StartGoogleLoginErrors = {
+  /**
+   * Request rejected
+   */
+  400: ApiError;
+  /**
+   * Request rejected
+   */
+  409: ApiError;
+  /**
+   * Request rejected
+   */
+  500: ApiError;
+  /**
+   * Request rejected
+   */
+  503: ApiError;
+};
+
+export type StartGoogleLoginError =
+  StartGoogleLoginErrors[keyof StartGoogleLoginErrors];
+
+export type CompleteGoogleLoginData = {
+  body?: never;
+  path?: never;
+  query: {
+    state: string;
+    code?: string;
+    error?: string;
+  };
+  url: "/v1/auth/google/callback";
+};
+
+export type CompleteGoogleLoginErrors = {
+  /**
+   * Request rejected
+   */
+  400: ApiError;
+};
+
+export type CompleteGoogleLoginError =
+  CompleteGoogleLoginErrors[keyof CompleteGoogleLoginErrors];
+
+export type StartGitHubLoginData = {
+  body?: never;
+  path?: never;
+  query?: never;
+  url: "/v1/auth/github/start";
+};
+
+export type StartGitHubLoginErrors = {
+  /**
+   * Request rejected
+   */
+  400: ApiError;
+  /**
+   * Request rejected
+   */
+  409: ApiError;
+  /**
+   * Request rejected
+   */
+  500: ApiError;
+  /**
+   * Request rejected
+   */
+  503: ApiError;
+};
+
+export type StartGitHubLoginError =
+  StartGitHubLoginErrors[keyof StartGitHubLoginErrors];
+
+export type CompleteGitHubLoginData = {
+  body?: never;
+  path?: never;
+  query: {
+    state: string;
+    code?: string;
+    error?: string;
+  };
+  url: "/v1/auth/github/callback";
+};
+
+export type CompleteGitHubLoginErrors = {
+  /**
+   * Request rejected
+   */
+  400: ApiError;
+};
+
+export type CompleteGitHubLoginError =
+  CompleteGitHubLoginErrors[keyof CompleteGitHubLoginErrors];
 
 export type RevokeCurrentBrowserSessionData = {
   body?: never;

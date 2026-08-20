@@ -1,3 +1,20 @@
+-- name: CreateBrowserSession :one
+INSERT INTO browser_sessions (session_id, user_id, expires_at)
+VALUES (sqlc.arg(session_id), sqlc.arg(user_id), transaction_timestamp() + interval '30 days')
+RETURNING *;
+
+-- name: LoadBrowserSessionByID :one
+SELECT session_id, user_id, expires_at, revoked_at
+FROM browser_sessions
+WHERE session_id = sqlc.arg(session_id);
+
+-- name: LoadActiveBrowserSessionByID :one
+SELECT session_id, user_id, expires_at, revoked_at
+FROM browser_sessions
+WHERE session_id = sqlc.arg(session_id)
+    AND revoked_at IS NULL
+    AND expires_at > transaction_timestamp();
+
 -- name: AuthenticateBrowserSession :one
 SELECT
     browser_session.user_id,

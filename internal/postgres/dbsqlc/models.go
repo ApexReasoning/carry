@@ -91,6 +91,31 @@ type EmailLoginChallenge struct {
 	BrowserSessionID      pgtype.UUID
 }
 
+type ExternalLoginTransaction struct {
+	TransactionID    string
+	Provider         string
+	Status           string
+	CallbackDigest   []byte
+	CreatedAt        pgtype.Timestamptz
+	ExpiresAt        pgtype.Timestamptz
+	CompletedAt      pgtype.Timestamptz
+	UserID           pgtype.UUID
+	BrowserSessionID pgtype.UUID
+}
+
+type GithubIdentity struct {
+	GithubUserID int64
+	UserID       string
+	VerifiedAt   pgtype.Timestamptz
+}
+
+type GoogleIdentity struct {
+	Issuer     string
+	Subject    string
+	UserID     string
+	VerifiedAt pgtype.Timestamptz
+}
+
 type Machine struct {
 	MachineID                string
 	SpaceID                  string

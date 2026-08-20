@@ -50,9 +50,40 @@ export function UserEntry({
           <>
             <h1 id="entry-title">Work that stays in good hands.</h1>
             <p className="entry-copy">
-              Carry is your team’s durable AI colleague. Continue with your
-              email to open your Work or create a Space.
+              Carry is your team’s durable AI colleague. Sign in to open your
+              Work or create a Space.
             </p>
+            <div
+              className="provider-entry"
+              role="group"
+              aria-label="Sign-in methods"
+            >
+              <form method="post" action="/v1/auth/google/start">
+                <button
+                  type="submit"
+                  className="secondary-button"
+                  disabled={busy}
+                >
+                  Continue with Google
+                </button>
+              </form>
+              <form method="post" action="/v1/auth/github/start">
+                <button
+                  type="submit"
+                  className="secondary-button"
+                  disabled={busy}
+                >
+                  Continue with GitHub
+                </button>
+              </form>
+            </div>
+            <p className="entry-method-note">
+              Use the same sign-in method you used before to return to existing
+              Work. Google, GitHub, and email accounts are not combined yet.
+            </p>
+            <div className="entry-divider" aria-hidden="true">
+              <span>or continue with email</span>
+            </div>
             <form onSubmit={submitEmail} className="entry-form">
               <label htmlFor="email">Email</label>
               <input

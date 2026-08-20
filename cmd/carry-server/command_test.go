@@ -32,7 +32,7 @@ func TestInitializePKIWritesPrivateKeysOnce(t *testing.T) {
 }
 
 func TestParseConfigRejectsUnexpectedArguments(t *testing.T) {
-	t.Parallel()
+	setRequiredServerEnvironment(t)
 
 	var stderr bytes.Buffer
 

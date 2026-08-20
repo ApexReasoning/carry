@@ -25,14 +25,19 @@ import (
 )
 
 type config struct {
-	listenAddress     string
-	databaseURL       string
-	pkiDirectory      string
-	identityRoot      string
-	resendAPIKey      string
-	resendAPIURL      string
-	emailFrom         string
-	trustedProxyCIDRs []netip.Prefix
+	listenAddress      string
+	databaseURL        string
+	pkiDirectory       string
+	identityRoot       string
+	externalOrigin     carryserver.ExternalOrigin
+	googleClientID     string
+	googleClientSecret string
+	githubClientID     string
+	githubClientSecret string
+	resendAPIKey       string
+	resendAPIURL       string
+	emailFrom          string
+	trustedProxyCIDRs  []netip.Prefix
 }
 
 type bootstrapConfig struct {
@@ -62,6 +67,15 @@ func parseConfig(arguments []string, stderr io.Writer) (config, error) {
 	flags.StringVar(&parsed.databaseURL, "database-url", os.Getenv("CARRY_DATABASE_URL"), "PostgreSQL connection URL")
 	flags.StringVar(&parsed.pkiDirectory, "pki-dir", os.Getenv("CARRY_PKI_DIR"), "Carry PKI directory")
 	parsed.identityRoot = os.Getenv("CARRY_IDENTITY_ROOT")
+	externalOrigin, err := carryserver.ParseExternalOrigin(os.Getenv("CARRY_EXTERNAL_ORIGIN"))
+	if err != nil {
+		return config{}, fmt.Errorf("configure CARRY_EXTERNAL_ORIGIN: %w", err)
+	}
+	parsed.externalOrigin = externalOrigin
+	parsed.googleClientID = os.Getenv("CARRY_GOOGLE_CLIENT_ID")
+	parsed.googleClientSecret = os.Getenv("CARRY_GOOGLE_CLIENT_SECRET")
+	parsed.githubClientID = os.Getenv("CARRY_GITHUB_CLIENT_ID")
+	parsed.githubClientSecret = os.Getenv("CARRY_GITHUB_CLIENT_SECRET")
 	parsed.resendAPIKey = os.Getenv("CARRY_RESEND_API_KEY")
 	parsed.resendAPIURL = os.Getenv("CARRY_RESEND_API_URL")
 	if strings.TrimSpace(parsed.resendAPIURL) == "" {
@@ -89,6 +103,12 @@ func parseConfig(arguments []string, stderr io.Writer) (config, error) {
 	}
 	if strings.TrimSpace(parsed.identityRoot) == "" {
 		return config{}, errors.New("CARRY_IDENTITY_ROOT is required")
+	}
+	if strings.TrimSpace(parsed.googleClientID) == "" || strings.TrimSpace(parsed.googleClientSecret) == "" {
+		return config{}, errors.New("CARRY_GOOGLE_CLIENT_ID and CARRY_GOOGLE_CLIENT_SECRET are required")
+	}
+	if strings.TrimSpace(parsed.githubClientID) == "" || strings.TrimSpace(parsed.githubClientSecret) == "" {
+		return config{}, errors.New("CARRY_GITHUB_CLIENT_ID and CARRY_GITHUB_CLIENT_SECRET are required")
 	}
 	if strings.TrimSpace(parsed.resendAPIKey) == "" {
 		return config{}, errors.New("CARRY_RESEND_API_KEY is required")
@@ -185,6 +205,22 @@ func run(ctx context.Context, arguments []string, stdout io.Writer, stderr io.Wr
 	if err != nil {
 		return fmt.Errorf("configure Resend: %w", err)
 	}
+	googleLogin, err := newGoogleLogin(
+		parsed.googleClientID,
+		parsed.googleClientSecret,
+		parsed.externalOrigin.CallbackURL(identity.GoogleLoginProvider),
+	)
+	if err != nil {
+		return fmt.Errorf("configure Google login: %w", err)
+	}
+	githubLogin, err := newGitHubLogin(
+		parsed.githubClientID,
+		parsed.githubClientSecret,
+		parsed.externalOrigin.CallbackURL(identity.GitHubLoginProvider),
+	)
+	if err != nil {
+		return fmt.Errorf("configure GitHub login: %w", err)
+	}
 	pool, err := carrypostgres.Open(ctx, parsed.databaseURL)
 	if err != nil {
 		return err
@@ -208,6 +244,10 @@ func run(ctx context.Context, arguments []string, stdout io.Writer, stderr io.Wr
 	if err != nil {
 		return fmt.Errorf("compose email login: %w", err)
 	}
+	externalLogin, err := identity.NewExternalLogin(store, googleLogin, githubLogin, credentials)
+	if err != nil {
+		return fmt.Errorf("compose external login: %w", err)
+	}
 	firstSpace, err := space.NewFirstSpace(store)
 	if err != nil {
 		return fmt.Errorf("compose first Space: %w", err)
@@ -222,8 +262,10 @@ func run(ctx context.Context, arguments []string, stdout io.Writer, stderr io.Wr
 	}
 	userIdentityRoutes, err := carryserver.NewUserIdentityRoutes(
 		emailLogin,
+		externalLogin,
 		store,
 		credentials,
+		parsed.externalOrigin,
 		carryserver.NewRequestSource(parsed.trustedProxyCIDRs),
 		store,
 	)

@@ -132,7 +132,7 @@ func TestBrowserCreatesDurableWorkWithoutStoringBearer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run browser product journey: %v\n%s", err, output)
 	}
-	if !strings.Contains(output, "4 passed") {
+	if !strings.Contains(output, "5 passed") {
 		t.Fatalf("email identity and durable Work Playwright specs did not execute:\n%s", output)
 	}
 	serverOutput := serverLog.String()

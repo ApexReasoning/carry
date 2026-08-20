@@ -81,6 +81,12 @@ export const zWorkMessage = z.object({
   created_at: z.iso.datetime({ offset: true }),
 });
 
+export const zOAuthState = z.string().min(1).max(255);
+
+export const zOAuthCode = z.string().min(1).max(4096);
+
+export const zOAuthError = z.string().min(1).max(255);
+
 export const zSpaceId = z.uuid();
 
 export const zWorkId = z.uuid();
@@ -129,6 +135,18 @@ export const zVerifyEmailCodePath = z.object({
  * Browser session established or exactly replayed
  */
 export const zVerifyEmailCodeResponse = z.void();
+
+export const zCompleteGoogleLoginQuery = z.object({
+  state: z.string().min(1).max(255),
+  code: z.string().min(1).max(4096).optional(),
+  error: z.string().min(1).max(255).optional(),
+});
+
+export const zCompleteGitHubLoginQuery = z.object({
+  state: z.string().min(1).max(255),
+  code: z.string().min(1).max(4096).optional(),
+  error: z.string().min(1).max(255).optional(),
+});
 
 /**
  * Browser session revoked

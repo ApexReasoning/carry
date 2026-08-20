@@ -246,7 +246,7 @@ func (s *Store) VerifyEmailChallenge(
 	} else if err != nil {
 		return identity.BrowserSession{}, fmt.Errorf("load email identity: %w", err)
 	}
-	created, err := queries.CreateEmailBrowserSession(ctx, dbsqlc.CreateEmailBrowserSessionParams{
+	created, err := queries.CreateBrowserSession(ctx, dbsqlc.CreateBrowserSessionParams{
 		SessionID: command.SessionID, UserID: userID,
 	})
 	if err != nil {

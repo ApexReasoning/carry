@@ -121,7 +121,7 @@ Carry 通过明确区分当前产品、生成物、实验和历史来避免这�
 
 `carry` 的 Cobra adapter 位于 `internal/cli/`。root 在一个可见位置静态组合命令；下一层按 `login`、`host`、未来已经 earned 的 `work` 等用户命令组分包，同组叶子命令按行为拆文件。禁止 `init()` 注册、动态 command registry 和向所有命令暴露所有凭据/客户端的万能 Factory。
 
-`carry-server` 的操作面仍然较浅，继续使用标准库 `flag`；`cmd/carry-server` 只保留 concrete composition 和 Resend HTTP implementation，不放 request/verify/replay、首个 Space 或 Machine certificate orchestration。两个二进制不为形式对称共享 CLI framework。
+`carry-server` 的操作面仍然较浅，继续使用标准库 `flag`；`cmd/carry-server` 只保留 concrete composition、Resend HTTP implementation 与固定官方 endpoint 的 concrete Google/GitHub clients，不放 request/verify/replay、首个 Space 或 Machine certificate orchestration，也不建立 provider registry。两个二进制不为形式对称共享 CLI framework。
 
 业务规则不放在 `cmd/` 或 `internal/cli/`。
 

@@ -13,6 +13,44 @@ beforeEach(() => {
   window.history.replaceState(null, "", "/");
 });
 
+test("offers Google GitHub and email without implying account linking", async () => {
+  mockUnauthenticatedEmail(async () => null);
+
+  render(<App />);
+
+  const google = await screen.findByRole("button", {
+    name: "Continue with Google",
+  });
+  const github = screen.getByRole("button", { name: "Continue with GitHub" });
+  expect(google.closest("form")).toHaveAttribute(
+    "action",
+    "/v1/auth/google/start",
+  );
+  expect(google.closest("form")).toHaveAttribute("method", "post");
+  expect(github.closest("form")).toHaveAttribute(
+    "action",
+    "/v1/auth/github/start",
+  );
+  expect(
+    screen.getByText(/Google, GitHub, and email accounts are not combined yet/),
+  ).toBeVisible();
+  expect(screen.getByLabelText("Email")).toBeVisible();
+});
+
+test("shows a neutral provider callback outcome and removes it from the URL", async () => {
+  window.history.replaceState(null, "", "/?sign_in=unavailable");
+  mockUnauthenticatedEmail(async () => null);
+
+  render(<App />);
+
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Carry could not confirm sign-in. Start a fresh sign-in.",
+  );
+  expect(window.location.search).toBe("");
+  expect(window.localStorage.length).toBe(0);
+  expect(window.sessionStorage.length).toBe(0);
+});
+
 test("shows a wrong email code and lets the User retry", async () => {
   mockUnauthenticatedEmail(async (request, path) => {
     if (request.method === "POST" && path.endsWith("/verify")) {

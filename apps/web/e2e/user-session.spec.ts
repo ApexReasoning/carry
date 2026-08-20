@@ -19,6 +19,41 @@ test.beforeEach(async () => {
   await rm(emailCaptureFile, { force: true });
 });
 
+test("provider entry keeps methods separate and cleans neutral callback status", async ({
+  page,
+}) => {
+  await page.goto("/?sign_in=unavailable");
+
+  await expect(
+    page.getByRole("button", { name: "Continue with Google" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Continue with GitHub" }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(/Google, GitHub, and email accounts are not combined yet/),
+  ).toBeVisible();
+  await expect(page.getByRole("alert")).toContainText(
+    "Carry could not confirm sign-in. Start a fresh sign-in.",
+  );
+  const forms = await page
+    .locator(".provider-entry form")
+    .evaluateAll((items) =>
+      items.map((item) => ({
+        action: item.getAttribute("action"),
+        method: item.getAttribute("method"),
+      })),
+    );
+  expect(forms).toEqual([
+    { action: "/v1/auth/google/start", method: "post" },
+    { action: "/v1/auth/github/start", method: "post" },
+  ]);
+  expect(new URL(page.url()).search).toBe("");
+  expect(
+    await page.evaluate(() => [localStorage.length, sessionStorage.length]),
+  ).toEqual([0, 0]);
+});
+
 test("email response loss replays exact commands and logout remains fail closed", async ({
   context,
   page,

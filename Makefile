@@ -19,7 +19,8 @@ test:
 	pnpm --dir apps/web test
 
 test-db:
-	./scripts/test-db
+	./scripts/test-db ./internal/postgres/...
+	./scripts/test-db ./cmd/carry-server
 
 check-go:
 	./scripts/check-go-format

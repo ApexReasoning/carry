@@ -15,6 +15,10 @@ import type {
   AppendWorkMessageData,
   AppendWorkMessageErrors,
   AppendWorkMessageResponses,
+  CompleteGitHubLoginData,
+  CompleteGitHubLoginErrors,
+  CompleteGoogleLoginData,
+  CompleteGoogleLoginErrors,
   CreateFirstSpaceData,
   CreateFirstSpaceErrors,
   CreateFirstSpaceResponses,
@@ -51,6 +55,10 @@ import type {
   SendConversationMessageData,
   SendConversationMessageErrors,
   SendConversationMessageResponses,
+  StartGitHubLoginData,
+  StartGitHubLoginErrors,
+  StartGoogleLoginData,
+  StartGoogleLoginErrors,
   VerifyEmailCodeData,
   VerifyEmailCodeErrors,
   VerifyEmailCodeResponses,
@@ -134,6 +142,42 @@ export const verifyEmailCode = <ThrowOnError extends boolean = false>(
       ...options.headers,
     },
   });
+
+export const startGoogleLogin = <ThrowOnError extends boolean = false>(
+  options?: Options<StartGoogleLoginData, ThrowOnError>,
+): RequestResult<unknown, StartGoogleLoginErrors, ThrowOnError> =>
+  (options?.client ?? client).post<
+    unknown,
+    StartGoogleLoginErrors,
+    ThrowOnError
+  >({ url: "/v1/auth/google/start", ...options });
+
+export const completeGoogleLogin = <ThrowOnError extends boolean = false>(
+  options: Options<CompleteGoogleLoginData, ThrowOnError>,
+): RequestResult<unknown, CompleteGoogleLoginErrors, ThrowOnError> =>
+  (options.client ?? client).get<
+    unknown,
+    CompleteGoogleLoginErrors,
+    ThrowOnError
+  >({ url: "/v1/auth/google/callback", ...options });
+
+export const startGitHubLogin = <ThrowOnError extends boolean = false>(
+  options?: Options<StartGitHubLoginData, ThrowOnError>,
+): RequestResult<unknown, StartGitHubLoginErrors, ThrowOnError> =>
+  (options?.client ?? client).post<
+    unknown,
+    StartGitHubLoginErrors,
+    ThrowOnError
+  >({ url: "/v1/auth/github/start", ...options });
+
+export const completeGitHubLogin = <ThrowOnError extends boolean = false>(
+  options: Options<CompleteGitHubLoginData, ThrowOnError>,
+): RequestResult<unknown, CompleteGitHubLoginErrors, ThrowOnError> =>
+  (options.client ?? client).get<
+    unknown,
+    CompleteGitHubLoginErrors,
+    ThrowOnError
+  >({ url: "/v1/auth/github/callback", ...options });
 
 export const revokeCurrentBrowserSession = <
   ThrowOnError extends boolean = false,

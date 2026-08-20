@@ -25,26 +25,32 @@ func NewUserAuthentication(
 	}}, nil
 }
 
-// UserIdentityRoutes owns the email login, Browser Session, and current-User HTTP routes.
+// UserIdentityRoutes owns login, Browser Session, and current-User HTTP routes.
 type UserIdentityRoutes struct {
 	email    emailLoginAPI
+	external externalLoginAPI
 	sessions browserSessionAPI
 	user     userAPI
 }
 
 func NewUserIdentityRoutes(
-	login EmailLogin,
+	emailLogin EmailLogin,
+	externalLogin ExternalLogin,
 	sessions BrowserSessions,
 	credentials identity.Credentials,
+	externalOrigin ExternalOrigin,
 	requestSources RequestSource,
 	memberships MembershipReader,
 ) (*UserIdentityRoutes, error) {
-	if login == nil || sessions == nil || memberships == nil {
+	if emailLogin == nil || externalLogin == nil || sessions == nil || memberships == nil || externalOrigin.value == "" {
 		return nil, errors.New("User identity route dependencies are required")
 	}
 	return &UserIdentityRoutes{
 		email: emailLoginAPI{
-			login: login, credentials: credentials, requestSources: requestSources,
+			login: emailLogin, credentials: credentials, requestSources: requestSources,
+		},
+		external: externalLoginAPI{
+			login: externalLogin, sessions: sessions, credentials: credentials, origin: externalOrigin,
 		},
 		sessions: browserSessionAPI{sessions: sessions, credentials: credentials},
 		user:     userAPI{memberships: memberships},
@@ -54,6 +60,10 @@ func NewUserIdentityRoutes(
 func (routes *UserIdentityRoutes) mountPublic(router chi.Router) {
 	router.Post("/auth/email/challenges", routes.email.requestCode)
 	router.Post("/auth/email/challenges/{challenge_id}/verify", routes.email.verifyCode)
+	router.Post("/auth/google/start", routes.external.startGoogle)
+	router.Get("/auth/google/callback", routes.external.callbackGoogle)
+	router.Post("/auth/github/start", routes.external.startGitHub)
+	router.Get("/auth/github/callback", routes.external.callbackGitHub)
 	router.Delete("/browser/sessions/current", routes.sessions.revokeCurrent)
 }
 

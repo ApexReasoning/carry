@@ -66,30 +66,6 @@ func (q *Queries) CountRecentSourceChallenges(ctx context.Context, sourceDigest 
 	return count, err
 }
 
-const createEmailBrowserSession = `-- name: CreateEmailBrowserSession :one
-INSERT INTO browser_sessions (session_id, user_id, expires_at)
-VALUES ($1, $2, transaction_timestamp() + interval '30 days')
-RETURNING user_id, created_at, expires_at, revoked_at, session_id
-`
-
-type CreateEmailBrowserSessionParams struct {
-	SessionID string
-	UserID    string
-}
-
-func (q *Queries) CreateEmailBrowserSession(ctx context.Context, arg CreateEmailBrowserSessionParams) (BrowserSession, error) {
-	row := q.db.QueryRow(ctx, createEmailBrowserSession, arg.SessionID, arg.UserID)
-	var i BrowserSession
-	err := row.Scan(
-		&i.UserID,
-		&i.CreatedAt,
-		&i.ExpiresAt,
-		&i.RevokedAt,
-		&i.SessionID,
-	)
-	return i, err
-}
-
 const createEmailChallenge = `-- name: CreateEmailChallenge :one
 INSERT INTO email_login_challenges (
     challenge_id,
@@ -202,31 +178,6 @@ WHERE canonical_email = $1
 func (q *Queries) InvalidateCurrentEmailChallenges(ctx context.Context, canonicalEmail string) error {
 	_, err := q.db.Exec(ctx, invalidateCurrentEmailChallenges, canonicalEmail)
 	return err
-}
-
-const loadBrowserSessionByID = `-- name: LoadBrowserSessionByID :one
-SELECT session_id, user_id, expires_at, revoked_at
-FROM browser_sessions
-WHERE session_id = $1
-`
-
-type LoadBrowserSessionByIDRow struct {
-	SessionID string
-	UserID    string
-	ExpiresAt pgtype.Timestamptz
-	RevokedAt pgtype.Timestamptz
-}
-
-func (q *Queries) LoadBrowserSessionByID(ctx context.Context, sessionID string) (LoadBrowserSessionByIDRow, error) {
-	row := q.db.QueryRow(ctx, loadBrowserSessionByID, sessionID)
-	var i LoadBrowserSessionByIDRow
-	err := row.Scan(
-		&i.SessionID,
-		&i.UserID,
-		&i.ExpiresAt,
-		&i.RevokedAt,
-	)
-	return i, err
 }
 
 const loadEmailAttempt = `-- name: LoadEmailAttempt :one
