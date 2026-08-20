@@ -1,14 +1,15 @@
 import { ConversationPanel } from "./features/conversation/conversation-panel";
-import { MemberEntry } from "./features/member-session/member-entry";
-import { useMemberSession } from "./features/member-session/use-member-session";
+import { FirstSpace } from "./features/user-session/first-space";
+import { useUserSession } from "./features/user-session/use-user-session";
+import { UserEntry } from "./features/user-session/user-entry";
 import { CreateWorkForm } from "./features/works/create-work-form";
 import { useWorkBoard } from "./features/works/use-work-board";
 import { WorkDetail } from "./features/works/work-detail";
 import { WorkList } from "./features/works/work-list";
 
 export function App() {
-  const session = useMemberSession();
-  const board = useWorkBoard(session.member);
+  const session = useUserSession();
+  const board = useWorkBoard(session.user);
   const busy = session.busy || board.busy;
 
   if (session.phase === "checking") {
@@ -64,20 +65,38 @@ export function App() {
       </main>
     );
   }
-  if (session.phase === "login") {
+  if (session.phase === "email" || session.phase === "code") {
     return (
-      <MemberEntry
+      <UserEntry
+        key={session.challengeID || "email-entry"}
+        step={session.phase}
+        email={session.email}
         busy={busy}
         error={session.error}
-        onOpen={session.openWithToken}
+        canRetryCodeRequest={session.canRetryCodeRequest}
+        onSendCode={session.sendCode}
+        onRetryCodeRequest={session.retryCodeRequest}
+        onVerifyCode={session.verifyCode}
+        onResendCode={session.resendCode}
+        onBack={session.backToEmail}
       />
     );
   }
-  if (!session.member) {
+  if (session.phase === "first-space") {
+    return (
+      <FirstSpace
+        busy={busy}
+        error={session.error}
+        initialName={session.user?.display_name ?? ""}
+        onCreate={session.createSpace}
+      />
+    );
+  }
+  if (!session.user) {
     return null;
   }
 
-  const currentSpace = session.member.spaces.find(
+  const currentSpace = session.user.spaces.find(
     (space) => space.space_id === board.spaceID,
   );
   return (
@@ -90,8 +109,8 @@ export function App() {
           </span>
         </a>
         <div className="header-actions">
-          <span className="member-name">{session.member.display_name}</span>
-          {session.member.spaces.length > 1 ? (
+          <span className="member-name">{session.user.display_name}</span>
+          {session.user.spaces.length > 1 ? (
             <label className="space-picker">
               <span className="space-picker-label">Space</span>
               <select
@@ -102,7 +121,7 @@ export function App() {
                 <option value="" disabled>
                   Choose a Space
                 </option>
-                {session.member.spaces.map((space) => (
+                {session.user.spaces.map((space) => (
                   <option key={space.space_id} value={space.space_id}>
                     {space.name}
                   </option>
@@ -144,8 +163,8 @@ export function App() {
         {board.spaceID ? (
           <>
             <ConversationPanel
-              key={`${session.member.user_id}:${board.spaceID}`}
-              memberID={session.member.user_id}
+              key={`${session.user.user_id}:${board.spaceID}`}
+              memberID={session.user.user_id}
               spaceID={board.spaceID}
               workBusy={board.busy}
               onOpenWork={board.selectWork}
@@ -174,7 +193,7 @@ export function App() {
                   key={board.details?.work.work_id ?? "no-work-selected"}
                   details={board.details}
                   busy={busy}
-                  currentMemberID={session.member.user_id}
+                  currentMemberID={session.user.user_id}
                   onMessage={board.addMessage}
                   onRetry={board.retryCurrentWork}
                   onAcceptReview={board.acceptCurrentReview}
@@ -183,16 +202,11 @@ export function App() {
               </div>
             </section>
           </>
-        ) : session.member.spaces.length > 1 ? (
+        ) : session.user.spaces.length > 1 ? (
           <p className="empty-panel">
             Choose a Space before talking to Carry or opening shared Work.
           </p>
-        ) : (
-          <p className="empty-panel">
-            This member does not belong to a Space yet. Ask a Space owner to add
-            you, then open Carry again.
-          </p>
-        )}
+        ) : null}
       </main>
     </div>
   );

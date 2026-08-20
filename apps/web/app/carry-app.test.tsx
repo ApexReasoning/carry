@@ -16,7 +16,138 @@ beforeEach(() => {
   window.history.replaceState(null, "", "/");
 });
 
-test("exchanges a member token without storing it and creates durable Work", async () => {
+test("retries the exact email request after its response is lost", async () => {
+  const requests: Array<{ body: unknown; key: string | null }> = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request =
+        input instanceof Request ? input : new Request(input, init);
+      const path = new URL(request.url).pathname;
+      if (request.method === "GET" && path === "/v1/me") {
+        return json({ error: "User authentication is required" }, 401);
+      }
+      if (request.method === "POST" && path === "/v1/auth/email/challenges") {
+        const body = (await request.json()) as { challenge_id: string };
+        requests.push({
+          body,
+          key: request.headers.get("Idempotency-Key"),
+        });
+        if (requests.length === 1) {
+          throw new TypeError("email submission response lost");
+        }
+        return json(
+          {
+            challenge_id: body.challenge_id,
+            expires_at: "2026-08-20T12:05:00Z",
+          },
+          202,
+        );
+      }
+      throw new Error(`unexpected request: ${request.method} ${path}`);
+    }),
+  );
+
+  const user = userEvent.setup();
+  render(<App />);
+  await user.type(await screen.findByLabelText("Email"), "alex@example.com");
+  await user.click(screen.getByRole("button", { name: "Send code" }));
+
+  await screen.findByLabelText("Email code");
+  expect(
+    screen.getByText(/Carry may have sent the code\. Retry this exact request/),
+  ).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "Retry this request" }));
+  await waitFor(() => expect(requests).toHaveLength(2));
+  expect(requests[0]).toEqual(requests[1]);
+  expect(
+    screen.queryByRole("button", { name: "Retry this request" }),
+  ).not.toBeInTheDocument();
+  expect(window.localStorage.length).toBe(0);
+  expect(window.sessionStorage.length).toBe(0);
+});
+
+test("verifies email and explicitly creates the first Space after response loss", async () => {
+  let sessionEstablished = false;
+  let spaceCreated = false;
+  let submittedSpaceKey = "";
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request =
+        input instanceof Request ? input : new Request(input, init);
+      const path = new URL(request.url).pathname;
+      if (request.method === "GET" && path === "/v1/me") {
+        if (!sessionEstablished)
+          return json({ error: "User authentication is required" }, 401);
+        return json({
+          user_id: authenticatedMemberID,
+          display_name: spaceCreated ? "Alex Morgan" : null,
+          spaces: spaceCreated
+            ? [
+                {
+                  space_id: spaceID,
+                  name: "Research",
+                  can_manage_members: true,
+                  can_enroll_machines: true,
+                },
+              ]
+            : [],
+        });
+      }
+      if (request.method === "POST" && path === "/v1/auth/email/challenges") {
+        const body = (await request.json()) as {
+          challenge_id: string;
+          email: string;
+        };
+        expect(body.email).toBe("alex@example.com");
+        return json(
+          {
+            challenge_id: body.challenge_id,
+            expires_at: "2026-08-20T12:05:00Z",
+          },
+          202,
+        );
+      }
+      if (request.method === "POST" && path.endsWith("/verify")) {
+        expect(await request.json()).toEqual({ code: "123456" });
+        sessionEstablished = true;
+        return new Response(null, { status: 204 });
+      }
+      if (request.method === "POST" && path === "/v1/spaces") {
+        submittedSpaceKey = request.headers.get("Idempotency-Key") ?? "";
+        expect(await request.json()).toEqual({
+          display_name: "Alex Morgan",
+          name: "Research",
+        });
+        spaceCreated = true;
+        throw new TypeError("first Space response lost after commit");
+      }
+      if (isConversationList(request, path)) return json({ messages: [] });
+      if (request.method === "GET" && path === `/v1/spaces/${spaceID}/works`) {
+        return json({ works: [], has_earlier_works: false });
+      }
+      throw new Error(`unexpected request: ${request.method} ${path}`);
+    }),
+  );
+
+  const user = userEvent.setup();
+  render(<App />);
+  await signIn(user);
+  await user.type(await screen.findByLabelText("Your name"), "Alex Morgan");
+  await user.type(screen.getByLabelText("Space name"), "Research");
+  await user.click(screen.getByRole("button", { name: "Create Space" }));
+  await screen.findByRole("heading", {
+    name: "What should Carry keep moving?",
+  });
+
+  expect(submittedSpaceKey).toBeTruthy();
+  expect(window.localStorage.length).toBe(0);
+  expect(window.sessionStorage.length).toBe(0);
+  expect(window.location.search).not.toContain("123456");
+});
+
+test("returns an email User to existing durable Work without storing credentials", async () => {
   let sessionEstablished = false;
   let created = false;
   let messageAdded = false;
@@ -37,14 +168,26 @@ test("exchanges a member token without storing it and creates durable Work", asy
           user_id: authenticatedMemberID,
           display_name: "Alex Morgan",
           spaces: [
-            { space_id: spaceID, name: "Research", can_enroll_machines: true },
+            {
+              space_id: spaceID,
+              name: "Research",
+              can_manage_members: true,
+              can_enroll_machines: true,
+            },
           ],
         });
       }
-      if (request.method === "POST" && path === "/v1/browser/sessions") {
-        expect(request.headers.get("Authorization")).toBe(
-          "Bearer member-secret",
+      if (request.method === "POST" && path === "/v1/auth/email/challenges") {
+        const body = (await request.json()) as { challenge_id: string };
+        return json(
+          {
+            challenge_id: body.challenge_id,
+            expires_at: "2026-08-20T12:05:00Z",
+          },
+          202,
         );
+      }
+      if (request.method === "POST" && path.endsWith("/verify")) {
         sessionEstablished = true;
         return new Response(null, { status: 204 });
       }
@@ -99,11 +242,7 @@ test("exchanges a member token without storing it and creates durable Work", asy
   const user = userEvent.setup();
   render(<App />);
 
-  await user.type(
-    await screen.findByLabelText("Member token"),
-    "member-secret",
-  );
-  await user.click(screen.getByRole("button", { name: "Open Carry" }));
+  await signIn(user);
   await screen.findByRole("heading", {
     name: "What should Carry keep moving?",
   });
@@ -148,11 +287,26 @@ test("clears a message draft when the member selects another Work", async () => 
           user_id: authenticatedMemberID,
           display_name: "Alex Morgan",
           spaces: [
-            { space_id: spaceID, name: "Research", can_enroll_machines: true },
+            {
+              space_id: spaceID,
+              name: "Research",
+              can_manage_members: true,
+              can_enroll_machines: true,
+            },
           ],
         });
       }
-      if (request.method === "POST" && path === "/v1/browser/sessions") {
+      if (request.method === "POST" && path === "/v1/auth/email/challenges") {
+        const body = (await request.json()) as { challenge_id: string };
+        return json(
+          {
+            challenge_id: body.challenge_id,
+            expires_at: "2026-08-20T12:05:00Z",
+          },
+          202,
+        );
+      }
+      if (request.method === "POST" && path.endsWith("/verify")) {
         sessionEstablished = true;
         return new Response(null, { status: 204 });
       }
@@ -191,11 +345,7 @@ test("clears a message draft when the member selects another Work", async () => 
 
   const user = userEvent.setup();
   render(<App />);
-  await user.type(
-    await screen.findByLabelText("Member token"),
-    "member-secret",
-  );
-  await user.click(screen.getByRole("button", { name: "Open Carry" }));
+  await signIn(user);
   await user.click(
     await screen.findByRole("button", { name: /Review customer renewals/ }),
   );
@@ -234,11 +384,26 @@ test("reuses the same Work identity after a create response is lost", async () =
           user_id: authenticatedMemberID,
           display_name: "Alex Morgan",
           spaces: [
-            { space_id: spaceID, name: "Research", can_enroll_machines: true },
+            {
+              space_id: spaceID,
+              name: "Research",
+              can_manage_members: true,
+              can_enroll_machines: true,
+            },
           ],
         });
       }
-      if (request.method === "POST" && path === "/v1/browser/sessions") {
+      if (request.method === "POST" && path === "/v1/auth/email/challenges") {
+        const body = (await request.json()) as { challenge_id: string };
+        return json(
+          {
+            challenge_id: body.challenge_id,
+            expires_at: "2026-08-20T12:05:00Z",
+          },
+          202,
+        );
+      }
+      if (request.method === "POST" && path.endsWith("/verify")) {
         sessionEstablished = true;
         return new Response(null, { status: 204 });
       }
@@ -273,11 +438,7 @@ test("reuses the same Work identity after a create response is lost", async () =
 
   const user = userEvent.setup();
   render(<App />);
-  await user.type(
-    await screen.findByLabelText("Member token"),
-    "member-secret",
-  );
-  await user.click(screen.getByRole("button", { name: "Open Carry" }));
+  await signIn(user);
   await screen.findByRole("heading", {
     name: "What should Carry keep moving?",
   });
@@ -319,11 +480,26 @@ test("reuses a pending Work identity after remount", async () => {
           user_id: authenticatedMemberID,
           display_name: "Alex Morgan",
           spaces: [
-            { space_id: spaceID, name: "Research", can_enroll_machines: true },
+            {
+              space_id: spaceID,
+              name: "Research",
+              can_manage_members: true,
+              can_enroll_machines: true,
+            },
           ],
         });
       }
-      if (request.method === "POST" && path === "/v1/browser/sessions") {
+      if (request.method === "POST" && path === "/v1/auth/email/challenges") {
+        const body = (await request.json()) as { challenge_id: string };
+        return json(
+          {
+            challenge_id: body.challenge_id,
+            expires_at: "2026-08-20T12:05:00Z",
+          },
+          202,
+        );
+      }
+      if (request.method === "POST" && path.endsWith("/verify")) {
         sessionEstablished = true;
         return new Response(null, { status: 204 });
       }
@@ -349,11 +525,7 @@ test("reuses a pending Work identity after remount", async () => {
   );
   const user = userEvent.setup();
   const first = render(<App />);
-  await user.type(
-    await screen.findByLabelText("Member token"),
-    "member-secret",
-  );
-  await user.click(screen.getByRole("button", { name: "Open Carry" }));
+  await signIn(user);
   const goal = await screen.findByLabelText(
     "What should Carry take responsibility for?",
   );
@@ -393,16 +565,32 @@ test("requires an explicit Space choice when several are available", async () =>
           user_id: authenticatedMemberID,
           display_name: "Alex Morgan",
           spaces: [
-            { space_id: spaceID, name: "Research", can_enroll_machines: true },
+            {
+              space_id: spaceID,
+              name: "Research",
+              can_manage_members: true,
+              can_enroll_machines: true,
+            },
             {
               space_id: secondWorkID,
               name: "Operations",
+              can_manage_members: true,
               can_enroll_machines: false,
             },
           ],
         });
       }
-      if (request.method === "POST" && path === "/v1/browser/sessions") {
+      if (request.method === "POST" && path === "/v1/auth/email/challenges") {
+        const body = (await request.json()) as { challenge_id: string };
+        return json(
+          {
+            challenge_id: body.challenge_id,
+            expires_at: "2026-08-20T12:05:00Z",
+          },
+          202,
+        );
+      }
+      if (request.method === "POST" && path.endsWith("/verify")) {
         sessionEstablished = true;
         return new Response(null, { status: 204 });
       }
@@ -415,11 +603,7 @@ test("requires an explicit Space choice when several are available", async () =>
   );
   const user = userEvent.setup();
   render(<App />);
-  await user.type(
-    await screen.findByLabelText("Member token"),
-    "member-secret",
-  );
-  await user.click(screen.getByRole("button", { name: "Open Carry" }));
+  await signIn(user);
   await screen.findByText(
     "Choose a Space before talking to Carry or opening shared Work.",
   );
@@ -449,6 +633,7 @@ test("keeps Work hidden across an unconfirmed sign-out reload", async () => {
             {
               space_id: spaceID,
               name: "Research",
+              can_manage_members: true,
               can_enroll_machines: true,
             },
           ],
@@ -502,7 +687,7 @@ test("keeps Work hidden across an unconfirmed sign-out reload", async () => {
   ).not.toBeInTheDocument();
   finishSignOut = true;
   await user.click(screen.getByRole("button", { name: "Finish signing out" }));
-  await screen.findByLabelText("Member token");
+  await screen.findByLabelText("Email");
   expect(
     new URL(window.location.href).searchParams.get("carry-signing-out"),
   ).toBeNull();
@@ -528,6 +713,7 @@ test("falls back from a failed URL latch without reopening Work", async () => {
             {
               space_id: spaceID,
               name: "Research",
+              can_manage_members: true,
               can_enroll_machines: true,
             },
           ],
@@ -577,7 +763,7 @@ test("falls back from a failed URL latch without reopening Work", async () => {
 
   finishSignOut = true;
   await user.click(screen.getByRole("button", { name: "Finish signing out" }));
-  await screen.findByLabelText("Member token");
+  await screen.findByLabelText("Email");
   expect(window.sessionStorage.getItem("carry.pending-sign-out.v1")).toBeNull();
   historyWrite.mockRestore();
 });
@@ -600,6 +786,7 @@ test("reconciles a lost Work retry response by reloading the Work", async () => 
             {
               space_id: spaceID,
               name: "Research",
+              can_manage_members: true,
               can_enroll_machines: true,
             },
           ],
@@ -665,6 +852,7 @@ test("reconciles an old retry identity before authorizing a later terminal Run",
             {
               space_id: spaceID,
               name: "Research",
+              can_manage_members: true,
               can_enroll_machines: true,
             },
           ],
@@ -743,7 +931,12 @@ test("opens shared Work from a private Carry reply without copying private text"
           user_id: authenticatedMemberID,
           display_name: "Alex Morgan",
           spaces: [
-            { space_id: spaceID, name: "Research", can_enroll_machines: true },
+            {
+              space_id: spaceID,
+              name: "Research",
+              can_manage_members: true,
+              can_enroll_machines: true,
+            },
           ],
         });
       }
@@ -798,46 +991,12 @@ test("opens shared Work from a private Carry reply without copying private text"
   expect(heading.closest("article")).not.toHaveTextContent(privateSource);
 });
 
-test("reconciles an unknown browser-session exchange", async () => {
-  let sessionEstablished = false;
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const request =
-        input instanceof Request ? input : new Request(input, init);
-      const path = new URL(request.url).pathname;
-      if (isConversationList(request, path)) return json({ messages: [] });
-      if (request.method === "POST" && path === "/v1/browser/sessions") {
-        sessionEstablished = true;
-        throw new TypeError("response lost");
-      }
-      if (request.method === "GET" && path === "/v1/me") {
-        if (!sessionEstablished)
-          return json({ error: "authentication required" }, 401);
-        return json({
-          user_id: authenticatedMemberID,
-          display_name: "Alex Morgan",
-          spaces: [
-            { space_id: spaceID, name: "Research", can_enroll_machines: true },
-          ],
-        });
-      }
-      if (request.method === "GET" && path === `/v1/spaces/${spaceID}/works`)
-        return json({ works: [], has_earlier_works: false });
-      throw new Error(`unexpected request: ${request.method} ${path}`);
-    }),
-  );
-  const user = userEvent.setup();
-  render(<App />);
-  await user.type(
-    await screen.findByLabelText("Member token"),
-    "member-secret",
-  );
-  await user.click(screen.getByRole("button", { name: "Open Carry" }));
-  await screen.findByRole("heading", {
-    name: "What should Carry keep moving?",
-  });
-});
+async function signIn(user: ReturnType<typeof userEvent.setup>) {
+  await user.type(await screen.findByLabelText("Email"), "alex@example.com");
+  await user.click(screen.getByRole("button", { name: "Send code" }));
+  await user.type(await screen.findByLabelText("Email code"), "123456");
+  await user.click(screen.getByRole("button", { name: "Verify" }));
+}
 
 function work(id = workID, goal = "Review customer renewals") {
   return {

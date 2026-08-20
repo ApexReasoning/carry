@@ -237,17 +237,10 @@ func TestMachineConversationRoutesRejectMemberCredentialsAndMapReplyErrors(t *te
 func machineConversationTestAPI(
 	t *testing.T,
 	authority *machine.CertificateAuthority,
-	conversations MachineConversationStore,
+	conversations *recordingMachineConversations,
 ) http.Handler {
 	t.Helper()
-	member, err := NewMemberRoutes(
-		&recordingUserTokens{}, unavailableBrowserSessions{}, emptyMemberships{},
-		&recordingMachineEnrollments{}, unavailableConversationCommands{}, unavailableConversationQueries{},
-		unavailableWorkCommands{}, unavailableWorkQueries{}, authority,
-	)
-	if err != nil {
-		t.Fatalf("compose member routes: %v", err)
-	}
+	member := testUserRoutes(t, authority)
 	machine, err := NewMachineRoutes(&recordingMachineRuns{}, conversations)
 	if err != nil {
 		t.Fatalf("compose Machine routes: %v", err)

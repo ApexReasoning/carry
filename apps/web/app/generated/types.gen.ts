@@ -8,15 +8,21 @@ export type ApiError = {
   error: string;
 };
 
+export type EmailChallenge = {
+  challenge_id: string;
+  expires_at: string;
+};
+
 export type Membership = {
   space_id: string;
   name: string;
+  can_manage_members: boolean;
   can_enroll_machines: boolean;
 };
 
-export type Member = {
+export type User = {
   user_id: string;
-  display_name: string;
+  display_name: string | null;
   spaces: Array<Membership>;
 };
 
@@ -116,32 +122,92 @@ export type BeforeWorkMessage = string;
 
 export type NeedsYou = boolean;
 
-export type CreateBrowserSessionData = {
-  body?: never;
+export type RequestEmailCodeData = {
+  body: {
+    challenge_id: string;
+    email: string;
+  };
+  headers: {
+    "Idempotency-Key": string;
+  };
   path?: never;
   query?: never;
-  url: "/v1/browser/sessions";
+  url: "/v1/auth/email/challenges";
 };
 
-export type CreateBrowserSessionErrors = {
+export type RequestEmailCodeErrors = {
+  /**
+   * Request rejected
+   */
+  400: ApiError;
+  /**
+   * Request rejected
+   */
+  409: ApiError;
+  /**
+   * Request rejected
+   */
+  429: ApiError;
+  /**
+   * Request rejected
+   */
+  503: ApiError;
+};
+
+export type RequestEmailCodeError =
+  RequestEmailCodeErrors[keyof RequestEmailCodeErrors];
+
+export type RequestEmailCodeResponses = {
+  /**
+   * Email submission accepted or its outcome remains unknown
+   */
+  202: EmailChallenge;
+};
+
+export type RequestEmailCodeResponse =
+  RequestEmailCodeResponses[keyof RequestEmailCodeResponses];
+
+export type VerifyEmailCodeData = {
+  body: {
+    code: string;
+  };
+  headers: {
+    "Idempotency-Key": string;
+  };
+  path: {
+    challengeID: string;
+  };
+  query?: never;
+  url: "/v1/auth/email/challenges/{challengeID}/verify";
+};
+
+export type VerifyEmailCodeErrors = {
+  /**
+   * Request rejected
+   */
+  400: ApiError;
   /**
    * Request rejected
    */
   401: ApiError;
+  /**
+   * Request rejected
+   */
+  409: ApiError;
 };
 
-export type CreateBrowserSessionError =
-  CreateBrowserSessionErrors[keyof CreateBrowserSessionErrors];
+export type VerifyEmailCodeError =
+  VerifyEmailCodeErrors[keyof VerifyEmailCodeErrors];
 
-export type CreateBrowserSessionResponses = {
+export type VerifyEmailCodeResponses = {
   /**
-   * Browser session created
+   * Browser session established or exactly replayed
    */
   204: void;
 };
 
-export type CreateBrowserSessionResponse =
-  CreateBrowserSessionResponses[keyof CreateBrowserSessionResponses];
+export type VerifyEmailCodeResponse =
+  VerifyEmailCodeResponses[keyof VerifyEmailCodeResponses];
 
 export type RevokeCurrentBrowserSessionData = {
   body?: never;
@@ -170,32 +236,77 @@ export type RevokeCurrentBrowserSessionResponses = {
 export type RevokeCurrentBrowserSessionResponse =
   RevokeCurrentBrowserSessionResponses[keyof RevokeCurrentBrowserSessionResponses];
 
-export type LoadCurrentMemberData = {
+export type LoadCurrentUserData = {
   body?: never;
   path?: never;
   query?: never;
   url: "/v1/me";
 };
 
-export type LoadCurrentMemberErrors = {
+export type LoadCurrentUserErrors = {
   /**
    * Request rejected
    */
   401: ApiError;
 };
 
-export type LoadCurrentMemberError =
-  LoadCurrentMemberErrors[keyof LoadCurrentMemberErrors];
+export type LoadCurrentUserError =
+  LoadCurrentUserErrors[keyof LoadCurrentUserErrors];
 
-export type LoadCurrentMemberResponses = {
+export type LoadCurrentUserResponses = {
   /**
-   * Current member and Spaces
+   * Current User and Spaces
    */
-  200: Member;
+  200: User;
 };
 
-export type LoadCurrentMemberResponse =
-  LoadCurrentMemberResponses[keyof LoadCurrentMemberResponses];
+export type LoadCurrentUserResponse =
+  LoadCurrentUserResponses[keyof LoadCurrentUserResponses];
+
+export type CreateFirstSpaceData = {
+  body: {
+    display_name: string;
+    name: string;
+  };
+  headers: {
+    "Idempotency-Key": string;
+  };
+  path?: never;
+  query?: never;
+  url: "/v1/spaces";
+};
+
+export type CreateFirstSpaceErrors = {
+  /**
+   * Request rejected
+   */
+  400: ApiError;
+  /**
+   * Request rejected
+   */
+  401: ApiError;
+  /**
+   * Request rejected
+   */
+  403: ApiError;
+  /**
+   * Request rejected
+   */
+  409: ApiError;
+};
+
+export type CreateFirstSpaceError =
+  CreateFirstSpaceErrors[keyof CreateFirstSpaceErrors];
+
+export type CreateFirstSpaceResponses = {
+  /**
+   * First Space and creator Membership created or exactly replayed
+   */
+  201: Membership;
+};
+
+export type CreateFirstSpaceResponse =
+  CreateFirstSpaceResponses[keyof CreateFirstSpaceResponses];
 
 export type EnrollMachineData = {
   body: {

@@ -7,107 +7,42 @@ package dbsqlc
 
 import (
 	"context"
-
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const authenticateBrowserSession = `-- name: AuthenticateBrowserSession :one
-SELECT browser_session.user_id, carry_user.display_name
+SELECT
+    browser_session.user_id,
+    carry_user.display_name
 FROM browser_sessions AS browser_session
-INNER JOIN user_tokens AS user_token
-    ON user_token.token_id = browser_session.source_token_id
-    AND user_token.user_id = browser_session.user_id
-INNER JOIN carry_users AS carry_user ON carry_user.user_id = browser_session.user_id
+INNER JOIN
+    carry_users AS carry_user
+    ON browser_session.user_id = carry_user.user_id
 WHERE
-    browser_session.session_digest = $1
+    browser_session.session_id = $1
     AND browser_session.revoked_at IS NULL
     AND browser_session.expires_at > transaction_timestamp()
-    AND user_token.revoked_at IS NULL
-    AND user_token.expires_at > transaction_timestamp()
 `
 
 type AuthenticateBrowserSessionRow struct {
 	UserID      string
-	DisplayName string
+	DisplayName *string
 }
 
-func (q *Queries) AuthenticateBrowserSession(ctx context.Context, sessionDigest []byte) (AuthenticateBrowserSessionRow, error) {
-	row := q.db.QueryRow(ctx, authenticateBrowserSession, sessionDigest)
+func (q *Queries) AuthenticateBrowserSession(ctx context.Context, sessionID string) (AuthenticateBrowserSessionRow, error) {
+	row := q.db.QueryRow(ctx, authenticateBrowserSession, sessionID)
 	var i AuthenticateBrowserSessionRow
 	err := row.Scan(&i.UserID, &i.DisplayName)
-	return i, err
-}
-
-const createBrowserSession = `-- name: CreateBrowserSession :one
-INSERT INTO browser_sessions (
-    session_digest,
-    user_id,
-    source_token_id,
-    expires_at
-) VALUES (
-    $1,
-    $2,
-    $3,
-    $4
-)
-RETURNING user_id, expires_at
-`
-
-type CreateBrowserSessionParams struct {
-	SessionDigest []byte
-	UserID        string
-	SourceTokenID string
-	ExpiresAt     pgtype.Timestamptz
-}
-
-type CreateBrowserSessionRow struct {
-	UserID    string
-	ExpiresAt pgtype.Timestamptz
-}
-
-func (q *Queries) CreateBrowserSession(ctx context.Context, arg CreateBrowserSessionParams) (CreateBrowserSessionRow, error) {
-	row := q.db.QueryRow(ctx, createBrowserSession,
-		arg.SessionDigest,
-		arg.UserID,
-		arg.SourceTokenID,
-		arg.ExpiresAt,
-	)
-	var i CreateBrowserSessionRow
-	err := row.Scan(&i.UserID, &i.ExpiresAt)
-	return i, err
-}
-
-const loadActiveUserTokenForBrowserSession = `-- name: LoadActiveUserTokenForBrowserSession :one
-SELECT token_id, user_id, expires_at
-FROM user_tokens
-WHERE
-    token_hash = $1
-    AND revoked_at IS NULL
-    AND expires_at > transaction_timestamp()
-FOR SHARE
-`
-
-type LoadActiveUserTokenForBrowserSessionRow struct {
-	TokenID   string
-	UserID    string
-	ExpiresAt pgtype.Timestamptz
-}
-
-func (q *Queries) LoadActiveUserTokenForBrowserSession(ctx context.Context, tokenHash []byte) (LoadActiveUserTokenForBrowserSessionRow, error) {
-	row := q.db.QueryRow(ctx, loadActiveUserTokenForBrowserSession, tokenHash)
-	var i LoadActiveUserTokenForBrowserSessionRow
-	err := row.Scan(&i.TokenID, &i.UserID, &i.ExpiresAt)
 	return i, err
 }
 
 const revokeBrowserSession = `-- name: RevokeBrowserSession :execrows
 UPDATE browser_sessions
 SET revoked_at = transaction_timestamp()
-WHERE session_digest = $1 AND revoked_at IS NULL
+WHERE session_id = $1 AND revoked_at IS NULL
 `
 
-func (q *Queries) RevokeBrowserSession(ctx context.Context, sessionDigest []byte) (int64, error) {
-	result, err := q.db.Exec(ctx, revokeBrowserSession, sessionDigest)
+func (q *Queries) RevokeBrowserSession(ctx context.Context, sessionID string) (int64, error) {
+	result, err := q.db.Exec(ctx, revokeBrowserSession, sessionID)
 	if err != nil {
 		return 0, err
 	}

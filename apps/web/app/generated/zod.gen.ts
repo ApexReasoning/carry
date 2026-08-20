@@ -6,15 +6,21 @@ export const zApiError = z.object({
   error: z.string(),
 });
 
+export const zEmailChallenge = z.object({
+  challenge_id: z.uuid(),
+  expires_at: z.iso.datetime({ offset: true }),
+});
+
 export const zMembership = z.object({
   space_id: z.uuid(),
   name: z.string(),
+  can_manage_members: z.boolean(),
   can_enroll_machines: z.boolean(),
 });
 
-export const zMember = z.object({
+export const zUser = z.object({
   user_id: z.uuid(),
-  display_name: z.string(),
+  display_name: z.string().nullable(),
   spaces: z.array(zMembership),
 });
 
@@ -93,10 +99,36 @@ export const zBeforeWorkMessage = z.uuid();
 
 export const zNeedsYou = z.boolean().default(false);
 
+export const zRequestEmailCodeBody = z.object({
+  challenge_id: z.uuid(),
+  email: z.email().max(254),
+});
+
+export const zRequestEmailCodeHeaders = z.object({
+  "Idempotency-Key": z.string().min(1).max(255),
+});
+
 /**
- * Browser session created
+ * Email submission accepted or its outcome remains unknown
  */
-export const zCreateBrowserSessionResponse = z.void();
+export const zRequestEmailCodeResponse = zEmailChallenge;
+
+export const zVerifyEmailCodeBody = z.object({
+  code: z.string().regex(/^[0-9]{6}$/),
+});
+
+export const zVerifyEmailCodeHeaders = z.object({
+  "Idempotency-Key": z.string().min(1).max(255),
+});
+
+export const zVerifyEmailCodePath = z.object({
+  challengeID: z.uuid(),
+});
+
+/**
+ * Browser session established or exactly replayed
+ */
+export const zVerifyEmailCodeResponse = z.void();
 
 /**
  * Browser session revoked
@@ -104,9 +136,23 @@ export const zCreateBrowserSessionResponse = z.void();
 export const zRevokeCurrentBrowserSessionResponse = z.void();
 
 /**
- * Current member and Spaces
+ * Current User and Spaces
  */
-export const zLoadCurrentMemberResponse = zMember;
+export const zLoadCurrentUserResponse = zUser;
+
+export const zCreateFirstSpaceBody = z.object({
+  display_name: z.string().min(1),
+  name: z.string().min(1),
+});
+
+export const zCreateFirstSpaceHeaders = z.object({
+  "Idempotency-Key": z.string().min(1).max(255),
+});
+
+/**
+ * First Space and creator Membership created or exactly replayed
+ */
+export const zCreateFirstSpaceResponse = zMembership;
 
 export const zEnrollMachineBody = z.object({
   space_id: z.uuid(),

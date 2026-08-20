@@ -90,7 +90,7 @@ func (api workAPI) mount(router chi.Router) {
 }
 
 func (api workAPI) create(response http.ResponseWriter, request *http.Request) {
-	user, ok := currentMember(response, request)
+	user, ok := currentUser(response, request)
 	if !ok {
 		return
 	}
@@ -118,7 +118,7 @@ func (api workAPI) create(response http.ResponseWriter, request *http.Request) {
 }
 
 func (api workAPI) list(response http.ResponseWriter, request *http.Request) {
-	user, ok := currentMember(response, request)
+	user, ok := currentUser(response, request)
 	if !ok {
 		return
 	}
@@ -152,7 +152,7 @@ func (api workAPI) list(response http.ResponseWriter, request *http.Request) {
 }
 
 func (api workAPI) load(response http.ResponseWriter, request *http.Request) {
-	user, ok := currentMember(response, request)
+	user, ok := currentUser(response, request)
 	if !ok {
 		return
 	}
@@ -187,7 +187,7 @@ func (api workAPI) load(response http.ResponseWriter, request *http.Request) {
 }
 
 func (api workAPI) appendMessage(response http.ResponseWriter, request *http.Request) {
-	user, ok := currentMember(response, request)
+	user, ok := currentUser(response, request)
 	if !ok {
 		return
 	}
@@ -219,7 +219,7 @@ func (api workAPI) appendMessage(response http.ResponseWriter, request *http.Req
 }
 
 func (api workAPI) acceptReview(response http.ResponseWriter, request *http.Request) {
-	user, ok := currentMember(response, request)
+	user, ok := currentUser(response, request)
 	if !ok {
 		return
 	}
@@ -250,7 +250,7 @@ func (api workAPI) acceptReview(response http.ResponseWriter, request *http.Requ
 }
 
 func (api workAPI) retry(response http.ResponseWriter, request *http.Request) {
-	user, ok := currentMember(response, request)
+	user, ok := currentUser(response, request)
 	if !ok {
 		return
 	}

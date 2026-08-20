@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
@@ -179,38 +180,44 @@ func testAPI(
 	t *testing.T,
 	authority *machine.CertificateAuthority,
 	tokens UserTokenAuthenticator,
-	machines MachineEnrollmentStore,
-	runs MachineRunStore,
+	machines machine.EnrollmentPersistence,
+	runs *recordingMachineRuns,
 ) http.Handler {
 	t.Helper()
-	member, err := NewMemberRoutes(
-		tokens, unavailableBrowserSessions{}, emptyMemberships{}, machines,
-		unavailableConversationCommands{}, unavailableConversationQueries{},
-		unavailableWorkCommands{}, unavailableWorkQueries{}, authority,
+	user := testUserRoutes(t, authority)
+	authentication, err := NewUserAuthentication(tokens, unavailableBrowserSessions{}, testIdentityCredentials(t))
+	if err != nil {
+		t.Fatalf("compose User authentication: %v", err)
+	}
+	userMachines, err := NewUserMachineRoutes(
+		testMachineEnrollment(t, machines, authority),
+		machines.(MachineRevocation),
 	)
 	if err != nil {
-		t.Fatalf("compose member routes: %v", err)
+		t.Fatalf("compose User Machine routes: %v", err)
 	}
+	user.authentication = authentication
+	user.machines = userMachines
 	machine, err := NewMachineRoutes(runs, unavailableMachineConversations{})
 	if err != nil {
 		t.Fatalf("compose Machine routes: %v", err)
 	}
-	return mustAPI(t, member, machine)
+	return mustAPI(t, user, machine)
 }
 
-func mustAPI(t *testing.T, member *MemberRoutes, machine *MachineRoutes) http.Handler {
+func mustAPI(t *testing.T, user *UserRoutes, machine *MachineRoutes) http.Handler {
 	t.Helper()
-	return mustAPIWithReadiness(t, nil, member, machine)
+	return mustAPIWithReadiness(t, nil, user, machine)
 }
 
 func mustAPIWithReadiness(
 	t *testing.T,
 	readiness Readiness,
-	member *MemberRoutes,
+	user *UserRoutes,
 	machine *MachineRoutes,
 ) http.Handler {
 	t.Helper()
-	apiServer, err := NewAPI(readiness, member, machine)
+	apiServer, err := NewAPI(readiness, user, machine)
 	if err != nil {
 		t.Fatalf("compose API: %v", err)
 	}
@@ -269,15 +276,128 @@ func (store *recordingUserTokens) AuthenticateUserToken(_ context.Context, token
 
 type unavailableBrowserSessions struct{}
 
-func (unavailableBrowserSessions) CreateBrowserSession(context.Context, string, time.Time) (identity.BrowserSession, error) {
-	return identity.BrowserSession{}, errors.New("not implemented")
-}
-
 func (unavailableBrowserSessions) AuthenticateBrowserSession(context.Context, string) (identity.AuthenticatedUser, error) {
 	return identity.AuthenticatedUser{}, identity.ErrUnauthenticated
 }
 
 func (unavailableBrowserSessions) RevokeBrowserSession(context.Context, string) error { return nil }
+
+type unavailableEmailLogins struct{}
+
+func (unavailableEmailLogins) PrepareEmailChallenge(context.Context, identity.PrepareEmailChallengeCommand) (identity.EmailChallenge, error) {
+	return identity.EmailChallenge{}, errors.New("not implemented")
+}
+
+func (unavailableEmailLogins) RecordEmailSubmission(
+	context.Context,
+	string,
+	[sha256.Size]byte,
+	identity.EmailSubmission,
+) (identity.EmailChallenge, error) {
+	return identity.EmailChallenge{}, errors.New("not implemented")
+}
+
+func (unavailableEmailLogins) VerifyEmailChallenge(context.Context, identity.VerifyEmailChallengeCommand) (identity.BrowserSession, error) {
+	return identity.BrowserSession{}, errors.New("not implemented")
+}
+
+type unavailableEmailSender struct{}
+
+func (unavailableEmailSender) PayloadDigest(identity.EmailCodeMessage) ([sha256.Size]byte, error) {
+	return [sha256.Size]byte{}, nil
+}
+
+func (unavailableEmailSender) SubmitEmailCode(
+	context.Context,
+	identity.EmailCodeMessage,
+	[sha256.Size]byte,
+) identity.EmailSubmission {
+	return identity.EmailSubmission{State: identity.EmailSubmissionRejected}
+}
+
+func testIdentityCredentials(t *testing.T) identity.Credentials {
+	t.Helper()
+	credentials, err := identity.NewCredentials(bytes.Repeat([]byte{7}, identity.IdentityRootBytes))
+	if err != nil {
+		t.Fatalf("create test Identity credentials: %v", err)
+	}
+	return credentials
+}
+
+func testUserRoutes(t *testing.T, authority *machine.CertificateAuthority) *UserRoutes {
+	t.Helper()
+	credentials := testIdentityCredentials(t)
+	sessions := unavailableBrowserSessions{}
+	emailLogin, err := identity.NewEmailLogin(unavailableEmailLogins{}, unavailableEmailSender{}, credentials)
+	if err != nil {
+		t.Fatalf("compose test email login: %v", err)
+	}
+	firstSpace, err := space.NewFirstSpace(unavailableFirstSpaces{})
+	if err != nil {
+		t.Fatalf("compose test first Space: %v", err)
+	}
+	machines := &recordingMachineEnrollments{}
+	authentication, err := NewUserAuthentication(&recordingUserTokens{}, sessions, credentials)
+	if err != nil {
+		t.Fatalf("compose test User authentication: %v", err)
+	}
+	identityRoutes, err := NewUserIdentityRoutes(
+		emailLogin,
+		sessions,
+		credentials,
+		NewRequestSource(nil),
+		emptyMemberships{},
+	)
+	if err != nil {
+		t.Fatalf("compose test User identity routes: %v", err)
+	}
+	spaceRoutes, err := NewUserSpaceRoutes(firstSpace)
+	if err != nil {
+		t.Fatalf("compose test User Space routes: %v", err)
+	}
+	machineRoutes, err := NewUserMachineRoutes(testMachineEnrollment(t, machines, authority), machines)
+	if err != nil {
+		t.Fatalf("compose test User Machine routes: %v", err)
+	}
+	conversationRoutes, err := NewConversationRoutes(
+		unavailableConversationCommands{},
+		unavailableConversationQueries{},
+	)
+	if err != nil {
+		t.Fatalf("compose test Conversation routes: %v", err)
+	}
+	workRoutes, err := NewWorkRoutes(unavailableWorkCommands{}, unavailableWorkQueries{})
+	if err != nil {
+		t.Fatalf("compose test Work routes: %v", err)
+	}
+	routes, err := NewUserRoutes(
+		authentication,
+		identityRoutes,
+		spaceRoutes,
+		machineRoutes,
+		conversationRoutes,
+		workRoutes,
+	)
+	if err != nil {
+		t.Fatalf("compose test User routes: %v", err)
+	}
+	return routes
+}
+
+func testMachineEnrollment(t *testing.T, persistence machine.EnrollmentPersistence, authority *machine.CertificateAuthority) *machine.Enrollment {
+	t.Helper()
+	enrollment, err := machine.NewEnrollment(persistence, authority)
+	if err != nil {
+		t.Fatalf("compose test Machine enrollment: %v", err)
+	}
+	return enrollment
+}
+
+type unavailableFirstSpaces struct{}
+
+func (unavailableFirstSpaces) CreateFirstSpace(context.Context, space.CreateFirstCommand) (space.CreatedSpace, error) {
+	return space.CreatedSpace{}, errors.New("not implemented")
+}
 
 type emptyMemberships struct{}
 

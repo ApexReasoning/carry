@@ -11,8 +11,8 @@ import (
 	"github.com/ApexReasoning/carry/internal/run"
 )
 
-// MachineRunStore owns the exact transactions used by one mTLS-authenticated Host.
-type MachineRunStore interface {
+// MachineRuns exposes the complete Run transactions used by one mTLS-authenticated Host.
+type MachineRuns interface {
 	ClaimRun(context.Context, string) (run.Claim, error)
 	RenewRunAttempt(context.Context, string, string, string, int64) (time.Time, error)
 	CommitWorkUnderstanding(context.Context, run.CommitCommand) error
@@ -20,7 +20,7 @@ type MachineRunStore interface {
 }
 
 type machineAPI struct {
-	store MachineRunStore
+	runs MachineRuns
 }
 
 type machineContextKey struct{}
@@ -68,7 +68,7 @@ func requireMachine(next http.Handler) http.Handler {
 		// authority on the Machine surface.
 		_, browserCookieErr := request.Cookie(browserSessionCookie)
 		if strings.TrimSpace(request.Header.Get("Authorization")) != "" || browserCookieErr == nil {
-			writeAPIError(response, http.StatusUnauthorized, "Machine route does not accept member authentication")
+			writeAPIError(response, http.StatusUnauthorized, "Machine route does not accept User authentication")
 			return
 		}
 		if request.TLS == nil || len(request.TLS.VerifiedChains) == 0 || len(request.TLS.PeerCertificates) == 0 {
@@ -99,7 +99,7 @@ func (api machineAPI) claimRun(response http.ResponseWriter, request *http.Reque
 	if !ok {
 		return
 	}
-	claim, err := api.store.ClaimRun(request.Context(), machineID)
+	claim, err := api.runs.ClaimRun(request.Context(), machineID)
 	if errors.Is(err, run.ErrNoRunAvailable) {
 		response.WriteHeader(http.StatusNoContent)
 		return
@@ -135,7 +135,7 @@ func (api machineAPI) renewRun(response http.ResponseWriter, request *http.Reque
 	if !decodeJSON(response, request, &body) {
 		return
 	}
-	leaseExpiresAt, err := api.store.RenewRunAttempt(
+	leaseExpiresAt, err := api.runs.RenewRunAttempt(
 		request.Context(), machineID, runID, attemptID, body.Fence,
 	)
 	if err != nil {
@@ -160,7 +160,7 @@ func (api machineAPI) commitUnderstanding(response http.ResponseWriter, request 
 	if !decodeJSON(response, request, &body) {
 		return
 	}
-	if err := api.store.CommitWorkUnderstanding(request.Context(), run.CommitCommand{
+	if err := api.runs.CommitWorkUnderstanding(request.Context(), run.CommitCommand{
 		MachineID: machineID, RunID: runID,
 		AttemptID: attemptID, Fence: body.Fence,
 		BaseUnderstandingVersion: body.BaseUnderstandingVersion,
@@ -186,7 +186,7 @@ func (api machineAPI) finishAttempt(response http.ResponseWriter, request *http.
 	if !decodeJSON(response, request, &body) {
 		return
 	}
-	if err := api.store.FinishUnresolvedAttempt(request.Context(), run.FinishCommand{
+	if err := api.runs.FinishUnresolvedAttempt(request.Context(), run.FinishCommand{
 		MachineID: machineID, RunID: runID,
 		AttemptID: attemptID, Fence: body.Fence, Outcome: body.Outcome,
 	}); err != nil {

@@ -14,7 +14,7 @@ import (
 const authenticateUserToken = `-- name: AuthenticateUserToken :one
 SELECT
     token.user_id,
-    carry_user.display_name
+    coalesce(carry_user.display_name, '') AS display_name
 FROM user_tokens AS token
 INNER JOIN carry_users AS carry_user ON token.user_id = carry_user.user_id
 WHERE
@@ -36,8 +36,13 @@ func (q *Queries) AuthenticateUserToken(ctx context.Context, tokenHash []byte) (
 }
 
 const createBootstrapMembership = `-- name: CreateBootstrapMembership :exec
-INSERT INTO space_memberships (space_id, user_id, can_enroll_machines)
-VALUES ($1, $2, true)
+INSERT INTO space_memberships (
+    space_id,
+    user_id,
+    can_enroll_machines,
+    can_manage_members
+)
+VALUES ($1, $2, true, true)
 `
 
 type CreateBootstrapMembershipParams struct {
@@ -67,7 +72,7 @@ func (q *Queries) CreateBootstrapSpace(ctx context.Context, arg CreateBootstrapS
 
 const createBootstrapUser = `-- name: CreateBootstrapUser :exec
 INSERT INTO carry_users (user_id, display_name)
-VALUES ($1, $2)
+VALUES ($1, $2::text)
 `
 
 type CreateBootstrapUserParams struct {
@@ -120,7 +125,7 @@ func (q *Queries) IsBootstrapped(ctx context.Context) (bool, error) {
 
 const loadPreparedBootstrap = `-- name: LoadPreparedBootstrap :one
 SELECT
-    carry_user.display_name,
+    coalesce(carry_user.display_name, '') AS display_name,
     space.name AS space_name,
     membership.can_enroll_machines,
     user_token.token_hash,

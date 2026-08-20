@@ -2,14 +2,14 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { expect, test, vi } from "vitest";
 
 import type {
-  Member,
+  User,
   Work,
   WorkMessage,
   WorkSummary,
 } from "../../generated/types.gen";
 import { useWorkBoard } from "./use-work-board";
 
-const memberID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const userID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const spaceID = "11111111-1111-4111-8111-111111111111";
 const newestWorkID = "22222222-2222-4222-8222-222222222222";
 const olderWorkID = "33333333-3333-4333-8333-333333333333";
@@ -17,10 +17,17 @@ const oldestMessageID = "44444444-4444-4444-8444-444444444444";
 const middleMessageID = "55555555-5555-4555-8555-555555555555";
 const newestMessageID = "66666666-6666-4666-8666-666666666666";
 
-const member: Member = {
-  user_id: memberID,
+const user: User = {
+  user_id: userID,
   display_name: "Alex Morgan",
-  spaces: [{ space_id: spaceID, name: "Research", can_enroll_machines: true }],
+  spaces: [
+    {
+      space_id: spaceID,
+      name: "Research",
+      can_manage_members: true,
+      can_enroll_machines: true,
+    },
+  ],
 };
 
 test("loads bounded earlier Work and message pages without duplicates", async () => {
@@ -66,7 +73,7 @@ test("loads bounded earlier Work and message pages without duplicates", async ()
     }),
   );
 
-  const { result } = renderHook(() => useWorkBoard(member));
+  const { result } = renderHook(() => useWorkBoard(user));
   await waitFor(() => expect(result.current.works).toHaveLength(1));
   expect(result.current.hasEarlierWorks).toBe(true);
 
@@ -159,7 +166,7 @@ test("reuses the exact acceptance identity when a lost request did not commit", 
     }),
   );
 
-  const { result } = renderHook(() => useWorkBoard(member));
+  const { result } = renderHook(() => useWorkBoard(user));
   await waitFor(() => expect(result.current.works).toHaveLength(1));
   await act(() => result.current.selectWork(newestWorkID));
 
@@ -225,7 +232,7 @@ test("accepts the exact Needs You result and reconciles a lost response", async 
     }),
   );
 
-  const { result } = renderHook(() => useWorkBoard(member));
+  const { result } = renderHook(() => useWorkBoard(user));
   await waitFor(() => expect(result.current.spaceID).toBe(spaceID));
   expect(result.current.works).toHaveLength(0);
 
@@ -251,9 +258,9 @@ function summary(workID: string, goal: string): WorkSummary {
     space_id: spaceID,
     goal,
     lifecycle: "open",
-    owner_user_id: memberID,
+    owner_user_id: userID,
     owner_display_name: "Alex Morgan",
-    creator_user_id: memberID,
+    creator_user_id: userID,
     creator_display_name: "Alex Morgan",
     has_unapplied_input: false,
     needs_retry: false,
@@ -274,7 +281,7 @@ function workMessage(messageID: string, text: string): WorkMessage {
   return {
     message_id: messageID,
     work_id: newestWorkID,
-    author_user_id: memberID,
+    author_user_id: userID,
     author_display_name: "Alex Morgan",
     text,
     created_at: "2026-08-20T12:00:00Z",

@@ -11,40 +11,67 @@ import (
 
 const browserSessionCookie = "__Host-carry_session"
 
-// UserTokenAuthenticator validates a member token without owning browser-session state.
+// UserTokenAuthenticator validates the transitional CLI bearer without owning browser-session state.
 type UserTokenAuthenticator interface {
 	AuthenticateUserToken(context.Context, string) (identity.AuthenticatedUser, error)
 }
 
-type memberAuthenticator struct {
-	tokens   UserTokenAuthenticator
-	sessions BrowserSessionStore
+type userAuthenticator struct {
+	tokens      UserTokenAuthenticator
+	sessions    BrowserSessions
+	credentials identity.Credentials
 }
 
-type memberContextKey struct{}
+type userContextKey struct{}
 
 func rejectMachinePrincipal(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		if request.TLS != nil && len(request.TLS.PeerCertificates) != 0 {
-			writeAPIError(response, http.StatusUnauthorized, "Member route does not accept Machine authentication")
+			writeAPIError(response, http.StatusUnauthorized, "User route does not accept Machine authentication")
 			return
 		}
 		next.ServeHTTP(response, request)
 	})
 }
 
-func (a memberAuthenticator) requireMember(next http.Handler) http.Handler {
+func (a userAuthenticator) requireUser(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		user, ok := a.authenticate(response, request)
 		if !ok {
 			return
 		}
-		ctx := context.WithValue(request.Context(), memberContextKey{}, user)
+		ctx := context.WithValue(request.Context(), userContextKey{}, user)
 		next.ServeHTTP(response, request.WithContext(ctx))
 	})
 }
 
-func (a memberAuthenticator) authenticate(
+func (a userAuthenticator) requireBrowserUser(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if _, hasToken := bearerToken(request); hasToken {
+			writeAPIError(response, http.StatusUnauthorized, "Browser Session authentication is required")
+			return
+		}
+		cookie, err := request.Cookie(browserSessionCookie)
+		if err != nil || strings.TrimSpace(cookie.Value) == "" {
+			writeAPIError(response, http.StatusUnauthorized, "Browser Session authentication is required")
+			return
+		}
+		sessionID, ok := a.credentials.ParseBrowserSessionCredential(cookie.Value)
+		if !ok {
+			writeAPIError(response, http.StatusUnauthorized, "User authentication is invalid")
+			return
+		}
+		user, err := a.sessions.AuthenticateBrowserSession(request.Context(), sessionID)
+		user, ok = authenticatedUserResult(response, user, err)
+		if !ok {
+			return
+		}
+		ctx := context.WithValue(request.Context(), userContextKey{}, user)
+		next.ServeHTTP(response, request.WithContext(ctx))
+	})
+}
+
+func (a userAuthenticator) authenticate(
 	response http.ResponseWriter,
 	request *http.Request,
 ) (identity.AuthenticatedUser, bool) {
@@ -52,7 +79,7 @@ func (a memberAuthenticator) authenticate(
 	cookie, cookieErr := request.Cookie(browserSessionCookie)
 	hasSession := cookieErr == nil && strings.TrimSpace(cookie.Value) != ""
 	if hasToken && hasSession {
-		writeAPIError(response, http.StatusUnauthorized, "member authentication is ambiguous")
+		writeAPIError(response, http.StatusUnauthorized, "User authentication is ambiguous")
 		return identity.AuthenticatedUser{}, false
 	}
 	if hasToken {
@@ -60,17 +87,22 @@ func (a memberAuthenticator) authenticate(
 		return authenticatedUserResult(response, user, err)
 	}
 	if hasSession {
-		user, err := a.sessions.AuthenticateBrowserSession(request.Context(), cookie.Value)
+		sessionID, ok := a.credentials.ParseBrowserSessionCredential(cookie.Value)
+		if !ok {
+			writeAPIError(response, http.StatusUnauthorized, "User authentication is invalid")
+			return identity.AuthenticatedUser{}, false
+		}
+		user, err := a.sessions.AuthenticateBrowserSession(request.Context(), sessionID)
 		return authenticatedUserResult(response, user, err)
 	}
-	writeAPIError(response, http.StatusUnauthorized, "member authentication is required")
+	writeAPIError(response, http.StatusUnauthorized, "User authentication is required")
 	return identity.AuthenticatedUser{}, false
 }
 
-func currentMember(response http.ResponseWriter, request *http.Request) (identity.AuthenticatedUser, bool) {
-	user, ok := request.Context().Value(memberContextKey{}).(identity.AuthenticatedUser)
+func currentUser(response http.ResponseWriter, request *http.Request) (identity.AuthenticatedUser, bool) {
+	user, ok := request.Context().Value(userContextKey{}).(identity.AuthenticatedUser)
 	if !ok || user.UserID == "" {
-		writeAPIError(response, http.StatusInternalServerError, "member authentication context is missing")
+		writeAPIError(response, http.StatusInternalServerError, "User authentication context is missing")
 		return identity.AuthenticatedUser{}, false
 	}
 	return user, true
@@ -82,11 +114,11 @@ func authenticatedUserResult(
 	err error,
 ) (identity.AuthenticatedUser, bool) {
 	if errors.Is(err, identity.ErrUnauthenticated) {
-		writeAPIError(response, http.StatusUnauthorized, "member authentication is invalid")
+		writeAPIError(response, http.StatusUnauthorized, "User authentication is invalid")
 		return identity.AuthenticatedUser{}, false
 	}
 	if err != nil {
-		writeAPIError(response, http.StatusInternalServerError, "authenticate member")
+		writeAPIError(response, http.StatusInternalServerError, "authenticate User")
 		return identity.AuthenticatedUser{}, false
 	}
 	return user, true

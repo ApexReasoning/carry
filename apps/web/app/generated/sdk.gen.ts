@@ -15,9 +15,9 @@ import type {
   AppendWorkMessageData,
   AppendWorkMessageErrors,
   AppendWorkMessageResponses,
-  CreateBrowserSessionData,
-  CreateBrowserSessionErrors,
-  CreateBrowserSessionResponses,
+  CreateFirstSpaceData,
+  CreateFirstSpaceErrors,
+  CreateFirstSpaceResponses,
   CreateWorkData,
   CreateWorkErrors,
   CreateWorkResponses,
@@ -30,12 +30,15 @@ import type {
   ListWorksData,
   ListWorksErrors,
   ListWorksResponses,
-  LoadCurrentMemberData,
-  LoadCurrentMemberErrors,
-  LoadCurrentMemberResponses,
+  LoadCurrentUserData,
+  LoadCurrentUserErrors,
+  LoadCurrentUserResponses,
   LoadWorkData,
   LoadWorkErrors,
   LoadWorkResponses,
+  RequestEmailCodeData,
+  RequestEmailCodeErrors,
+  RequestEmailCodeResponses,
   RetryWorkData,
   RetryWorkErrors,
   RetryWorkResponses,
@@ -48,21 +51,26 @@ import type {
   SendConversationMessageData,
   SendConversationMessageErrors,
   SendConversationMessageResponses,
+  VerifyEmailCodeData,
+  VerifyEmailCodeErrors,
+  VerifyEmailCodeResponses,
 } from "./types.gen";
 import {
   zAcceptWorkReviewResponse,
   zAppendWorkMessageResponse,
-  zCreateBrowserSessionResponse,
+  zCreateFirstSpaceResponse,
   zCreateWorkResponse,
   zEnrollMachineResponse,
   zListConversationMessagesResponse,
   zListWorksResponse,
-  zLoadCurrentMemberResponse,
+  zLoadCurrentUserResponse,
   zLoadWorkResponse,
+  zRequestEmailCodeResponse,
   zRetryWorkResponse,
   zRevokeCurrentBrowserSessionResponse,
   zRevokeMachineResponse,
   zSendConversationMessageResponse,
+  zVerifyEmailCodeResponse,
 } from "./zod.gen";
 
 export type Options<
@@ -83,23 +91,48 @@ export type Options<
   meta?: keyof ClientMeta extends never ? Record<string, unknown> : ClientMeta;
 };
 
-export const createBrowserSession = <ThrowOnError extends boolean = false>(
-  options?: Options<CreateBrowserSessionData, ThrowOnError>,
+export const requestEmailCode = <ThrowOnError extends boolean = false>(
+  options: Options<RequestEmailCodeData, ThrowOnError>,
 ): RequestResult<
-  CreateBrowserSessionResponses,
-  CreateBrowserSessionErrors,
+  RequestEmailCodeResponses,
+  RequestEmailCodeErrors,
   ThrowOnError
 > =>
-  (options?.client ?? client).post<
-    CreateBrowserSessionResponses,
-    CreateBrowserSessionErrors,
+  (options.client ?? client).post<
+    RequestEmailCodeResponses,
+    RequestEmailCodeErrors,
     ThrowOnError
   >({
     responseValidator: async (data) =>
-      await zCreateBrowserSessionResponse.parseAsync(data),
-    security: [{ scheme: "bearer", type: "http" }],
-    url: "/v1/browser/sessions",
+      await zRequestEmailCodeResponse.parseAsync(data),
+    url: "/v1/auth/email/challenges",
     ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+
+export const verifyEmailCode = <ThrowOnError extends boolean = false>(
+  options: Options<VerifyEmailCodeData, ThrowOnError>,
+): RequestResult<
+  VerifyEmailCodeResponses,
+  VerifyEmailCodeErrors,
+  ThrowOnError
+> =>
+  (options.client ?? client).post<
+    VerifyEmailCodeResponses,
+    VerifyEmailCodeErrors,
+    ThrowOnError
+  >({
+    responseValidator: async (data) =>
+      await zVerifyEmailCodeResponse.parseAsync(data),
+    url: "/v1/auth/email/challenges/{challengeID}/verify",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
   });
 
 export const revokeCurrentBrowserSession = <
@@ -129,20 +162,20 @@ export const revokeCurrentBrowserSession = <
     ...options,
   });
 
-export const loadCurrentMember = <ThrowOnError extends boolean = false>(
-  options?: Options<LoadCurrentMemberData, ThrowOnError>,
+export const loadCurrentUser = <ThrowOnError extends boolean = false>(
+  options?: Options<LoadCurrentUserData, ThrowOnError>,
 ): RequestResult<
-  LoadCurrentMemberResponses,
-  LoadCurrentMemberErrors,
+  LoadCurrentUserResponses,
+  LoadCurrentUserErrors,
   ThrowOnError
 > =>
   (options?.client ?? client).get<
-    LoadCurrentMemberResponses,
-    LoadCurrentMemberErrors,
+    LoadCurrentUserResponses,
+    LoadCurrentUserErrors,
     ThrowOnError
   >({
     responseValidator: async (data) =>
-      await zLoadCurrentMemberResponse.parseAsync(data),
+      await zLoadCurrentUserResponse.parseAsync(data),
     security: [
       { scheme: "bearer", type: "http" },
       {
@@ -153,6 +186,35 @@ export const loadCurrentMember = <ThrowOnError extends boolean = false>(
     ],
     url: "/v1/me",
     ...options,
+  });
+
+export const createFirstSpace = <ThrowOnError extends boolean = false>(
+  options: Options<CreateFirstSpaceData, ThrowOnError>,
+): RequestResult<
+  CreateFirstSpaceResponses,
+  CreateFirstSpaceErrors,
+  ThrowOnError
+> =>
+  (options.client ?? client).post<
+    CreateFirstSpaceResponses,
+    CreateFirstSpaceErrors,
+    ThrowOnError
+  >({
+    responseValidator: async (data) =>
+      await zCreateFirstSpaceResponse.parseAsync(data),
+    security: [
+      {
+        in: "cookie",
+        name: "__Host-carry_session",
+        type: "apiKey",
+      },
+    ],
+    url: "/v1/spaces",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
   });
 
 export const enrollMachine = <ThrowOnError extends boolean = false>(

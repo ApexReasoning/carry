@@ -2,6 +2,7 @@
 SELECT
     m.space_id,
     s.name,
+    m.can_manage_members,
     m.can_enroll_machines
 FROM space_memberships AS m
 INNER JOIN spaces AS s ON m.space_id = s.space_id

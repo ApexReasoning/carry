@@ -2,19 +2,23 @@ import { client } from "./generated/client.gen";
 import {
   acceptWorkReview as acceptWorkReviewRequest,
   appendWorkMessage as appendWorkMessageRequest,
-  createBrowserSession,
+  createFirstSpace as createFirstSpaceRequest,
   createWork as createWorkRequest,
   listConversationMessages as listConversationMessagesRequest,
   listWorks as listWorksRequest,
-  loadCurrentMember,
+  loadCurrentUser,
   loadWork as loadWorkRequest,
+  requestEmailCode as requestEmailCodeRequest,
   retryWork as retryWorkRequest,
   revokeCurrentBrowserSession,
   sendConversationMessage as sendConversationMessageRequest,
+  verifyEmailCode as verifyEmailCodeRequest,
 } from "./generated/sdk.gen";
 import type {
   ConversationMessage,
-  Member,
+  EmailChallenge,
+  Membership,
+  User,
   Work,
   WorkMessage,
   WorkSummary,
@@ -49,12 +53,54 @@ client.setConfig({
 
 const sameOrigin = { credentials: "same-origin" as const };
 
-export async function establishBrowserSession(token: string): Promise<void> {
-  const result = await createBrowserSession({
+export async function requestEmailCode(
+  email: string,
+  challengeID: string,
+  idempotencyKey: string,
+): Promise<EmailChallenge> {
+  const result = await requestEmailCodeRequest({
     ...sameOrigin,
-    auth: token,
+    body: { challenge_id: challengeID, email },
+    headers: { "Idempotency-Key": idempotencyKey },
   });
-  requireMutationSuccess(result.response, result.error, "Open Carry");
+  return requireMutationData(
+    result.data,
+    result.response,
+    result.error,
+    "Send email code",
+  );
+}
+
+export async function verifyEmailCode(
+  challengeID: string,
+  code: string,
+  idempotencyKey: string,
+): Promise<void> {
+  const result = await verifyEmailCodeRequest({
+    ...sameOrigin,
+    body: { code },
+    headers: { "Idempotency-Key": idempotencyKey },
+    path: { challengeID },
+  });
+  requireMutationSuccess(result.response, result.error, "Verify email code");
+}
+
+export async function createFirstSpace(
+  displayName: string,
+  name: string,
+  idempotencyKey: string,
+): Promise<Membership> {
+  const result = await createFirstSpaceRequest({
+    ...sameOrigin,
+    body: { display_name: displayName, name },
+    headers: { "Idempotency-Key": idempotencyKey },
+  });
+  return requireMutationData(
+    result.data,
+    result.response,
+    result.error,
+    "Create first Space",
+  );
 }
 
 export async function closeBrowserSession(): Promise<void> {
@@ -66,12 +112,12 @@ export async function closeBrowserSession(): Promise<void> {
   );
 }
 
-export async function currentMember(): Promise<Member | null> {
-  const result = await loadCurrentMember(sameOrigin);
+export async function currentUser(): Promise<User | null> {
+  const result = await loadCurrentUser(sameOrigin);
   if (result.response?.status === 401) {
     return null;
   }
-  return requireData(result.data, result.response, result.error, "Load member");
+  return requireData(result.data, result.response, result.error, "Load User");
 }
 
 export async function listConversationMessages(

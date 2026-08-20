@@ -8,18 +8,82 @@ security:
   - memberToken: []
   - browserSession: []
 paths:
-  /v1/browser/sessions:
+  /v1/auth/email/challenges:
     post:
-      operationId: createBrowserSession
-      security:
-        - memberToken: []
+      operationId: requestEmailCode
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [challenge_id, email]
+              properties:
+                challenge_id:
+                  type: string
+                  format: uuid
+                email:
+                  type: string
+                  format: email
+                  maxLength: 254
       responses:
-        "204":
-          description: Browser session created
+        "202":
+          description: Email submission accepted or its outcome remains unknown
           headers:
             Cache-Control:
               $ref: "#/components/headers/NoStore"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailChallenge"
+        "400":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "429":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+  /v1/auth/email/challenges/{challengeID}/verify:
+    parameters:
+      - name: challengeID
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      operationId: verifyEmailCode
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [code]
+              properties:
+                code:
+                  type: string
+                  pattern: "^[0-9]{6}$"
+      responses:
+        "204":
+          description: Browser session established or exactly replayed
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
+        "400":
+          $ref: "#/components/responses/Error"
         "401":
+          $ref: "#/components/responses/Error"
+        "409":
           $ref: "#/components/responses/Error"
   /v1/browser/sessions/current:
     delete:
@@ -36,18 +100,59 @@ paths:
           $ref: "#/components/responses/Error"
   /v1/me:
     get:
-      operationId: loadCurrentMember
+      operationId: loadCurrentUser
       responses:
         "200":
-          description: Current member and Spaces
+          description: Current User and Spaces
           headers:
             Cache-Control:
               $ref: "#/components/headers/NoStore"
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Member"
+                $ref: "#/components/schemas/User"
         "401":
+          $ref: "#/components/responses/Error"
+  /v1/spaces:
+    post:
+      operationId: createFirstSpace
+      security:
+        - browserSession: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [display_name, name]
+              properties:
+                display_name:
+                  type: string
+                  minLength: 1
+                name:
+                  type: string
+                  minLength: 1
+      responses:
+        "201":
+          description: >-
+            First Space and creator Membership created or exactly replayed
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Membership"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
           $ref: "#/components/responses/Error"
   /v1/machines/enroll:
     post:
@@ -492,19 +597,32 @@ components:
       properties:
         error:
           type: string
+    EmailChallenge:
+      type: object
+      additionalProperties: false
+      required: [challenge_id, expires_at]
+      properties:
+        challenge_id:
+          type: string
+          format: uuid
+        expires_at:
+          type: string
+          format: date-time
     Membership:
       type: object
       additionalProperties: false
-      required: [space_id, name, can_enroll_machines]
+      required: [space_id, name, can_manage_members, can_enroll_machines]
       properties:
         space_id:
           type: string
           format: uuid
         name:
           type: string
+        can_manage_members:
+          type: boolean
         can_enroll_machines:
           type: boolean
-    Member:
+    User:
       type: object
       additionalProperties: false
       required: [user_id, display_name, spaces]
@@ -513,7 +631,7 @@ components:
           type: string
           format: uuid
         display_name:
-          type: string
+          type: [string, "null"]
         spaces:
           type: array
           items:

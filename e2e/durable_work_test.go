@@ -4,10 +4,12 @@ package e2e
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestMemberCreatesMessagesAndReloadsDurableWork(t *testing.T) {
@@ -37,7 +39,7 @@ func TestMemberCreatesMessagesAndReloadsDurableWork(t *testing.T) {
 	}
 
 	address := freeAddress(t)
-	stopServer, serverLog := startServer(t, root, carryServer, address, databaseURL, pkiDirectory)
+	stopServer, serverLog, _ := startServer(t, root, carryServer, address, databaseURL, pkiDirectory)
 	defer func() { stopServer() }()
 	serverURL := "https://" + address
 	waitForServer(t, serverURL, filepath.Join(pkiDirectory, "ca.pem"), serverLog)
@@ -77,7 +79,7 @@ func TestMemberCreatesMessagesAndReloadsDurableWork(t *testing.T) {
 	}
 
 	stopServer()
-	stopServer, serverLog = startServer(t, root, carryServer, address, databaseURL, pkiDirectory)
+	stopServer, serverLog, _ = startServer(t, root, carryServer, address, databaseURL, pkiDirectory)
 	waitForServer(t, serverURL, filepath.Join(pkiDirectory, "ca.pem"), serverLog)
 	restarted := run(t, root, environment, carry, "work", "show", workID)
 	if !strings.Contains(restarted, "Track recurring customer renewal questions") ||
@@ -100,17 +102,11 @@ func TestBrowserCreatesDurableWorkWithoutStoringBearer(t *testing.T) {
 	build(t, root, carryServer, "./cmd/carry-server")
 	pkiDirectory := filepath.Join(temporary, "pki")
 	run(t, root, nil, carryServer, "pki", "init", "--dir", pkiDirectory, "--hosts", "localhost,127.0.0.1")
-	bootstrapOutput := bootstrapCarry(t, root, carryServer, databaseURL)
+	_ = bootstrapCarry(t, root, carryServer, databaseURL)
 	resetProductJourneyFacts(t, databaseURL)
-	var bootstrap struct {
-		UserToken string `json:"user_token"`
-	}
-	if err := json.Unmarshal([]byte(bootstrapOutput), &bootstrap); err != nil {
-		t.Fatalf("decode bootstrap: %v", err)
-	}
 
 	serverAddress := freeAddress(t)
-	stopServer, serverLog := startServer(t, root, carryServer, serverAddress, databaseURL, pkiDirectory)
+	stopServer, serverLog, emailCaptureFile := startServer(t, root, carryServer, serverAddress, databaseURL, pkiDirectory)
 	defer func() { stopServer() }()
 	serverURL := "https://" + serverAddress
 	waitForServer(t, serverURL, filepath.Join(pkiDirectory, "ca.pem"), serverLog)
@@ -122,18 +118,32 @@ func TestBrowserCreatesDurableWorkWithoutStoringBearer(t *testing.T) {
 	webURL := "https://" + webAddress
 	waitForServer(t, webURL, filepath.Join(pkiDirectory, "ca.pem"), webLog)
 
+	loginEmail := fmt.Sprintf("new-user-%d@example.com", time.Now().UnixNano())
 	output, err := runError(
 		root,
 		[]string{
 			"CARRY_WEB_URL=" + webURL,
-			"CARRY_MEMBER_TOKEN=" + bootstrap.UserToken,
+			"CARRY_EMAIL_CAPTURE_FILE=" + emailCaptureFile,
+			"CARRY_LOGIN_EMAIL=" + loginEmail,
 		},
-		"pnpm", "--dir", "apps/web", "exec", "playwright", "test", "e2e/first-durable-work.spec.ts",
+		"pnpm", "--dir", "apps/web", "exec", "playwright", "test",
+		"e2e/user-session.spec.ts", "e2e/first-durable-work.spec.ts",
 	)
 	if err != nil {
 		t.Fatalf("run browser product journey: %v\n%s", err, output)
 	}
-	if !strings.Contains(output, "1 passed") {
-		t.Fatalf("durable Work Playwright spec did not execute:\n%s", output)
+	if !strings.Contains(output, "4 passed") {
+		t.Fatalf("email identity and durable Work Playwright specs did not execute:\n%s", output)
+	}
+	serverOutput := serverLog.String()
+	if localPart := strings.SplitN(loginEmail, "@", 2)[0]; strings.Contains(serverOutput, localPart) {
+		t.Fatalf("carry-server log contains login email local part: %s", serverOutput)
+	}
+	capturedCode, readErr := os.ReadFile(emailCaptureFile)
+	if readErr != nil {
+		t.Fatalf("read latest submitted email code: %v", readErr)
+	}
+	if code := strings.TrimSpace(string(capturedCode)); code != "" && strings.Contains(serverOutput, code) {
+		t.Fatalf("carry-server log contains email code: %s", serverOutput)
 	}
 }

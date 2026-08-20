@@ -33,7 +33,11 @@ func TestMigrateCreatesCurrentFactsAndRejectsUnearnedWorkLifecycle(t *testing.T)
 		"work_messages",
 		"runs",
 		"run_attempts",
+		"work_result_checks",
 		"browser_sessions",
+		"email_identities",
+		"email_login_challenges",
+		"email_login_attempts",
 	} {
 		var exists bool
 		if err := pool.QueryRow(ctx, `select to_regclass('public.' || $1) is not null`, table).Scan(&exists); err != nil {
@@ -253,5 +257,15 @@ func TestMigrateUpgradesTerminalNode2Runs(t *testing.T) {
 	}
 	if migrated != 2 {
 		t.Fatalf("upgraded terminal Runs = %d, want 2", migrated)
+	}
+	if _, err := pool.Exec(ctx, `
+		insert into spaces (
+			space_id, name, created_by_user_id, create_idempotency_key, create_request_digest
+		) values (
+			'20000000-0000-0000-0000-000000000099', 'Missing Digest',
+			'10000000-0000-0000-0000-000000000001', 'missing-digest', null
+		)
+	`); err == nil {
+		t.Fatal("upgraded schema accepted explicit first Space creation without a request digest")
 	}
 }

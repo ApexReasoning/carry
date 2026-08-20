@@ -2,20 +2,21 @@
 
 import { expect, test } from "@playwright/test";
 
-test("responsible member reviews an exact result after response loss", async ({
+import { signInWithEmail } from "./email-login";
+
+test("responsible User reviews an exact result after response loss", async ({
   page,
 }) => {
-  const memberToken = process.env.CARRY_MEMBER_TOKEN;
+  const emailCaptureFile = process.env.CARRY_EMAIL_CAPTURE_FILE;
   const workGoal = process.env.CARRY_REVIEW_WORK_GOAL;
-  if (!memberToken || !workGoal) {
+  if (!emailCaptureFile || !workGoal) {
     throw new Error(
-      "CARRY_MEMBER_TOKEN and CARRY_REVIEW_WORK_GOAL are required",
+      "CARRY_EMAIL_CAPTURE_FILE and CARRY_REVIEW_WORK_GOAL are required",
     );
   }
 
   await page.goto("/");
-  await page.getByLabel("Member token").fill(memberToken);
-  await page.getByRole("button", { name: "Open Carry" }).click();
+  await signInWithEmail(page, emailCaptureFile, "reviewer@example.com");
   await page.getByRole("button", { name: "Needs You" }).click();
   await page.getByRole("button", { name: workGoal }).click();
 
@@ -57,5 +58,6 @@ test("responsible member reviews an exact result after response loss", async ({
   await page.reload();
   await page.getByRole("button", { name: "Needs You" }).click();
   await expect(page.getByText("Nothing needs you right now.")).toBeVisible();
+  await expect.poll(() => page.evaluate(() => localStorage.length)).toBe(0);
   await expect.poll(() => page.evaluate(() => sessionStorage.length)).toBe(0);
 });

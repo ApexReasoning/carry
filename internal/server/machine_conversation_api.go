@@ -11,15 +11,15 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// MachineConversationStore owns only the private reply authority consumed by a Host.
-type MachineConversationStore interface {
+// MachineConversations exposes the complete private-reply transactions consumed by a Host.
+type MachineConversations interface {
 	ClaimConversationReply(context.Context, string) (conversation.ReplyClaim, error)
 	RenewConversationReply(context.Context, conversation.RenewReplyCommand) (time.Time, error)
 	CommitConversationReply(context.Context, conversation.CommitReplyCommand) (conversation.CommitReplyResult, error)
 }
 
 type machineConversationAPI struct {
-	store MachineConversationStore
+	conversations MachineConversations
 }
 
 type renewConversationReplyRequest struct {
@@ -49,7 +49,7 @@ func (api machineConversationAPI) claim(response http.ResponseWriter, request *h
 	if !ok {
 		return
 	}
-	claim, err := api.store.ClaimConversationReply(request.Context(), machineID)
+	claim, err := api.conversations.ClaimConversationReply(request.Context(), machineID)
 	if errors.Is(err, conversation.ErrNoReplyAvailable) {
 		response.WriteHeader(http.StatusNoContent)
 		return
@@ -83,7 +83,7 @@ func (api machineConversationAPI) renew(response http.ResponseWriter, request *h
 	if !decodeJSON(response, request, &body) {
 		return
 	}
-	lease, err := api.store.RenewConversationReply(request.Context(), conversation.RenewReplyCommand{
+	lease, err := api.conversations.RenewConversationReply(request.Context(), conversation.RenewReplyCommand{
 		MachineID: machineID, SourceMessageID: sourceMessageID, Fence: body.Fence,
 	})
 	if err != nil {
@@ -121,7 +121,7 @@ func (api machineConversationAPI) commit(response http.ResponseWriter, request *
 		}
 		candidate.DelegationGoal = &goal
 	}
-	result, err := api.store.CommitConversationReply(request.Context(), conversation.CommitReplyCommand{
+	result, err := api.conversations.CommitConversationReply(request.Context(), conversation.CommitReplyCommand{
 		MachineID: machineID, SourceMessageID: sourceMessageID, Fence: *body.Fence,
 		Candidate: candidate,
 	})

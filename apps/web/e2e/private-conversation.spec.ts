@@ -2,6 +2,8 @@
 
 import { expect, test, type Page } from "@playwright/test";
 
+import { signInWithEmail } from "./email-login";
+
 const questionText =
   "What should I check before a customer renewal? Private reference ORCHID-QUESTION-739.";
 const questionReply =
@@ -17,14 +19,13 @@ test("member talks privately to Carry and delegates one shared Work", async ({
   context,
   page,
 }) => {
-  const memberToken = process.env.CARRY_MEMBER_TOKEN;
-  if (!memberToken) {
-    throw new Error("CARRY_MEMBER_TOKEN is required");
+  const emailCaptureFile = process.env.CARRY_EMAIL_CAPTURE_FILE;
+  if (!emailCaptureFile) {
+    throw new Error("CARRY_EMAIL_CAPTURE_FILE is required");
   }
 
   await page.goto("/");
-  await page.getByLabel("Member token").fill(memberToken);
-  await page.getByRole("button", { name: "Open Carry" }).click();
+  await signInWithEmail(page, emailCaptureFile, "conversation@example.com");
   await expect(
     page.getByRole("heading", { name: "Talk to Carry" }),
   ).toBeVisible();
@@ -66,13 +67,13 @@ test("member talks privately to Carry and delegates one shared Work", async ({
     delegationText,
     "ORCHID-QUESTION-739",
     "ORCHID-DELEGATION-842",
-    memberToken,
+    "conversation@example.com",
   ]) {
     expect(persistedSessionState).not.toContain(privateValue);
   }
 
   await page.getByRole("button", { name: "Sign out" }).click();
-  await expect(page.getByLabel("Member token")).toBeVisible();
+  await expect(page.getByLabel("Email")).toBeVisible();
   await expect(
     page.getByRole("heading", { name: "Talk to Carry" }),
   ).toHaveCount(0);

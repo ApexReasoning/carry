@@ -9,17 +9,16 @@ import (
 )
 
 type BrowserSession struct {
-	SessionDigest []byte
-	UserID        string
-	SourceTokenID string
-	CreatedAt     pgtype.Timestamptz
-	ExpiresAt     pgtype.Timestamptz
-	RevokedAt     pgtype.Timestamptz
+	UserID    string
+	CreatedAt pgtype.Timestamptz
+	ExpiresAt pgtype.Timestamptz
+	RevokedAt pgtype.Timestamptz
+	SessionID string
 }
 
 type CarryUser struct {
 	UserID      string
-	DisplayName string
+	DisplayName *string
 	CreatedAt   pgtype.Timestamptz
 }
 
@@ -57,6 +56,39 @@ type ConversationReplyClaim struct {
 	CommittedReplyMessageID pgtype.UUID
 	CommittedReplyAuthor    *string
 	CreatedWorkID           pgtype.UUID
+}
+
+type EmailIdentity struct {
+	CanonicalEmail string
+	UserID         string
+	VerifiedAt     pgtype.Timestamptz
+}
+
+type EmailLoginAttempt struct {
+	ChallengeID    string
+	IdempotencyKey string
+	RequestDigest  []byte
+	Result         string
+	CreatedAt      pgtype.Timestamptz
+}
+
+type EmailLoginChallenge struct {
+	ChallengeID           string
+	CanonicalEmail        string
+	CodeDigest            []byte
+	SourceDigest          []byte
+	PayloadDigest         []byte
+	RequestIdempotencyKey string
+	RequestDigest         []byte
+	SubmissionState       string
+	ProviderMessageID     *string
+	AttemptsUsed          int32
+	CreatedAt             pgtype.Timestamptz
+	ExpiresAt             pgtype.Timestamptz
+	InvalidatedAt         pgtype.Timestamptz
+	ConsumedAt            pgtype.Timestamptz
+	UserID                pgtype.UUID
+	BrowserSessionID      pgtype.UUID
 }
 
 type Machine struct {
@@ -99,9 +131,12 @@ type RunAttempt struct {
 }
 
 type Space struct {
-	SpaceID   string
-	Name      string
-	CreatedAt pgtype.Timestamptz
+	SpaceID              string
+	Name                 string
+	CreatedAt            pgtype.Timestamptz
+	CreatedByUserID      pgtype.UUID
+	CreateIdempotencyKey *string
+	CreateRequestDigest  []byte
 }
 
 type SpaceMembership struct {
@@ -111,6 +146,7 @@ type SpaceMembership struct {
 	Version           int64
 	CreatedAt         pgtype.Timestamptz
 	RevokedAt         pgtype.Timestamptz
+	CanManageMembers  bool
 }
 
 type UserToken struct {

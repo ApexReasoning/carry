@@ -49,14 +49,7 @@ func TestHealthReportsUnavailableWhenDatabaseFails(t *testing.T) {
 func healthTestAPI(t *testing.T, readiness Readiness) http.Handler {
 	t.Helper()
 	authority := testAuthority(t)
-	member, err := NewMemberRoutes(
-		&recordingUserTokens{}, unavailableBrowserSessions{}, emptyMemberships{},
-		&recordingMachineEnrollments{}, unavailableConversationCommands{}, unavailableConversationQueries{},
-		unavailableWorkCommands{}, unavailableWorkQueries{}, authority,
-	)
-	if err != nil {
-		t.Fatalf("compose member routes: %v", err)
-	}
+	member := testUserRoutes(t, authority)
 	runStore := &recordingMachineRuns{}
 	machine, err := NewMachineRoutes(runStore, unavailableMachineConversations{})
 	if err != nil {

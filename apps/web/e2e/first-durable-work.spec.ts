@@ -2,20 +2,34 @@
 
 import { expect, test } from "@playwright/test";
 
-test("member creates and continues durable Work without browser bearer storage", async ({
+import { signInWithEmail } from "./email-login";
+
+test("new User creates a first Space and continues durable Work without browser credential storage", async ({
+  context,
   page,
 }) => {
-  const memberToken = process.env.CARRY_MEMBER_TOKEN;
-  if (!memberToken) {
-    throw new Error("CARRY_MEMBER_TOKEN is required");
+  const emailCaptureFile = process.env.CARRY_EMAIL_CAPTURE_FILE;
+  const loginEmail = process.env.CARRY_LOGIN_EMAIL;
+  if (!emailCaptureFile || !loginEmail) {
+    throw new Error(
+      "CARRY_EMAIL_CAPTURE_FILE and CARRY_LOGIN_EMAIL are required",
+    );
   }
 
   await page.goto("/");
-  await page.getByLabel("Member token").fill(memberToken);
-  await page.getByRole("button", { name: "Open Carry" }).click();
+  await signInWithEmail(page, emailCaptureFile, loginEmail);
+  await page.getByLabel("Your name").fill("Alex Morgan");
+  await page.getByLabel("Space name").fill("Research");
+  await page.getByRole("button", { name: "Create Space" }).click();
   await expect(
     page.getByRole("heading", { name: "What should Carry keep moving?" }),
   ).toBeVisible();
+  const browserSession = (await context.cookies()).find(
+    (cookie) => cookie.name === "__Host-carry_session",
+  );
+  expect(browserSession?.httpOnly).toBe(true);
+  expect(browserSession?.secure).toBe(true);
+  expect(browserSession?.sameSite).toBe("Strict");
   await expect.poll(() => page.evaluate(() => localStorage.length)).toBe(0);
   await expect.poll(() => page.evaluate(() => sessionStorage.length)).toBe(0);
 
@@ -49,4 +63,11 @@ test("member creates and continues durable Work without browser bearer storage",
   await expect(
     page.getByText("Include themes from the support queue"),
   ).toBeVisible();
+  expect(await page.evaluate(() => Object.entries(localStorage))).toEqual([]);
+  const sessionValues = JSON.stringify(
+    await page.evaluate(() => Object.entries(sessionStorage)),
+  );
+  expect(sessionValues).not.toContain(loginEmail);
+  expect(sessionValues).not.toContain("__Host-carry_session");
+  expect(sessionValues).not.toMatch(/\b\d{6}\b/);
 });

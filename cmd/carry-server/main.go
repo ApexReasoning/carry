@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -16,14 +17,22 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ApexReasoning/carry/internal/identity"
+	"github.com/ApexReasoning/carry/internal/machine"
 	carrypostgres "github.com/ApexReasoning/carry/internal/postgres"
 	carryserver "github.com/ApexReasoning/carry/internal/server"
+	"github.com/ApexReasoning/carry/internal/space"
 )
 
 type config struct {
-	listenAddress string
-	databaseURL   string
-	pkiDirectory  string
+	listenAddress     string
+	databaseURL       string
+	pkiDirectory      string
+	identityRoot      string
+	resendAPIKey      string
+	resendAPIURL      string
+	emailFrom         string
+	trustedProxyCIDRs []netip.Prefix
 }
 
 type bootstrapConfig struct {
@@ -52,6 +61,20 @@ func parseConfig(arguments []string, stderr io.Writer) (config, error) {
 	flags.StringVar(&parsed.listenAddress, "listen", "127.0.0.1:8080", "HTTPS listen address")
 	flags.StringVar(&parsed.databaseURL, "database-url", os.Getenv("CARRY_DATABASE_URL"), "PostgreSQL connection URL")
 	flags.StringVar(&parsed.pkiDirectory, "pki-dir", os.Getenv("CARRY_PKI_DIR"), "Carry PKI directory")
+	parsed.identityRoot = os.Getenv("CARRY_IDENTITY_ROOT")
+	parsed.resendAPIKey = os.Getenv("CARRY_RESEND_API_KEY")
+	parsed.resendAPIURL = os.Getenv("CARRY_RESEND_API_URL")
+	if strings.TrimSpace(parsed.resendAPIURL) == "" {
+		parsed.resendAPIURL = "https://api.resend.com"
+	}
+	parsed.emailFrom = os.Getenv("CARRY_EMAIL_FROM")
+	trustedProxyCIDRs := os.Getenv("CARRY_TRUSTED_PROXY_CIDRS")
+	flags.StringVar(
+		&trustedProxyCIDRs,
+		"trusted-proxy-cidrs",
+		trustedProxyCIDRs,
+		"comma-separated reverse proxy CIDRs trusted to supply X-Forwarded-For",
+	)
 	if err := flags.Parse(arguments); err != nil {
 		return config{}, fmt.Errorf("parse flags: %w", err)
 	}
@@ -64,7 +87,37 @@ func parseConfig(arguments []string, stderr io.Writer) (config, error) {
 	if strings.TrimSpace(parsed.pkiDirectory) == "" {
 		return config{}, errors.New("PKI directory is required through --pki-dir or CARRY_PKI_DIR")
 	}
+	if strings.TrimSpace(parsed.identityRoot) == "" {
+		return config{}, errors.New("CARRY_IDENTITY_ROOT is required")
+	}
+	if strings.TrimSpace(parsed.resendAPIKey) == "" {
+		return config{}, errors.New("CARRY_RESEND_API_KEY is required")
+	}
+	if strings.TrimSpace(parsed.emailFrom) == "" {
+		return config{}, errors.New("CARRY_EMAIL_FROM is required")
+	}
+	parsedCIDRs, err := parseTrustedProxyCIDRs(trustedProxyCIDRs)
+	if err != nil {
+		return config{}, err
+	}
+	parsed.trustedProxyCIDRs = parsedCIDRs
 	return parsed, nil
+}
+
+func parseTrustedProxyCIDRs(value string) ([]netip.Prefix, error) {
+	if strings.TrimSpace(value) == "" {
+		return nil, nil
+	}
+	parts := strings.Split(value, ",")
+	prefixes := make([]netip.Prefix, 0, len(parts))
+	for _, part := range parts {
+		prefix, err := netip.ParsePrefix(strings.TrimSpace(part))
+		if err != nil {
+			return nil, fmt.Errorf("trusted proxy CIDR %q is invalid", strings.TrimSpace(part))
+		}
+		prefixes = append(prefixes, prefix.Masked())
+	}
+	return prefixes, nil
 }
 
 func parseBootstrapConfig(arguments []string, stderr io.Writer) (bootstrapConfig, error) {
@@ -124,6 +177,14 @@ func run(ctx context.Context, arguments []string, stdout io.Writer, stderr io.Wr
 	if err != nil {
 		return err
 	}
+	credentials, err := identity.ParseIdentityRoot(parsed.identityRoot)
+	if err != nil {
+		return fmt.Errorf("configure Identity root: %w", err)
+	}
+	resendSubmitter, err := newResendCodeSender(parsed.resendAPIURL, parsed.resendAPIKey, parsed.emailFrom)
+	if err != nil {
+		return fmt.Errorf("configure Resend: %w", err)
+	}
 	pool, err := carrypostgres.Open(ctx, parsed.databaseURL)
 	if err != nil {
 		return err
@@ -143,17 +204,64 @@ func run(ctx context.Context, arguments []string, stdout io.Writer, stderr io.Wr
 	}
 
 	store := carrypostgres.NewStore(pool)
-	memberRoutes, err := carryserver.NewMemberRoutes(
-		store, store, store, store, store, store, store, store, authority,
+	emailLogin, err := identity.NewEmailLogin(store, resendSubmitter, credentials)
+	if err != nil {
+		return fmt.Errorf("compose email login: %w", err)
+	}
+	firstSpace, err := space.NewFirstSpace(store)
+	if err != nil {
+		return fmt.Errorf("compose first Space: %w", err)
+	}
+	machineEnrollment, err := machine.NewEnrollment(store, authority)
+	if err != nil {
+		return fmt.Errorf("compose Machine enrollment: %w", err)
+	}
+	userAuthentication, err := carryserver.NewUserAuthentication(store, store, credentials)
+	if err != nil {
+		return fmt.Errorf("compose User authentication: %w", err)
+	}
+	userIdentityRoutes, err := carryserver.NewUserIdentityRoutes(
+		emailLogin,
+		store,
+		credentials,
+		carryserver.NewRequestSource(parsed.trustedProxyCIDRs),
+		store,
 	)
 	if err != nil {
-		return fmt.Errorf("compose member routes: %w", err)
+		return fmt.Errorf("compose User identity routes: %w", err)
+	}
+	userSpaceRoutes, err := carryserver.NewUserSpaceRoutes(firstSpace)
+	if err != nil {
+		return fmt.Errorf("compose User Space routes: %w", err)
+	}
+	userMachineRoutes, err := carryserver.NewUserMachineRoutes(machineEnrollment, store)
+	if err != nil {
+		return fmt.Errorf("compose User Machine routes: %w", err)
+	}
+	conversationRoutes, err := carryserver.NewConversationRoutes(store, store)
+	if err != nil {
+		return fmt.Errorf("compose Conversation routes: %w", err)
+	}
+	workRoutes, err := carryserver.NewWorkRoutes(store, store)
+	if err != nil {
+		return fmt.Errorf("compose Work routes: %w", err)
+	}
+	userRoutes, err := carryserver.NewUserRoutes(
+		userAuthentication,
+		userIdentityRoutes,
+		userSpaceRoutes,
+		userMachineRoutes,
+		conversationRoutes,
+		workRoutes,
+	)
+	if err != nil {
+		return fmt.Errorf("compose User routes: %w", err)
 	}
 	machineRoutes, err := carryserver.NewMachineRoutes(store, store)
 	if err != nil {
 		return fmt.Errorf("compose Machine routes: %w", err)
 	}
-	apiServer, err := carryserver.NewAPI(pool, memberRoutes, machineRoutes)
+	apiServer, err := carryserver.NewAPI(pool, userRoutes, machineRoutes)
 	if err != nil {
 		return fmt.Errorf("compose Carry API: %w", err)
 	}

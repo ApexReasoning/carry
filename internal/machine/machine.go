@@ -1,8 +1,10 @@
 package machine
 
 import (
+	"context"
 	"errors"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
@@ -14,6 +16,45 @@ var (
 	ErrIdempotencyConflict = errors.New("idempotency key refers to different enrollment")
 	ErrInvalidEnrollment   = errors.New("complete valid Machine enrollment is required")
 )
+
+// EnrollmentPersistence is the atomic Machine enrollment mutation consumed by Machine.
+type EnrollmentPersistence interface {
+	EnrollMachine(context.Context, EnrollMachineCommand) (MachineEnrollment, error)
+}
+
+type Enrollment struct {
+	persistence EnrollmentPersistence
+	authority   *CertificateAuthority
+}
+
+func NewEnrollment(persistence EnrollmentPersistence, authority *CertificateAuthority) (*Enrollment, error) {
+	if persistence == nil || authority == nil {
+		return nil, errors.New("Machine enrollment dependencies are required")
+	}
+	return &Enrollment{persistence: persistence, authority: authority}, nil
+}
+
+type EnrollmentRequest struct {
+	SpaceID          string
+	DisplayName      string
+	PublicKeyDER     []byte
+	EnrolledByUserID string
+	IdempotencyKey   string
+}
+
+func (enrollment *Enrollment) Enroll(ctx context.Context, request EnrollmentRequest) (MachineEnrollment, error) {
+	machineID := uuid.NewString()
+	issued, err := enrollment.authority.IssueMachineCertificate(machineID, request.PublicKeyDER, time.Now().UTC())
+	if err != nil {
+		return MachineEnrollment{}, ErrInvalidEnrollment
+	}
+	return enrollment.persistence.EnrollMachine(ctx, EnrollMachineCommand{
+		MachineID: machineID, SpaceID: request.SpaceID, DisplayName: request.DisplayName,
+		PublicKeyDER: request.PublicKeyDER, CertificatePEM: issued.CertificatePEM,
+		CertificateSerial: issued.Serial, EnrolledByUserID: request.EnrolledByUserID,
+		IdempotencyKey: request.IdempotencyKey,
+	})
+}
 
 type EnrollMachineCommand struct {
 	MachineID         string

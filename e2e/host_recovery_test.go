@@ -50,7 +50,7 @@ func TestInterruptedHostWorkContinuesWithNewAttempt(t *testing.T) {
 	}
 
 	address := freeAddress(t)
-	stopServer, serverLog := startServer(t, root, carryServer, address, databaseURL, pkiDirectory)
+	stopServer, serverLog, _ := startServer(t, root, carryServer, address, databaseURL, pkiDirectory)
 	defer stopServer()
 	serverURL := "https://" + address
 	waitForServer(t, serverURL, filepath.Join(pkiDirectory, "ca.pem"), serverLog)

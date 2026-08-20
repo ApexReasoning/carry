@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/ApexReasoning/carry/internal/identity"
+	"github.com/ApexReasoning/carry/internal/machine"
 	"github.com/ApexReasoning/carry/internal/work"
 )
 
@@ -311,14 +312,21 @@ func TestRetryWorkUsesAuthenticatedMemberAndIdempotency(t *testing.T) {
 func workTestAPI(t *testing.T, commands WorkCommands, queries WorkQueries) http.Handler {
 	t.Helper()
 	authority := testAuthority(t)
-	member, err := NewMemberRoutes(
+	member := testUserRoutes(t, authority)
+	authentication, err := NewUserAuthentication(
 		&recordingUserTokens{user: identity.AuthenticatedUser{UserID: "member-9"}},
-		unavailableBrowserSessions{}, emptyMemberships{}, &recordingMachineEnrollments{},
-		unavailableConversationCommands{}, unavailableConversationQueries{}, commands, queries, authority,
+		unavailableBrowserSessions{},
+		testIdentityCredentials(t),
 	)
 	if err != nil {
-		t.Fatalf("compose member routes: %v", err)
+		t.Fatalf("compose User authentication: %v", err)
 	}
+	workRoutes, err := NewWorkRoutes(commands, queries)
+	if err != nil {
+		t.Fatalf("compose Work routes: %v", err)
+	}
+	member.authentication = authentication
+	member.works = workRoutes
 	runStore := &recordingMachineRuns{}
 	machine, err := NewMachineRoutes(runStore, unavailableMachineConversations{})
 	if err != nil {
@@ -375,5 +383,4 @@ func (s *recordingWorkQueries) LoadWork(_ context.Context, command work.LoadComm
 	return s.details, s.loadErr
 }
 
-var _ MachineEnrollmentStore = (*recordingMachineEnrollments)(nil)
-var _ MachineRunStore = (*recordingMachineRuns)(nil)
+var _ machine.EnrollmentPersistence = (*recordingMachineEnrollments)(nil)

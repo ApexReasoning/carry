@@ -175,14 +175,22 @@ func conversationTestAPI(
 	queries ConversationQueries,
 ) http.Handler {
 	t.Helper()
-	member, err := NewMemberRoutes(
+	authority := testAuthority(t)
+	member := testUserRoutes(t, authority)
+	authentication, err := NewUserAuthentication(
 		&recordingUserTokens{user: identity.AuthenticatedUser{UserID: "member-private"}},
-		unavailableBrowserSessions{}, emptyMemberships{}, &recordingMachineEnrollments{},
-		commands, queries, unavailableWorkCommands{}, unavailableWorkQueries{}, testAuthority(t),
+		unavailableBrowserSessions{},
+		testIdentityCredentials(t),
 	)
 	if err != nil {
-		t.Fatalf("compose member routes: %v", err)
+		t.Fatalf("compose User authentication: %v", err)
 	}
+	conversationRoutes, err := NewConversationRoutes(commands, queries)
+	if err != nil {
+		t.Fatalf("compose Conversation routes: %v", err)
+	}
+	member.authentication = authentication
+	member.conversations = conversationRoutes
 	machine, err := NewMachineRoutes(&recordingMachineRuns{}, unavailableMachineConversations{})
 	if err != nil {
 		t.Fatalf("compose Machine routes: %v", err)

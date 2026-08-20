@@ -1,32 +1,35 @@
 package identity
 
 import (
-	"encoding/base64"
+	"bytes"
 	"testing"
 )
 
-func TestBrowserSessionSecretHasFullRandomEntropy(t *testing.T) {
+func TestBrowserSessionCredentialIsStableAndRejectsTampering(t *testing.T) {
 	t.Parallel()
 
-	first, err := NewBrowserSessionSecret()
+	credentials, err := NewCredentials(bytes.Repeat([]byte{7}, IdentityRootBytes))
 	if err != nil {
-		t.Fatalf("create first browser session: %v", err)
+		t.Fatalf("create Identity credentials: %v", err)
 	}
-	second, err := NewBrowserSessionSecret()
+	const sessionID = "11111111-1111-4111-8111-111111111111"
+	first, err := credentials.BrowserSessionCredential(sessionID)
 	if err != nil {
-		t.Fatalf("create second browser session: %v", err)
+		t.Fatalf("create browser session credential: %v", err)
 	}
-	if first.Secret == second.Secret {
-		t.Fatal("browser session secrets repeated")
-	}
-	decoded, err := base64.RawURLEncoding.DecodeString(first.Secret)
+	second, err := credentials.BrowserSessionCredential(sessionID)
 	if err != nil {
-		t.Fatalf("decode browser session secret: %v", err)
+		t.Fatalf("recreate browser session credential: %v", err)
 	}
-	if len(decoded) != BrowserSessionSecretBytes {
-		t.Fatalf("secret entropy bytes = %d, want %d", len(decoded), BrowserSessionSecretBytes)
+	if first != second {
+		t.Fatal("browser session credential was not replayable")
 	}
-	if first.Hash != HashBrowserSessionSecret(first.Secret) {
-		t.Fatal("browser session hash does not match secret")
+	parsed, ok := credentials.ParseBrowserSessionCredential(first)
+	if !ok || parsed != sessionID {
+		t.Fatalf("parsed browser session = %q, %t", parsed, ok)
+	}
+	tampered := first[:len(first)-1] + "A"
+	if _, ok := credentials.ParseBrowserSessionCredential(tampered); ok {
+		t.Fatal("tampered browser session credential was accepted")
 	}
 }

@@ -35,6 +35,7 @@ const listMemberships = `-- name: ListMemberships :many
 SELECT
     m.space_id,
     s.name,
+    m.can_manage_members,
     m.can_enroll_machines
 FROM space_memberships AS m
 INNER JOIN spaces AS s ON m.space_id = s.space_id
@@ -47,6 +48,7 @@ ORDER BY s.name, m.space_id
 type ListMembershipsRow struct {
 	SpaceID           string
 	Name              string
+	CanManageMembers  bool
 	CanEnrollMachines bool
 }
 
@@ -59,7 +61,12 @@ func (q *Queries) ListMemberships(ctx context.Context, userID string) ([]ListMem
 	var items []ListMembershipsRow
 	for rows.Next() {
 		var i ListMembershipsRow
-		if err := rows.Scan(&i.SpaceID, &i.Name, &i.CanEnrollMachines); err != nil {
+		if err := rows.Scan(
+			&i.SpaceID,
+			&i.Name,
+			&i.CanManageMembers,
+			&i.CanEnrollMachines,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

@@ -22,28 +22,28 @@ type Server struct {
 	readiness Readiness
 }
 
-// NewAPI composes member and Machine routes without merging their principals.
+// NewAPI composes User and Machine routes without merging their principals.
 func NewAPI(
 	readiness Readiness,
-	member *MemberRoutes,
+	user *UserRoutes,
 	machine *MachineRoutes,
 ) (*Server, error) {
-	if member == nil || machine == nil {
-		return nil, errors.New("member and Machine routes are required")
+	if user == nil || machine == nil {
+		return nil, errors.New("User and Machine routes are required")
 	}
-	return newServer(readiness, member, machine), nil
+	return newServer(readiness, user, machine), nil
 }
 
 func newServer(
 	readiness Readiness,
-	member *MemberRoutes,
+	user *UserRoutes,
 	machine *MachineRoutes,
 ) *Server {
 	server := &Server{readiness: readiness}
 	router := chi.NewRouter()
 	router.Get("/healthz", server.health)
 	router.Route("/v1", func(versionOne chi.Router) {
-		member.mount(versionOne)
+		user.mount(versionOne)
 		versionOne.Route("/host", machine.mount)
 	})
 	// Fetch-Metadata and Origin checks protect browser mutations while CLI and

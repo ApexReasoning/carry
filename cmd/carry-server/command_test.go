@@ -43,6 +43,22 @@ func TestParseConfigRejectsUnexpectedArguments(t *testing.T) {
 	}
 }
 
+func TestParseTrustedProxyCIDRsAcceptsIPv4AndIPv6AndRejectsMalformedValues(t *testing.T) {
+	t.Parallel()
+	prefixes, err := parseTrustedProxyCIDRs("10.0.0.0/8, 2001:db8:ffff::/48")
+	if err != nil {
+		t.Fatalf("parse trusted proxy CIDRs: %v", err)
+	}
+	if len(prefixes) != 2 || prefixes[0].String() != "10.0.0.0/8" || prefixes[1].String() != "2001:db8:ffff::/48" {
+		t.Fatalf("trusted proxy CIDRs = %#v", prefixes)
+	}
+	for _, invalid := range []string{"not-a-cidr", "10.0.0.0/8,"} {
+		if _, err := parseTrustedProxyCIDRs(invalid); err == nil {
+			t.Fatalf("invalid trusted proxy CIDRs %q were accepted", invalid)
+		}
+	}
+}
+
 func TestConcurrentBootstrapCredentialPublicationConverges(t *testing.T) {
 	t.Parallel()
 

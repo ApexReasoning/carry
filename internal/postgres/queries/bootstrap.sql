@@ -6,7 +6,7 @@ SELECT exists(SELECT 1 FROM spaces);
 
 -- name: LoadPreparedBootstrap :one
 SELECT
-    carry_user.display_name,
+    coalesce(carry_user.display_name, '') AS display_name,
     space.name AS space_name,
     membership.can_enroll_machines,
     user_token.token_hash,
@@ -24,15 +24,20 @@ WHERE
 
 -- name: CreateBootstrapUser :exec
 INSERT INTO carry_users (user_id, display_name)
-VALUES (sqlc.arg(user_id), sqlc.arg(display_name));
+VALUES (sqlc.arg(user_id), sqlc.arg(display_name)::text);
 
 -- name: CreateBootstrapSpace :exec
 INSERT INTO spaces (space_id, name)
 VALUES (sqlc.arg(space_id), sqlc.arg(name));
 
 -- name: CreateBootstrapMembership :exec
-INSERT INTO space_memberships (space_id, user_id, can_enroll_machines)
-VALUES (sqlc.arg(space_id), sqlc.arg(user_id), true);
+INSERT INTO space_memberships (
+    space_id,
+    user_id,
+    can_enroll_machines,
+    can_manage_members
+)
+VALUES (sqlc.arg(space_id), sqlc.arg(user_id), true, true);
 
 -- name: CreateUserToken :exec
 INSERT INTO user_tokens (token_id, user_id, token_hash, expires_at)
@@ -46,7 +51,7 @@ VALUES (
 -- name: AuthenticateUserToken :one
 SELECT
     token.user_id,
-    carry_user.display_name
+    coalesce(carry_user.display_name, '') AS display_name
 FROM user_tokens AS token
 INNER JOIN carry_users AS carry_user ON token.user_id = carry_user.user_id
 WHERE

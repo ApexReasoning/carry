@@ -7,13 +7,17 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sync"
 	"testing"
 	"time"
@@ -102,19 +106,27 @@ func startServer(
 	address string,
 	databaseURL string,
 	pkiDirectory string,
-) (func(), *lockedBuffer) {
+) (func(), *lockedBuffer, string) {
 	t.Helper()
+	captureFile := filepath.Join(t.TempDir(), "latest-email-code")
+	resendFixture := newResendFixture(t, captureFile)
 	serverCtx, cancel := context.WithCancel(t.Context())
 	serverLog := &lockedBuffer{}
 	serverCommand := exec.CommandContext(serverCtx, carryServer, "serve", "--listen", address)
 	serverCommand.Dir = root
+	identityRoot := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{3}, 32))
 	serverCommand.Env = append(os.Environ(),
 		"CARRY_DATABASE_URL="+databaseURL,
 		"CARRY_PKI_DIR="+pkiDirectory,
+		"CARRY_IDENTITY_ROOT="+identityRoot,
+		"CARRY_RESEND_API_KEY=test-restricted-key",
+		"CARRY_RESEND_API_URL="+resendFixture.URL,
+		"CARRY_EMAIL_FROM=Carry <login@example.com>",
 	)
 	serverCommand.Stdout = serverLog
 	serverCommand.Stderr = serverLog
 	if err := serverCommand.Start(); err != nil {
+		resendFixture.Close()
 		t.Fatalf("start carry-server: %v", err)
 	}
 	stopped := false
@@ -127,8 +139,58 @@ func startServer(
 		if err := serverCommand.Wait(); err != nil && serverCtx.Err() == nil {
 			t.Errorf("wait for carry-server: %v", err)
 		}
+		resendFixture.Close()
 	}
-	return stop, serverLog
+	return stop, serverLog, captureFile
+}
+
+func newResendFixture(t *testing.T, captureFile string) *httptest.Server {
+	t.Helper()
+	var mutex sync.Mutex
+	accepted := map[string][]byte{}
+	codePattern := regexp.MustCompile(`\b[0-9]{6}\b`)
+	return httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodPost || request.URL.Path != "/emails" ||
+			request.Header.Get("Authorization") != "Bearer test-restricted-key" {
+			http.Error(response, "rejected", http.StatusUnauthorized)
+			return
+		}
+		var body struct {
+			To   []string `json:"to"`
+			Text string   `json:"text"`
+		}
+		encoded, err := io.ReadAll(http.MaxBytesReader(response, request.Body, 64<<10))
+		if err != nil || json.Unmarshal(encoded, &body) != nil || len(body.To) != 1 {
+			http.Error(response, "invalid", http.StatusBadRequest)
+			return
+		}
+		key := request.Header.Get("Idempotency-Key")
+		mutex.Lock()
+		previous, exists := accepted[key]
+		if exists && !bytes.Equal(previous, encoded) {
+			mutex.Unlock()
+			http.Error(response, "idempotency conflict", http.StatusConflict)
+			return
+		}
+		accepted[key] = append([]byte(nil), encoded...)
+		mutex.Unlock()
+		code := codePattern.FindString(body.Text)
+		if code == "" {
+			http.Error(response, "missing code", http.StatusBadRequest)
+			return
+		}
+		temporary := captureFile + ".tmp"
+		if err := os.WriteFile(temporary, []byte(code), 0o600); err != nil || os.Rename(temporary, captureFile) != nil {
+			http.Error(response, "capture failed", http.StatusInternalServerError)
+			return
+		}
+		writeJSONFixture(response, map[string]string{"id": "resend-fixture-" + key})
+	}))
+}
+
+func writeJSONFixture(response http.ResponseWriter, value any) {
+	response.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(response).Encode(value)
 }
 
 func startWeb(
@@ -176,6 +238,36 @@ func startWeb(
 	return stop, webLog
 }
 
+func attachTestEmailIdentity(t *testing.T, databaseURL string, userID string, email string) {
+	t.Helper()
+	pool, err := pgxpool.New(t.Context(), databaseURL)
+	if err != nil {
+		t.Fatalf("open email Identity fixture database: %v", err)
+	}
+	defer pool.Close()
+	transaction, err := pool.Begin(t.Context())
+	if err != nil {
+		t.Fatalf("begin email Identity fixture: %v", err)
+	}
+	defer func() { _ = transaction.Rollback(t.Context()) }()
+	if _, err := transaction.Exec(t.Context(), `
+		delete from email_identities
+		where user_id = $2 and canonical_email <> $1
+	`, email, userID); err != nil {
+		t.Fatalf("remove prior email Identity fixture: %v", err)
+	}
+	if _, err := transaction.Exec(t.Context(), `
+		insert into email_identities (canonical_email, user_id)
+		values ($1, $2)
+		on conflict (canonical_email) do update set user_id = excluded.user_id
+	`, email, userID); err != nil {
+		t.Fatalf("attach email Identity fixture: %v", err)
+	}
+	if err := transaction.Commit(t.Context()); err != nil {
+		t.Fatalf("commit email Identity fixture: %v", err)
+	}
+}
+
 func resetProductJourneyFacts(t *testing.T, databaseURL string) {
 	t.Helper()
 	pool, err := pgxpool.New(t.Context(), databaseURL)
@@ -189,6 +281,8 @@ func resetProductJourneyFacts(t *testing.T, databaseURL string) {
 	}
 	defer func() { _ = transaction.Rollback(t.Context()) }()
 	for _, table := range []string{
+		"email_login_attempts",
+		"email_login_challenges",
 		"conversation_reply_claims",
 		"conversation_messages",
 		"conversations",

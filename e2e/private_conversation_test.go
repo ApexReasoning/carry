@@ -59,9 +59,10 @@ func TestMemberTalksPrivatelyAndDelegatesSharedWork(t *testing.T) {
 	if err := json.Unmarshal([]byte(bootstrapOutput), &bootstrap); err != nil {
 		t.Fatalf("decode bootstrap: %v", err)
 	}
+	attachTestEmailIdentity(t, databaseURL, bootstrap.UserID, "conversation@example.com")
 
 	serverAddress := freeAddress(t)
-	stopServer, serverLog := startServer(t, root, carryServer, serverAddress, databaseURL, pkiDirectory)
+	stopServer, serverLog, emailCaptureFile := startServer(t, root, carryServer, serverAddress, databaseURL, pkiDirectory)
 	defer stopServer()
 	serverURL := "https://" + serverAddress
 	waitForServer(t, serverURL, filepath.Join(pkiDirectory, "ca.pem"), serverLog)
@@ -108,7 +109,7 @@ func TestMemberTalksPrivatelyAndDelegatesSharedWork(t *testing.T) {
 		root,
 		[]string{
 			"CARRY_WEB_URL=" + webURL,
-			"CARRY_MEMBER_TOKEN=" + bootstrap.UserToken,
+			"CARRY_EMAIL_CAPTURE_FILE=" + emailCaptureFile,
 		},
 		"pnpm", "--dir", "apps/web", "exec", "playwright", "test", "e2e/private-conversation.spec.ts",
 	)

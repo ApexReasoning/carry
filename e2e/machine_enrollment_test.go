@@ -41,7 +41,7 @@ func TestMemberEnrollsAndRevokesIndependentMachine(t *testing.T) {
 	}
 
 	address := freeAddress(t)
-	stopServer, serverLog := startServer(t, root, carryServer, address, databaseURL, pkiDirectory)
+	stopServer, serverLog, _ := startServer(t, root, carryServer, address, databaseURL, pkiDirectory)
 	defer func() { stopServer() }()
 
 	serverURL := "https://" + address
@@ -107,7 +107,7 @@ func TestMemberEnrollsAndRevokesIndependentMachine(t *testing.T) {
 	}
 
 	stopServer()
-	stopServer, serverLog = startServer(t, root, carryServer, address, databaseURL, pkiDirectory)
+	stopServer, serverLog, _ = startServer(t, root, carryServer, address, databaseURL, pkiDirectory)
 	waitForServer(t, serverURL, filepath.Join(pkiDirectory, "ca.pem"), serverLog)
 	restarted := runHostUntilStarted(t, root, carry, hostEnvironment)
 	if !strings.Contains(restarted, machineCredential.MachineID) {

@@ -8,7 +8,7 @@ Carry 是团队可以长期托付工作的 AI 同事。
 
 Carry 不是聊天机器人、任务清单、工作流编辑器、Agent 管理平台或只面向研发团队的自动化工具。它的价值不是完成一次模型调用，而是让一份责任跨越时间、成员、工具、模型和机器后仍然可理解、可纠正、可继续。
 
-除明确标注为未来方向的段落外，本文件描述当前 M1 基线与 Node 5 结果检查合同。Nodes 6+ 的顺序和进入条件只由 `docs/implementation.md` 定义；未来方向不是当前 API、状态或用户承诺。
+除明确标注为未来方向的段落外，本文件描述当前 M1 基线与正在建设的 Node 6 邮箱身份/首个 Space 合同。后续 Node 的顺序和进入条件只由 `docs/implementation.md` 定义；未来方向不是当前 API、状态或用户承诺。
 
 ## 设计哲学：克制与自由
 
@@ -111,6 +111,16 @@ Work
 
 一个词只有同时拥有独立生命周期、持久身份、独立权限边界和明确用户价值时，才可以升级成新的产品对象。一个事实在某次判断中的用途不构成新对象；未来候选词及其进入顺序只在 `docs/implementation.md` 维护。
 
+## User 与 Browser Session
+
+官方 Carry Cloud 允许公开注册。Node 6 的第一条入口通过生产事务邮件发送一次性验证码，证明用户当前可以接收该邮箱的邮件；它不宣称 MFA、NIST AAL 或抗钓鱼能力。
+
+邮箱 proof 只建立或找回稳定 Carry User，并签发 Carry-owned、HttpOnly、可撤销的 Browser Session。新 User 可以暂时没有姓名和 Membership；系统不能从邮箱 local part、domain、相似名称或既有 Space 推断姓名、团队或权限。用户只有在验证后明确填写姓名和 Space 名并提交创建，才获得首个 Space Membership。
+
+验证码只在五分钟内有效，最多接受五次唯一错误尝试；resend 创建新验证码并永久使旧验证码失效。邮件 provider 接受请求不等于送达、进入 inbox 或已读，响应丢失保持 Unknown。OTP、Session 和 member bearer 不进入 URL、browser storage 或日志。
+
+当前 logout 只撤销准确 Browser Session；旧 cookie fail closed。现有 member bearer 和 operator bootstrap 只为已发布 CLI 过渡保留到 Node 11，不再是 Browser 或官方 Cloud onboarding truth。
+
 ## Space
 
 Space 是当前的团队边界，包含成员、团队权限、共同 Work 和允许的执行机器。外部连接尚未进入 M1。
@@ -197,6 +207,7 @@ Review identity 是绑定内部 understanding version 与内容 digest 的不透
 ## 未来产品方向（当前尚未实现）
 
 - 官方云端是主要产品形态，自托管是同一产品的部署选项；两者共享 User、Space、Membership、Browser Session 与隐私语义，不以共享 token 或无用户模式换取部署简单；
+- Google、GitHub、显式 method linking/recovery 和成员邀请按 `docs/implementation.md` 后续 Node 进入；相同邮箱不能让未来 provider identity 自动关联、合并 User 或产生 Membership；
 - 只有独立结果确实需要历史正文、独立引用及接受、修改或撤回生命周期时，才考虑 Result identity；
 - 第一条未来继续优先是 Work 的一个明确时间条件，不预建 Timer；
 - Pause、Close、Reopen、负责人转交、渠道、第三方能力和外部 Action 按 `docs/implementation.md` 的后续 journey 逐条重新设计。

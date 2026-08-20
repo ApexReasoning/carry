@@ -35,15 +35,17 @@ func TestOwnerReviewsResultProducedThroughNativeExecution(t *testing.T) {
 	bootstrapOutput := bootstrapCarry(t, root, carryServer, databaseURL)
 	resetProductJourneyFacts(t, databaseURL)
 	var bootstrap struct {
+		UserID    string `json:"user_id"`
 		SpaceID   string `json:"space_id"`
 		UserToken string `json:"user_token"`
 	}
 	if err := json.Unmarshal([]byte(bootstrapOutput), &bootstrap); err != nil {
 		t.Fatalf("decode bootstrap: %v", err)
 	}
+	attachTestEmailIdentity(t, databaseURL, bootstrap.UserID, "reviewer@example.com")
 
 	address := freeAddress(t)
-	stopServer, serverLog := startServer(t, root, carryServer, address, databaseURL, pkiDirectory)
+	stopServer, serverLog, emailCaptureFile := startServer(t, root, carryServer, address, databaseURL, pkiDirectory)
 	defer stopServer()
 	serverURL := "https://" + address
 	waitForServer(t, serverURL, filepath.Join(pkiDirectory, "ca.pem"), serverLog)
@@ -189,7 +191,7 @@ func TestOwnerReviewsResultProducedThroughNativeExecution(t *testing.T) {
 				root,
 				[]string{
 					"CARRY_WEB_URL=" + webURL,
-					"CARRY_MEMBER_TOKEN=" + bootstrap.UserToken,
+					"CARRY_EMAIL_CAPTURE_FILE=" + emailCaptureFile,
 					"CARRY_REVIEW_WORK_GOAL=Prepare a customer renewal recommendation",
 				},
 				"pnpm", "--dir", "apps/web", "exec", "playwright", "test", "e2e/result-review.spec.ts",

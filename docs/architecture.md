@@ -94,7 +94,7 @@ PostgreSQL 拥有事务、唯一 winner、lease、fence、幂等和恢复裁决�
 
 | Owner | 持久事实 | 当前消费者 |
 | --- | --- | --- |
-| Identity | 成员认证、User token、Browser Session | User API、Web、CLI |
+| Identity | User、邮箱 proof、User token、Browser Session | User API、Web、CLI |
 | Space | Membership、Machine enrollment 权限 | User API、Host enrollment |
 | Work | 目标、负责人、消息、当前理解、阶段结果检查与接受事实 | 成员、执行路径 |
 | Conversation | 成员与 Carry 的私人消息、reply claim、private-side Work consequence | 准确成员、受限 Machine claim |
@@ -115,9 +115,17 @@ PostgreSQL 拥有事务、唯一 winner、lease、fence、幂等和恢复裁决�
 
 ### 5.1 User
 
-成员 CLI 使用 User token。Web 用 User token 换取短期 HttpOnly Browser Session，避免 JavaScript 保存长期 bearer。
+User 是经过认证的人，不因认证自动成为任何 Space 的成员。Node 6 的邮箱方法先证明准确邮箱 possession：trim 后按严格 addr-spec 验证，整体 Unicode lowercase 形成该方法的 canonical key；不做 provider-specific dot、plus 或 alias 重写。该 key 只关联 email method，未来 Google/GitHub email 不能据此自动 linking 或 merge。
 
-User token 和 Browser Session 是两种 credential 表示，但都映射到同一成员身份。它们不能作为 Machine credential。
+邮箱 challenge 是 Identity 的短期内部事实，不是产品对象：六位十进制 code、五分钟 expiry、五次唯一错误尝试、六十秒 resend cooldown，且只有最新 challenge 有效。code 由随机 challenge identity 与 server-held root secret 经 domain-separated MAC 推导，数据库不保存 plaintext 或可离线枚举的裸 digest。PostgreSQL 原子裁决 request/verify idempotency、attempt、expiry、invalidation、single use 与唯一首次成功；exact replay 不重复消耗 attempt，也不产生第二个 User 或 Session。
+
+Resend 是官方 Cloud 的唯一 concrete 邮件 adapter。发送意图先持久化，网络 I/O 在事务外，以固定 recipient、payload 和 provider idempotency key 提交。challenge 只记录 prepared、accepted、rejected 或 unknown 这类 submission fact；Accepted 只证明 provider 接受，Unknown 只允许在 challenge 有效期和 Resend 相同-key窗口内重放完全相同请求。当前不建立 provider registry、Delivery owner、webhook 或 outbox framework。
+
+成功 verify 在同一权威 transaction 中建立或读取 User、消费 challenge 并建立一个 Browser Session。Session cookie credential 由稳定 session identity 与 server-keyed MAC 组成，服务端可以在 exact committed replay 中重现同一 credential；PostgreSQL 保存 session identity、User、expiry 与 revocation，不保存可直接使用的 secret。Cookie 使用 `__Host-`、Secure、HttpOnly、SameSite Strict 与 Path `/`，logout 撤销准确 Session，stale cookie fail closed。
+
+新 email User 在创建首个 Space 前允许没有 display name 和 Membership。`/v1/me` 的 User 与当前 Memberships 是 Web routing 的唯一事实；不增加 profile-completed、onboarding-state 或 default-Space。
+
+现有 User token 与 operator bootstrap 只为已发布 CLI 的过渡消费者保留到 Node 11。Browser 不再接受 token exchange；User token 和 Browser Session 都不能作为 Machine credential。
 
 ### 5.2 Machine
 
@@ -322,8 +330,10 @@ Codex 缓冲结束但缺少准确 terminal notification 时，只可有界只读
 
 User API 只表达成员旅程：
 
-- 建立/撤销 Browser Session；
-- 读取当前具名成员与 Spaces；
+- 请求/重发邮箱 code，并验证准确 challenge 以建立 Browser Session；
+- 撤销当前 Browser Session；
+- 读取当前 User 与 Spaces；
+- authenticated User 显式创建首个 Space；
 - 分页读取并幂等追加当前成员在一个 Space 中的私人 Conversation；
 - 创建 Work，分页列出轻量 Work summaries，并分页读取一份 Work 的有界消息历史；
 - 追加 Work Message；
@@ -374,6 +384,9 @@ Web 使用 `protocol/user/v1/openapi.yaml` 生成 client。CLI 与 Web 不复制
 
 ```text
 carry_users
+email_identities
+email_login_challenges
+email_login_attempts
 spaces
 space_memberships
 user_tokens
@@ -438,9 +451,13 @@ protocol/
 规则：
 
 - domain owner 不导入 HTTP、PostgreSQL 或 concrete Agent adapter；
-- adapter 实现消费者定义的窄接口；
-- PostgreSQL 实现完整 use-case transaction，不暴露 CRUD repository；
+- `cmd/carry-server` 只是 concrete composition root：构造 PostgreSQL、Identity/Space/Machine 行为、Resend transport、证书 authority 与 HTTP routes，不拥有业务规则或跨步骤应用决定；
+- `internal/server` 只是 inbound HTTP transport 与显式 route composition：验证 wire syntax、认证 credential、映射 status/cookie 并调用一个准确行为，不拥有验证码、重放、投递、首个 Space 或证书签发策略；
+- 一个 journey 确实需要多步应用编排时，由现有事实 owner 的 concrete behavior 负责；其 persistence 与外部 submit port 由消费它的 owner 定义，adapter 只实现该窄需求，不新增 `service`/`orchestrator` package 或 owner；
+- PostgreSQL 实现并保留完整 use-case transaction，不暴露 CRUD repository，也不把一个必须原子的决定拆成 server/domain 多次调用；
+- Work、Conversation 与 Run handler 如果只把一个 exact command 翻译给一个完整 PostgreSQL use case，可以直接调用它；不为形式对称增加 forwarding Service；
 - `cmd/carry-server` 与 `internal/cli` 显式组合实现；
+- Node 6 的 concrete Resend HTTP implementation 只留在 `cmd/carry-server`；一个 caller 和一个实现不赚得独立 adapter package、provider interface hierarchy、registry 或 fallback；
 - 不建立 common、utils、platform、integration、registry、resource、runtime、orchestrator 或 readmodel；
 - 删除最后一个消费者时同时删除 package、route、query、generated code、test 和文档。
 

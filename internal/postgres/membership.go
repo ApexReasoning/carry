@@ -15,7 +15,8 @@ func (s *Store) ListMemberships(ctx context.Context, userID string) ([]space.Mem
 	memberships := make([]space.Membership, 0, len(rows))
 	for _, row := range rows {
 		memberships = append(memberships, space.Membership{
-			SpaceID: row.SpaceID, Name: row.Name, CanEnrollMachines: row.CanEnrollMachines,
+			SpaceID: row.SpaceID, Name: row.Name,
+			CanManageMembers: row.CanManageMembers, CanEnrollMachines: row.CanEnrollMachines,
 		})
 	}
 	return memberships, nil

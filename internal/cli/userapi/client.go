@@ -152,6 +152,7 @@ func (client *Client) LoadMember(ctx context.Context) (Member, error) {
 		Spaces      []struct {
 			SpaceID           string `json:"space_id"`
 			Name              string `json:"name"`
+			CanManageMembers  bool   `json:"can_manage_members"`
 			CanEnrollMachines bool   `json:"can_enroll_machines"`
 		} `json:"spaces"`
 	}
@@ -162,6 +163,7 @@ func (client *Client) LoadMember(ctx context.Context) (Member, error) {
 	for _, membership := range wire.Spaces {
 		member.Spaces = append(member.Spaces, space.Membership{
 			SpaceID: membership.SpaceID, Name: membership.Name,
+			CanManageMembers:  membership.CanManageMembers,
 			CanEnrollMachines: membership.CanEnrollMachines,
 		})
 	}

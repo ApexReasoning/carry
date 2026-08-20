@@ -9,7 +9,7 @@ import {
   retryWork,
   type WorkDetails,
 } from "../../carry-api";
-import type { Member, WorkSummary } from "../../generated/types.gen";
+import type { User, WorkSummary } from "../../generated/types.gen";
 import {
   emptyWorkPage,
   mergeByID,
@@ -25,7 +25,7 @@ import {
   pendingRetryIdentity,
 } from "./work-pending";
 
-export function useWorkBoard(member: Member | null) {
+export function useWorkBoard(user: User | null) {
   const [spaceID, setSpaceID] = useState<string | null>(null);
   const [works, setWorks] = useState<Array<WorkSummary>>([]);
   const [hasEarlierWorks, setHasEarlierWorks] = useState(false);
@@ -38,9 +38,7 @@ export function useWorkBoard(member: Member | null) {
     let active = true;
     async function loadInitialSpace() {
       const initialSpaceID =
-        member?.spaces.length === 1
-          ? (member.spaces[0]?.space_id ?? null)
-          : null;
+        user?.spaces.length === 1 ? (user.spaces[0]?.space_id ?? null) : null;
       try {
         const page = initialSpaceID
           ? await listWorks(initialSpaceID)
@@ -60,7 +58,7 @@ export function useWorkBoard(member: Member | null) {
     return () => {
       active = false;
     };
-  }, [member]);
+  }, [user]);
 
   async function selectSpace(selectedSpaceID: string) {
     if (!selectedSpaceID) return;
@@ -123,9 +121,9 @@ export function useWorkBoard(member: Member | null) {
   }
 
   async function addWork(goal: string): Promise<boolean> {
-    if (!spaceID || !member) return false;
+    if (!spaceID || !user) return false;
     const identity = await pendingCreateIdentity(
-      member.user_id,
+      user.user_id,
       spaceID,
       goal,
     ).catch((caught: unknown) => {
@@ -144,10 +142,10 @@ export function useWorkBoard(member: Member | null) {
   }
 
   async function addMessage(text: string): Promise<boolean> {
-    if (!spaceID || !details || !member) return false;
+    if (!spaceID || !details || !user) return false;
     const workID = details.work.work_id;
     const identity = await pendingMessageIdentity(
-      member.user_id,
+      user.user_id,
       spaceID,
       workID,
       text,
@@ -167,12 +165,12 @@ export function useWorkBoard(member: Member | null) {
   }
 
   async function acceptCurrentReview(): Promise<void> {
-    if (!spaceID || !details || !member) return;
+    if (!spaceID || !details || !user) return;
     const workID = details.work.work_id;
     const reviewID = details.work.review_id;
     if (!details.work.needs_review || !reviewID) return;
     const identity = await pendingReviewIdentity(
-      member.user_id,
+      user.user_id,
       spaceID,
       workID,
       reviewID,
@@ -215,10 +213,10 @@ export function useWorkBoard(member: Member | null) {
   }
 
   async function retryCurrentWork(): Promise<void> {
-    if (!spaceID || !details || !member) return;
+    if (!spaceID || !details || !user) return;
     const workID = details.work.work_id;
     const identity = await pendingRetryIdentity(
-      member.user_id,
+      user.user_id,
       spaceID,
       workID,
     ).catch((caught: unknown) => {

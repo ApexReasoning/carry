@@ -111,16 +111,17 @@ Carry 通过明确区分当前产品、生成物、实验和历史来避免这�
 - `cmd/carry-server`：服务端二进制；
 - `cmd/carry`：成员 CLI 与 `carry host` 模式。
 
-入口只负责：
+入口只负责进程边界与 concrete composition：
 
-- 建立进程 `context` 和 signal cancellation；
-- 构造 CLI root；
-- 映射最终 exit code；
+- 建立进程 `context`、signal cancellation 和最终 exit code；
+- 解析浅层 operator 配置并获得进程资源；
+- 在一个可见位置静态构造 concrete adapter、现有 owner behavior 与 inbound routes；
+- 构造 CLI root 或 HTTP server；
 - 注入诊断版本。
 
 `carry` 的 Cobra adapter 位于 `internal/cli/`。root 在一个可见位置静态组合命令；下一层按 `login`、`host`、未来已经 earned 的 `work` 等用户命令组分包，同组叶子命令按行为拆文件。禁止 `init()` 注册、动态 command registry 和向所有命令暴露所有凭据/客户端的万能 Factory。
 
-`carry-server` 的操作面仍然较浅，继续使用标准库 `flag`；两个二进制不为形式对称共享 CLI framework。
+`carry-server` 的操作面仍然较浅，继续使用标准库 `flag`；`cmd/carry-server` 只保留 concrete composition 和 Resend HTTP implementation，不放 request/verify/replay、首个 Space 或 Machine certificate orchestration。两个二进制不为形式对称共享 CLI framework。
 
 业务规则不放在 `cmd/` 或 `internal/cli/`。
 
@@ -146,7 +147,7 @@ internal/
     └── userapi/
 ```
 
-`internal/cli/` 是具体 Carry CLI adapter，不是通用 ownership bucket。结构由 `docs/architecture.md` 决定，不由数据库表、HTTP route 或 UI 页面决定。
+`internal/cli/` 是具体 Carry CLI adapter，不是通用 ownership bucket。`internal/server/` 同样只是 inbound HTTP transport 与 route composition：它可以直接把一个准确 command 交给完整 PostgreSQL use case，但多步策略必须回到现有 owner，不能在 server 中建立第二个 application/service 层。结构由 `docs/architecture.md` 决定，不由数据库表、HTTP route 或 UI 页面决定。
 
 禁止新增：
 

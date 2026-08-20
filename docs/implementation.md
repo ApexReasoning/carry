@@ -166,16 +166,20 @@ Node 6 进入前仍保留一个明确迁移约束：旧 token-to-browser 与 CLI
 
 新用户可以通过生产事务邮件发送的一次性验证码建立稳定 Carry User，显式命名并创建第一个 Space，成为首位 active member；返回用户可以再次登录同一 User 并安全 logout。
 
-SMTP 或邮件 provider API 只负责投递，验证码负责邮箱 possession proof。官方云端使用一个 concrete production email provider；不建立邮件 provider registry。首版不保存成员密码。
+Resend HTTPS API 是官方 Cloud 的唯一 concrete production email transport；它只负责提交准确邮件，验证码负责邮箱 possession proof。一个 caller 和一个实现不赚得独立 adapter package、provider interface hierarchy、registry 或 fallback。首版不保存成员密码，也不把 email OTP 宣称为 MFA、NIST AAL 或抗钓鱼认证。
+
+Node 6 同时纠正服务端 owner boundary：`cmd/carry-server` 只静态组合 concrete 实现并保留 Resend HTTP；`internal/server` 只负责 inbound HTTP/route、syntax、Browser Session authentication、cookie 与 status；邮箱 request/verify/replay、code/session derivation 与 Resend outcome 编排属于 Identity，首个 Space command/digest/identity 属于 Space，Machine enrollment certificate/identity 编排属于 Machine。它们只使用现有 owner 在消费点定义的窄依赖，PostgreSQL 保留完整 atomic transaction；Work/Conversation/Run 的 exact command handler 继续直接调用完整 PostgreSQL use case，不建立 forwarding Service 或新 package/owner。
 
 ### 关闭证据
 
 - request、verify、resend、错误尝试、过期、single use、并发与 response-loss replay 有直接 Browser 证据；
-- 每次投递固定准确 recipient 与 challenge；provider accepted 不等于 delivered/read，response loss 不猜测成功或失败，也不盲目重发同一 challenge；
+- code 固定六位十进制、五分钟 expiry、五次唯一错误尝试与六十秒 resend cooldown；resend 创建新 challenge 并永久使旧 code 失效；
+- 邮箱经过 trim、严格 addr-spec validation 和整体 Unicode lowercase；不做 provider-specific dot、plus 或 alias 重写；
+- 每次投递固定准确 recipient、challenge、payload 与 provider idempotency key；Resend Accepted 不等于 delivered/read，response loss 不猜测成功或失败，只在 challenge 有效期内以相同 key 重放完全相同请求；
 - 不存在与存在的邮箱返回一致响应，限流保护地址、来源与投递信誉，验证码不进入日志或 browser storage；
 - Browser Session 由 Carry 签发、HttpOnly、可 logout/revoke，并在 stale cookie 下 fail closed；
 - Space 创建必须由用户显式发生，creator 获得当前旅程需要的 `can_manage_members` 与 `can_enroll_machines`，不建立 generic admin role；并发创建/重放不制造重复 Space；
-- 旧 token-to-browser bootstrap 不再是正常 Cloud human login truth。
+- 旧 token-to-browser bootstrap 不再是正常 Cloud human login truth；Browser exchange 和 token-entry UI 删除，现有 bearer/bootstrap 只为 CLI 过渡保留到 Node 11。
 
 ### 明确不做
 

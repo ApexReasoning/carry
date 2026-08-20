@@ -83,6 +83,8 @@ Agent prompt 代替服务端规则
 
 跨边界转换必须改变表示或验证新的事实。纯字段搬运且没有边界意义的转换应删除。
 
+服务端边界进一步固定为：`cmd/carry-server` 只做 concrete composition，`internal/server` 只做 HTTP syntax/authentication/cookie/status 与静态 route composition。需要 request/replay policy、identity/digest 构造、外部 outcome 编排或多步调用的行为属于现有 domain owner；owner 在消费点定义窄 persistence/submit interface，PostgreSQL adapter 仍用一个完整 transaction 实现必须原子的决定。一个 handler 如果只翻译一个 exact Work/Conversation/Run command，可以直接调用 PostgreSQL use case，不为层次对称添加转发 `Service`。
+
 ## 4. 名字必须直接说明行为
 
 好名字让调用点不需要跳进实现。
@@ -535,7 +537,8 @@ focused PostgreSQL test 必须使用真实数据库。数据库缺失导致的 s
 - route、method 和 path parameter 由 chi 明确声明；
 - 不混用 `http.ServeMux`、其他 router 或自建 route switch；
 
-- request 先验证 syntax，再交给 domain 验证 meaning；
+- request 先验证 wire syntax，再把 meaning、policy、derivation 与多步 orchestration 交给现有 owner；
+- HTTP 不生成 domain identity/digest、不裁决 replay 或 provider outcome；cookie credential 的 wire 编解码与 status mapping 仍属于 transport；
 - response 不泄漏数据库结构；
 - mutating endpoint 使用 idempotency identity；
 - concurrency conflict 与 validation failure 使用不同错误；

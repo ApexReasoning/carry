@@ -42,7 +42,7 @@ func (api conversationAPI) mount(router chi.Router) {
 }
 
 func (api conversationAPI) sendMessage(response http.ResponseWriter, request *http.Request) {
-	member, ok := currentMember(response, request)
+	member, ok := currentUser(response, request)
 	if !ok {
 		return
 	}
@@ -70,7 +70,7 @@ func (api conversationAPI) sendMessage(response http.ResponseWriter, request *ht
 }
 
 func (api conversationAPI) listMessages(response http.ResponseWriter, request *http.Request) {
-	member, ok := currentMember(response, request)
+	member, ok := currentUser(response, request)
 	if !ok {
 		return
 	}

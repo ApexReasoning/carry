@@ -4,22 +4,24 @@ import (
 	"context"
 	"encoding/base64"
 	"net/http"
-	"time"
 
 	"github.com/ApexReasoning/carry/internal/machine"
 	"github.com/google/uuid"
 )
 
-// MachineEnrollmentStore handles only member-authorized Machine enrollment
-// and revocation; it cannot report Host runtime state.
-type MachineEnrollmentStore interface {
-	EnrollMachine(context.Context, machine.EnrollMachineCommand) (machine.MachineEnrollment, error)
+// MachineEnrollment is the Machine owner behavior consumed by HTTP.
+type MachineEnrollment interface {
+	Enroll(context.Context, machine.EnrollmentRequest) (machine.MachineEnrollment, error)
+}
+
+// MachineRevocation is the complete PostgreSQL use case consumed directly by HTTP.
+type MachineRevocation interface {
 	RevokeMachine(context.Context, string, string, string) error
 }
 
-type memberMachineAPI struct {
-	store     MachineEnrollmentStore
-	authority *machine.CertificateAuthority
+type userMachineAPI struct {
+	enrollment MachineEnrollment
+	revocation MachineRevocation
 }
 
 type enrollMachineRequest struct {
@@ -33,8 +35,8 @@ type revokeMachineRequest struct {
 	MachineID string `json:"machine_id"`
 }
 
-func (api memberMachineAPI) enroll(response http.ResponseWriter, request *http.Request) {
-	user, ok := currentMember(response, request)
+func (api userMachineAPI) enroll(response http.ResponseWriter, request *http.Request) {
+	user, ok := currentUser(response, request)
 	if !ok {
 		return
 	}
@@ -55,17 +57,9 @@ func (api memberMachineAPI) enroll(response http.ResponseWriter, request *http.R
 		writeAPIError(response, http.StatusBadRequest, "public_key is invalid")
 		return
 	}
-	machineID := uuid.NewString()
-	issued, err := api.authority.IssueMachineCertificate(machineID, publicKeyDER, time.Now().UTC())
-	if err != nil {
-		writeAPIError(response, http.StatusBadRequest, "public_key is invalid")
-		return
-	}
-	enrollment, err := api.store.EnrollMachine(request.Context(), machine.EnrollMachineCommand{
-		MachineID: machineID, SpaceID: body.SpaceID, DisplayName: body.DisplayName,
-		PublicKeyDER: publicKeyDER, CertificatePEM: issued.CertificatePEM,
-		CertificateSerial: issued.Serial, EnrolledByUserID: user.UserID,
-		IdempotencyKey: idempotencyKey,
+	enrollment, err := api.enrollment.Enroll(request.Context(), machine.EnrollmentRequest{
+		SpaceID: body.SpaceID, DisplayName: body.DisplayName, PublicKeyDER: publicKeyDER,
+		EnrolledByUserID: user.UserID, IdempotencyKey: idempotencyKey,
 	})
 	if err != nil {
 		writeStoreError(response, err)
@@ -81,8 +75,8 @@ func (api memberMachineAPI) enroll(response http.ResponseWriter, request *http.R
 	})
 }
 
-func (api memberMachineAPI) revoke(response http.ResponseWriter, request *http.Request) {
-	user, ok := currentMember(response, request)
+func (api userMachineAPI) revoke(response http.ResponseWriter, request *http.Request) {
+	user, ok := currentUser(response, request)
 	if !ok {
 		return
 	}
@@ -94,7 +88,7 @@ func (api memberMachineAPI) revoke(response http.ResponseWriter, request *http.R
 		writeAPIError(response, http.StatusBadRequest, "Machine revocation identity is invalid")
 		return
 	}
-	if err := api.store.RevokeMachine(request.Context(), user.UserID, body.SpaceID, body.MachineID); err != nil {
+	if err := api.revocation.RevokeMachine(request.Context(), user.UserID, body.SpaceID, body.MachineID); err != nil {
 		writeStoreError(response, err)
 		return
 	}
