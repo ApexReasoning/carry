@@ -7,18 +7,23 @@ import (
 	"hash"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const (
-	MaxGoalBytes           = 2_000
-	MaxMessageBytes        = 60 * 1_024
-	MaxIdempotencyKeyBytes = 255
+	MaxGoalBytes            = 2_000
+	MaxMessageBytes         = 60 * 1_024
+	MaxIdempotencyKeyBytes  = 255
+	ListPageSize            = 50
+	MessagePageSize         = 50
+	MaxMessagePageTextBytes = 256 * 1_024
 )
 
 var (
 	ErrInvalidGoal         = errors.New("work goal must contain between 1 and 2000 bytes")
 	ErrInvalidMessage      = errors.New("work message must contain between 1 and 61440 bytes")
 	ErrInvalidIdempotency  = errors.New("idempotency key must contain between 1 and 255 bytes")
+	ErrInvalidCursor       = errors.New("work cursor is invalid")
 	ErrIdempotencyConflict = errors.New("idempotency key refers to different work input")
 	ErrRetryNotNeeded      = errors.New("work does not need retry")
 	ErrNotFound            = errors.New("work not found")
@@ -51,54 +56,94 @@ type RetryCommand struct {
 	IdempotencyKey string
 }
 
+type ListCommand struct {
+	UserID  string
+	SpaceID string
+	Before  string
+}
+
+type LoadCommand struct {
+	UserID        string
+	SpaceID       string
+	WorkID        string
+	BeforeMessage string
+}
+
 type Work struct {
-	WorkID            string
-	SpaceID           string
-	Goal              string
-	Lifecycle         Lifecycle
-	OwnerUserID       string
-	CreatorUserID     string
-	Understanding     string
-	NextStep          string
-	HasUnappliedInput bool
-	NeedsRetry        bool
-	CreatedAt         time.Time
+	WorkID             string
+	SpaceID            string
+	Goal               string
+	Lifecycle          Lifecycle
+	OwnerUserID        string
+	OwnerDisplayName   string
+	CreatorUserID      string
+	CreatorDisplayName string
+	Understanding      string
+	NextStep           string
+	HasUnappliedInput  bool
+	NeedsRetry         bool
+	CreatedAt          time.Time
+}
+
+type Summary struct {
+	WorkID             string
+	SpaceID            string
+	Goal               string
+	Lifecycle          Lifecycle
+	OwnerUserID        string
+	OwnerDisplayName   string
+	CreatorUserID      string
+	CreatorDisplayName string
+	HasUnappliedInput  bool
+	NeedsRetry         bool
+	CreatedAt          time.Time
+}
+
+type Page struct {
+	Works      []Summary
+	HasEarlier bool
 }
 
 type Message struct {
-	MessageID    string
-	WorkID       string
-	AuthorUserID string
-	Text         string
-	InputSeq     int64
-	CreatedAt    time.Time
+	MessageID         string
+	WorkID            string
+	AuthorUserID      string
+	AuthorDisplayName string
+	Text              string
+	InputSeq          int64
+	CreatedAt         time.Time
 }
 
 type Details struct {
-	Work     Work
-	Messages []Message
+	Work               Work
+	Messages           []Message
+	HasEarlierMessages bool
 }
 
 func NormalizeGoal(value string) (string, error) {
 	goal := strings.TrimSpace(value)
-	if len(goal) == 0 || len(goal) > MaxGoalBytes {
+	if len(goal) == 0 || len(goal) > MaxGoalBytes || !validText(goal) {
 		return "", ErrInvalidGoal
 	}
 	return goal, nil
 }
 
 func ValidateMessage(value string) error {
-	if strings.TrimSpace(value) == "" || len(value) > MaxMessageBytes {
+	if strings.TrimSpace(value) == "" || len(value) > MaxMessageBytes || !validText(value) {
 		return ErrInvalidMessage
 	}
 	return nil
 }
 
 func ValidateIdempotencyKey(value string) error {
-	if strings.TrimSpace(value) == "" || len(value) > MaxIdempotencyKeyBytes {
+	if strings.TrimSpace(value) == "" || len(value) > MaxIdempotencyKeyBytes || !validText(value) {
 		return ErrInvalidIdempotency
 	}
 	return nil
+}
+
+func validText(value string) bool {
+	return utf8.ValidString(value) && !strings.ContainsRune(value, 0)
 }
 
 func CreateDigest(spaceID string, creatorUserID string, goal string) [sha256.Size]byte {

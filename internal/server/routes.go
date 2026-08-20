@@ -3,7 +3,7 @@ package server
 import (
 	"errors"
 
-	"github.com/ApexReasoning/carry/internal/host"
+	"github.com/ApexReasoning/carry/internal/machine"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -30,7 +30,7 @@ func NewMemberRoutes(
 	conversationQueries ConversationQueries,
 	workCommands WorkCommands,
 	workQueries WorkQueries,
-	authority *host.CertificateAuthority,
+	authority *machine.CertificateAuthority,
 ) (*MemberRoutes, error) {
 	if tokens == nil || sessions == nil || memberships == nil || machines == nil ||
 		conversationCommands == nil || conversationQueries == nil ||

@@ -7,8 +7,9 @@ import (
 	"io"
 	"os"
 
-	"github.com/ApexReasoning/carry/internal/host/machinefile"
+	"github.com/ApexReasoning/carry/internal/cli/userapi"
 	"github.com/ApexReasoning/carry/internal/identity/memberfile"
+	"github.com/ApexReasoning/carry/internal/machine/machinefile"
 	"github.com/ApexReasoning/carry/internal/space"
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
@@ -47,11 +48,11 @@ func runEnroll(ctx context.Context, configDirectory string, output io.Writer, fl
 	if err != nil {
 		return err
 	}
-	connection, err := connectMember(member)
+	connection, err := userapi.FromCredential(member)
 	if err != nil {
 		return err
 	}
-	info, err := connection.loadInfo(ctx)
+	info, err := connection.LoadMember(ctx)
 	if err != nil {
 		return fmt.Errorf("load current member: %w", err)
 	}
@@ -62,7 +63,7 @@ func runEnroll(ctx context.Context, configDirectory string, output io.Writer, fl
 	if err != nil {
 		return err
 	}
-	enrollment, err := connection.enrollMachine(
+	enrollment, err := connection.EnrollMachine(
 		ctx,
 		pending.SpaceID,
 		pending.DisplayName,

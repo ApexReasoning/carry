@@ -73,7 +73,7 @@ func TestMigrateCreatesCurrentFactsAndRejectsUnearnedWorkLifecycle(t *testing.T)
 	if _, err := pool.Exec(ctx, `update works set lifecycle = 'paused' where work_id = $1`, created.WorkID); err == nil {
 		t.Fatal("unimplemented paused lifecycle was accepted")
 	}
-	details, err := store.LoadWork(ctx, bootstrap.UserID, bootstrap.SpaceID, created.WorkID)
+	details, err := store.LoadWork(ctx, work.LoadCommand{UserID: bootstrap.UserID, SpaceID: bootstrap.SpaceID, WorkID: created.WorkID})
 	if err != nil {
 		t.Fatalf("reload lifecycle fixture: %v", err)
 	}

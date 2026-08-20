@@ -17,8 +17,8 @@ import (
 	"time"
 
 	"github.com/ApexReasoning/carry/internal/conversation"
-	"github.com/ApexReasoning/carry/internal/host"
 	"github.com/ApexReasoning/carry/internal/identity"
+	"github.com/ApexReasoning/carry/internal/machine"
 	"github.com/ApexReasoning/carry/internal/run"
 	"github.com/ApexReasoning/carry/internal/space"
 	"github.com/ApexReasoning/carry/internal/work"
@@ -26,11 +26,16 @@ import (
 
 func TestEnrollMachineUsesAuthenticatedMemberAuthority(t *testing.T) {
 	t.Parallel()
+	const (
+		memberID  = "76fa247e-e9ef-4036-ac5d-87463cabb2ff"
+		spaceID   = "a30f0a9a-8cb2-4ae4-9a7e-ae85e207788a"
+		machineID = "38a0e783-2f61-4de4-a264-91fe1c099893"
+	)
 
 	authority := testAuthority(t)
-	tokens := &recordingUserTokens{user: identity.AuthenticatedUser{UserID: "member-1"}}
-	machines := &recordingMachineEnrollments{enrollment: host.MachineEnrollment{
-		MachineID: "machine-1", SpaceID: "space-1", CertificatePEM: []byte("machine-certificate"),
+	tokens := &recordingUserTokens{user: identity.AuthenticatedUser{UserID: memberID}}
+	machines := &recordingMachineEnrollments{enrollment: machine.MachineEnrollment{
+		MachineID: machineID, SpaceID: spaceID, CertificatePEM: []byte("machine-certificate"),
 	}}
 	publicKey, _, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -41,7 +46,7 @@ func TestEnrollMachineUsesAuthenticatedMemberAuthority(t *testing.T) {
 		t.Fatalf("marshal Machine public key: %v", err)
 	}
 	body := fmt.Sprintf(
-		`{"space_id":"space-1","display_name":"research-mac","public_key":%q}`,
+		`{"space_id":"`+spaceID+`","display_name":"research-mac","public_key":%q}`,
 		base64.StdEncoding.EncodeToString(publicKeyDER),
 	)
 	request := httptest.NewRequest(http.MethodPost, "/v1/machines/enroll", bytes.NewBufferString(body))
@@ -57,7 +62,7 @@ func TestEnrollMachineUsesAuthenticatedMemberAuthority(t *testing.T) {
 	if tokens.authenticatedToken != "member-token" {
 		t.Fatalf("authenticated token = %q", tokens.authenticatedToken)
 	}
-	if machines.command.EnrolledByUserID != "member-1" || machines.command.SpaceID != "space-1" {
+	if machines.command.EnrolledByUserID != memberID || machines.command.SpaceID != spaceID {
 		t.Fatalf("enrollment command = %#v", machines.command)
 	}
 	if machines.command.IdempotencyKey != "enroll-research-mac" {
@@ -117,11 +122,15 @@ func TestMachineClaimReturnsCompleteWorkContextWithoutSecondCredential(t *testin
 func TestMachineCommitBindsCertificateIdentity(t *testing.T) {
 	t.Parallel()
 
+	const (
+		runID     = "d293609c-6c02-4c70-97b2-e6ec5f8d96ac"
+		attemptID = "3b22d497-233c-4dcc-b496-a4a3f1c82f37"
+	)
 	authority, machineCertificate := testMachineCertificate(t, "machine-19")
 	runs := &recordingMachineRuns{}
 	request := httptest.NewRequest(
 		http.MethodPost,
-		"/v1/host/runs/run-7/attempts/attempt-7/understanding",
+		"/v1/host/runs/"+runID+"/attempts/"+attemptID+"/understanding",
 		bytes.NewBufferString(`{"fence":4,"base_understanding_version":2,"input_end_seq":5,"understanding":"Known","next_step":"Continue"}`),
 	)
 	request.TLS = verifiedMachineTLS(machineCertificate)
@@ -133,10 +142,30 @@ func TestMachineCommitBindsCertificateIdentity(t *testing.T) {
 	if response.Code != http.StatusNoContent {
 		t.Fatalf("status = %d, want %d; body = %s", response.Code, http.StatusNoContent, response.Body.String())
 	}
-	if runs.commit.MachineID != "machine-19" || runs.commit.RunID != "run-7" ||
+	if runs.commit.MachineID != "machine-19" || runs.commit.RunID != runID ||
 		runs.commit.BaseUnderstandingVersion != 2 {
 		t.Fatalf("commit = %#v", runs.commit)
 	}
+	assertNoStore(t, response)
+}
+
+func TestMachineMutationRejectsMalformedAuthorityPath(t *testing.T) {
+	t.Parallel()
+	authority, machineCertificate := testMachineCertificate(t, "machine-20")
+	runs := &recordingMachineRuns{}
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/host/runs/not-a-uuid/attempts/also-not-a-uuid/renew",
+		bytes.NewBufferString(`{"fence":1}`),
+	)
+	request.TLS = verifiedMachineTLS(machineCertificate)
+	response := httptest.NewRecorder()
+	testAPI(t, authority, &recordingUserTokens{}, &recordingMachineEnrollments{}, runs).
+		ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest || runs.renewRunID != "" {
+		t.Fatalf("malformed authority response = %d %s; renew Run = %q", response.Code, response.Body.String(), runs.renewRunID)
+	}
+	assertNoStore(t, response)
 }
 
 func verifiedMachineTLS(certificate *x509.Certificate) *tls.ConnectionState {
@@ -148,7 +177,7 @@ func verifiedMachineTLS(certificate *x509.Certificate) *tls.ConnectionState {
 
 func testAPI(
 	t *testing.T,
-	authority *host.CertificateAuthority,
+	authority *machine.CertificateAuthority,
 	tokens UserTokenAuthenticator,
 	machines MachineEnrollmentStore,
 	runs MachineRunStore,
@@ -188,20 +217,20 @@ func mustAPIWithReadiness(
 	return apiServer.Handler()
 }
 
-func testAuthority(t *testing.T) *host.CertificateAuthority {
+func testAuthority(t *testing.T) *machine.CertificateAuthority {
 	t.Helper()
 	authority, _ := testMachineCertificate(t, "authority-probe")
 	return authority
 }
 
-func testMachineCertificate(t *testing.T, machineID string) (*host.CertificateAuthority, *x509.Certificate) {
+func testMachineCertificate(t *testing.T, machineID string) (*machine.CertificateAuthority, *x509.Certificate) {
 	t.Helper()
 	now := time.Date(2026, time.August, 18, 16, 0, 0, 0, time.UTC)
-	bundle, err := host.CreatePKI([]string{"localhost"}, now)
+	bundle, err := machine.CreatePKI([]string{"localhost"}, now)
 	if err != nil {
 		t.Fatalf("create PKI: %v", err)
 	}
-	authority, err := host.LoadCertificateAuthority(bundle.CACertificatePEM, bundle.CAPrivateKeyPEM)
+	authority, err := machine.LoadCertificateAuthority(bundle.CACertificatePEM, bundle.CAPrivateKeyPEM)
 	if err != nil {
 		t.Fatalf("load authority: %v", err)
 	}
@@ -257,11 +286,11 @@ func (emptyMemberships) ListMemberships(context.Context, string) ([]space.Member
 }
 
 type recordingMachineEnrollments struct {
-	enrollment host.MachineEnrollment
-	command    host.EnrollMachineCommand
+	enrollment machine.MachineEnrollment
+	command    machine.EnrollMachineCommand
 }
 
-func (store *recordingMachineEnrollments) EnrollMachine(_ context.Context, command host.EnrollMachineCommand) (host.MachineEnrollment, error) {
+func (store *recordingMachineEnrollments) EnrollMachine(_ context.Context, command machine.EnrollMachineCommand) (machine.MachineEnrollment, error) {
 	store.command = command
 	return store.enrollment, nil
 }
@@ -274,6 +303,7 @@ type recordingMachineRuns struct {
 	claimMachineID string
 	claim          run.Claim
 	claimErr       error
+	renewRunID     string
 	commit         run.CommitCommand
 	finish         run.FinishCommand
 }
@@ -289,7 +319,14 @@ func (store *recordingMachineRuns) ClaimRun(_ context.Context, machineID string)
 	return store.claim, nil
 }
 
-func (*recordingMachineRuns) RenewRunAttempt(context.Context, string, string, string, int64) (time.Time, error) {
+func (store *recordingMachineRuns) RenewRunAttempt(
+	_ context.Context,
+	_ string,
+	runID string,
+	_ string,
+	_ int64,
+) (time.Time, error) {
+	store.renewRunID = runID
 	return time.Time{}, run.ErrStaleAttempt
 }
 
@@ -345,10 +382,10 @@ func (unavailableWorkCommands) RequestWorkRetry(context.Context, work.RetryComma
 
 type unavailableWorkQueries struct{}
 
-func (unavailableWorkQueries) ListWorks(context.Context, string, string) ([]work.Work, error) {
-	return nil, errors.New("not implemented")
+func (unavailableWorkQueries) ListWorks(context.Context, work.ListCommand) (work.Page, error) {
+	return work.Page{}, errors.New("not implemented")
 }
 
-func (unavailableWorkQueries) LoadWork(context.Context, string, string, string) (work.Details, error) {
+func (unavailableWorkQueries) LoadWork(context.Context, work.LoadCommand) (work.Details, error) {
 	return work.Details{}, errors.New("not implemented")
 }

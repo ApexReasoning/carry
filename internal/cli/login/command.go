@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/ApexReasoning/carry/internal/cli/userapi"
 	"github.com/ApexReasoning/carry/internal/identity/memberfile"
 	"github.com/spf13/cobra"
 )
@@ -38,7 +39,7 @@ func run(ctx context.Context, configDirectory string, output io.Writer, flags lo
 	if flags.serverURL == "" || flags.token == "" || flags.caCertificatePath == "" {
 		return errors.New("--server, --ca-cert, and --token are required")
 	}
-	serverURL, err := parseServerURL(flags.serverURL)
+	serverURL, err := userapi.ParseServerURL(flags.serverURL)
 	if err != nil {
 		return err
 	}
@@ -46,20 +47,20 @@ func run(ctx context.Context, configDirectory string, output io.Writer, flags lo
 	if err != nil {
 		return fmt.Errorf("read CA certificate: %w", err)
 	}
-	connection, err := newMemberHTTP(serverURL, string(caCertificatePEM), flags.token)
+	connection, err := userapi.New(serverURL.String(), string(caCertificatePEM), flags.token)
 	if err != nil {
 		return err
 	}
-	info, err := connection.loadInfo(ctx)
+	info, err := connection.LoadMember(ctx)
 	if err != nil {
 		return err
 	}
 	if err := memberfile.Save(configDirectory, memberfile.Credential{
-		ServerURL: serverURL, Token: flags.token, CACertificatePEM: string(caCertificatePEM),
+		ServerURL: serverURL.String(), Token: flags.token, CACertificatePEM: string(caCertificatePEM),
 		UserID: info.UserID,
 	}); err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintf(output, "Logged in as %s with %d Space(s)\n", info.UserID, len(info.Spaces))
+	_, _ = fmt.Fprintf(output, "Logged in as %s (%s) with %d Space(s)\n", info.DisplayName, info.UserID, len(info.Spaces))
 	return nil
 }

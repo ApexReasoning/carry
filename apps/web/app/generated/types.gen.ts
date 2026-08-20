@@ -16,7 +16,14 @@ export type Membership = {
 
 export type Member = {
   user_id: string;
+  display_name: string;
   spaces: Array<Membership>;
+};
+
+export type MachineEnrollment = {
+  machine_id: string;
+  space_id: string;
+  certificate_pem: string;
 };
 
 export type ConversationMessage = {
@@ -40,9 +47,28 @@ export type Work = {
   goal: string;
   lifecycle: "open";
   owner_user_id: string;
+  owner_display_name: string;
   creator_user_id: string;
+  creator_display_name: string;
   understanding: string;
   next_step: string;
+  has_unapplied_input: boolean;
+  /**
+   * An active member must explicitly request a fresh attempt
+   */
+  needs_retry: boolean;
+  created_at: string;
+};
+
+export type WorkSummary = {
+  work_id: string;
+  space_id: string;
+  goal: string;
+  lifecycle: "open";
+  owner_user_id: string;
+  owner_display_name: string;
+  creator_user_id: string;
+  creator_display_name: string;
   has_unapplied_input: boolean;
   /**
    * An active member must explicitly request a fresh attempt
@@ -55,6 +81,7 @@ export type WorkMessage = {
   message_id: string;
   work_id: string;
   author_user_id: string;
+  author_display_name: string;
   text: string;
   created_at: string;
 };
@@ -68,6 +95,10 @@ export type IdempotencyKey = string;
 export type BeforeConversationMessage = string;
 
 export type AfterConversationMessage = string;
+
+export type BeforeWork = string;
+
+export type BeforeWorkMessage = string;
 
 export type CreateBrowserSessionData = {
   body?: never;
@@ -149,6 +180,94 @@ export type LoadCurrentMemberResponses = {
 
 export type LoadCurrentMemberResponse =
   LoadCurrentMemberResponses[keyof LoadCurrentMemberResponses];
+
+export type EnrollMachineData = {
+  body: {
+    space_id: string;
+    display_name: string;
+    public_key: string;
+  };
+  headers: {
+    "Idempotency-Key": string;
+  };
+  path?: never;
+  query?: never;
+  url: "/v1/machines/enroll";
+};
+
+export type EnrollMachineErrors = {
+  /**
+   * Request rejected
+   */
+  400: ApiError;
+  /**
+   * Request rejected
+   */
+  401: ApiError;
+  /**
+   * Request rejected
+   */
+  403: ApiError;
+  /**
+   * Request rejected
+   */
+  409: ApiError;
+};
+
+export type EnrollMachineError = EnrollMachineErrors[keyof EnrollMachineErrors];
+
+export type EnrollMachineResponses = {
+  /**
+   * Machine enrolled or idempotently replayed
+   */
+  201: MachineEnrollment;
+};
+
+export type EnrollMachineResponse =
+  EnrollMachineResponses[keyof EnrollMachineResponses];
+
+export type RevokeMachineData = {
+  body: {
+    space_id: string;
+    machine_id: string;
+  };
+  path?: never;
+  query?: never;
+  url: "/v1/machines/revoke";
+};
+
+export type RevokeMachineErrors = {
+  /**
+   * Request rejected
+   */
+  400: ApiError;
+  /**
+   * Request rejected
+   */
+  401: ApiError;
+  /**
+   * Request rejected
+   */
+  403: ApiError;
+  /**
+   * Request rejected
+   */
+  404: ApiError;
+};
+
+export type RevokeMachineError = RevokeMachineErrors[keyof RevokeMachineErrors];
+
+export type RevokeMachineResponses = {
+  /**
+   * Machine revoked
+   */
+  200: {
+    status: "revoked";
+  };
+};
+
+export type RevokeMachineResponse =
+  RevokeMachineResponses[keyof RevokeMachineResponses];
 
 export type ListConversationMessagesData = {
   body?: never;
@@ -246,11 +365,17 @@ export type ListWorksData = {
   path: {
     spaceID: string;
   };
-  query?: never;
+  query?: {
+    before?: string;
+  };
   url: "/v1/spaces/{spaceID}/works";
 };
 
 export type ListWorksErrors = {
+  /**
+   * Request rejected
+   */
+  400: ApiError;
   /**
    * Request rejected
    */
@@ -265,10 +390,11 @@ export type ListWorksError = ListWorksErrors[keyof ListWorksErrors];
 
 export type ListWorksResponses = {
   /**
-   * Work visible in the Space
+   * Newest or cursor-relative Work summaries visible in the Space
    */
   200: {
-    works: Array<Work>;
+    works: Array<WorkSummary>;
+    has_earlier_works: boolean;
   };
 };
 
@@ -323,11 +449,17 @@ export type LoadWorkData = {
     spaceID: string;
     workID: string;
   };
-  query?: never;
+  query?: {
+    before?: string;
+  };
   url: "/v1/spaces/{spaceID}/works/{workID}";
 };
 
 export type LoadWorkErrors = {
+  /**
+   * Request rejected
+   */
+  400: ApiError;
   /**
    * Request rejected
    */
@@ -342,11 +474,15 @@ export type LoadWorkError = LoadWorkErrors[keyof LoadWorkErrors];
 
 export type LoadWorkResponses = {
   /**
-   * Work and its ordered member messages
+   * Work and its newest or cursor-relative ordered member message page
    */
   200: {
     work: Work;
+    /**
+     * Ordered complete messages with at most 262144 total UTF-8 text bytes
+     */
     messages: Array<WorkMessage>;
+    has_earlier_messages: boolean;
   };
 };
 

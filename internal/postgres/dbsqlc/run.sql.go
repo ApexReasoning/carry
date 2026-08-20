@@ -666,6 +666,42 @@ func (q *Queries) RunAttemptLeaseIsCurrent(ctx context.Context, attemptID string
 	return column_1, err
 }
 
+const selectRunInputEnd = `-- name: SelectRunInputEnd :one
+WITH upcoming AS (
+    SELECT input_seq, text
+    FROM work_messages
+    WHERE
+        work_id = $2
+        AND input_seq >= $1
+        AND input_seq <= $3
+    ORDER BY input_seq
+    LIMIT 32
+), candidates AS (
+    SELECT
+        input_seq,
+        sum(octet_length(text)) OVER (
+            ORDER BY input_seq ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        ) AS text_bytes
+    FROM upcoming
+)
+SELECT coalesce(max(input_seq), $1)::bigint
+FROM candidates
+WHERE text_bytes <= 262144
+`
+
+type SelectRunInputEndParams struct {
+	InputStartSeq int64
+	WorkID        string
+	InputHeadSeq  int64
+}
+
+func (q *Queries) SelectRunInputEnd(ctx context.Context, arg SelectRunInputEndParams) (int64, error) {
+	row := q.db.QueryRow(ctx, selectRunInputEnd, arg.InputStartSeq, arg.WorkID, arg.InputHeadSeq)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const succeedRun = `-- name: SucceedRun :execrows
 UPDATE runs
 SET state = 'succeeded', completed_at = clock_timestamp()

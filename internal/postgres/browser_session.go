@@ -57,14 +57,14 @@ func (s *Store) CreateBrowserSession(
 
 func (s *Store) AuthenticateBrowserSession(ctx context.Context, secret string) (identity.AuthenticatedUser, error) {
 	digest := identity.HashBrowserSessionSecret(secret)
-	userID, err := s.queries.AuthenticateBrowserSession(ctx, digest[:])
+	user, err := s.queries.AuthenticateBrowserSession(ctx, digest[:])
 	if errors.Is(err, pgx.ErrNoRows) {
 		return identity.AuthenticatedUser{}, identity.ErrUnauthenticated
 	}
 	if err != nil {
 		return identity.AuthenticatedUser{}, fmt.Errorf("authenticate browser session: %w", err)
 	}
-	return identity.AuthenticatedUser{UserID: userID}, nil
+	return identity.AuthenticatedUser{UserID: user.UserID, DisplayName: user.DisplayName}, nil
 }
 
 func (s *Store) RevokeBrowserSession(ctx context.Context, secret string) error {

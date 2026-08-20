@@ -136,228 +136,48 @@ M4 V1 closure       Node 12
 
 Node 不是 package 或 migration 批次，而是用户结果。默认一到三个工作日；第三天仍不能关闭时应删减或拆分。
 
-## 7. 当前简化切割
+## 7. 当前切割：M1 post-close correction
 
-Node 3 recovery 进入实现后出现了约 1,800 行未提交扩张：native evidence、Resume/Discard、额外 Host API、server retention 和 adapter lifecycle。用户旅程只要求“Host 挂了以后 Work 能继续”，这些概念没有被赚得。
-
-因此在继续 Node 3 前执行一次全仓 simplification cut，并按 Milestone 标准做三门审查。
+M1 已完成，但 post-close 审计发现两处会破坏既有承诺的边界遗漏：无界 Work 输入可以产生 Host 永远无法解码的 Run claim；authenticated Work GET 没有统一禁止缓存。用户批准在进入 Node 5 前完成一次 correction/beautification cut，不增加产品概念。
 
 ### 用户结果
 
-已有成员、Work、Machine、Pi/Codex 旅程保持可用；内部路径变短，普通成员和 public API 不再承担执行实现概念。
-
-### 允许修改
-
-- 五份 canonical 文档；
-- Identity/Space/Work/Run/Machine 当前 schema 与 migrations；
-- PostgreSQL queries、Store 和真实并发测试；
-- User/Host server routes；
-- Host worker 与 CLI composition；
-- User OpenAPI、generated Web client、Web/CLI tests；
-- Node 0–2 public-process E2E；
-- 删除 obsolete files。
+合法 Work 无论积累多少消息都可按有界连续 ranges 继续；撤权或 sign-out 后旧 authenticated response 不由缓存返回；Work 列表和消息历史有界分页且显示准确成员名称；有限或长期责任都可由自然语言明确委托。
 
 ### 必须完成
 
-1. 删除 RuntimeObservation persistence、report/status API 与 CLI status；
-2. Host 启动时本地选择一个 concrete executor，不向服务端报告 Runtime；
-3. Machine claim 直接创建 Run + Attempt，删除 background coordinator 与 pending Run；
-4. Claim 直接返回 Work context，删除 Agent API audience；
-5. 删除 Agent credential 与 writer token；Machine mTLS + exact Attempt/fence/lease 是当前 authority；
-6. current understanding 直接属于 Work，删除 revision rows；
-7. goal 不再重复为 tagged Agent input；执行上下文只传 goal、previous understanding 和 new messages；
-8. User API 隐藏 sequence/version，改为简单 `has_unapplied_input` 表达；
-9. 删除重复 `carry version`，保留 `--version`；
-10. 保留 Machine enrollment/start/revoke，删除没有 admission consumer 的 status/report surface；
-11. 恢复前不实现 native Session evidence、Resume、Discard 或 adapter archive lifecycle。
-
-### 成功证据
-
-- current schema 只有当前 owner 的表；
-- claim/recovery/commit 是清楚的 PostgreSQL transactions；
-- 并发 claim 一个 winner；
-- stale/expired Attempt 不能 renew、commit、finish；
-- Work 执行期间的新消息不会被旧 Run 覆盖；
-- Pi/Codex 各自完成相同 conformance journey；
-- CLI、Web、server 重启和 public-process E2E 通过；
-- `make check` 通过；
-- 三门独立审查无 blocker。
-
-### 明确不做
-
-- 新产品功能；
-- 原生 Session recovery；
-- Agent direct tools；
-- Result/Question/Timer/Conversation/Channel/Action/Artifact 实现；
-- provider routing 或 registry；
-- migration compatibility branch；
-- 修改代码迎合把 TypeScript 路径错误交给 `go test` 的外部 runner。
-
-## 8. Node 0：Foundation 与 Machine enrollment — complete
-
-### 用户结果
-
-两个二进制可运行；成员可以为 Space enrollment Machine，并用独立 Machine mTLS 启动 Host。
-
-### 简化后的合同
-
-- Identity 证明成员；
-- Space 判断 enrollment/revocation 权限；
-- Machine 保存 durable execution identity；
-- Host 只在本地 Diagnose executor；
-- 不保存 Runtime observation 或 status projection。
-
-### 保留证据
-
-- enrollment response loss 复用同一 idempotency identity；
-- private key 与 pending identity 在请求前以 `0600` 保存；
-- Host 不使用成员 token；
-- revoked Machine 不能继续执行；
-- 两个二进制和边界检查通过。
-
-## 9. Node 1：First durable Work — complete
-
-### 用户结果
-
-成员通过 CLI 或最薄 Web 创建、查看并补充一份重启后仍存在的 Work。
-
-### 合同
-
-Work 拥有 goal、owner、messages 与 current understanding。内部 sequence 只用于 PostgreSQL ordering/CAS，不进入 User API。
-
-### 保留证据
-
-- create/message 幂等；
-- 并发消息获得连续顺序；
-- 开放 Work 恰有一个负责人；
-- Web 不保存 JavaScript 可读长期 bearer；
-- unsafe cross-origin write 被拒绝；
-- PostgreSQL 重启后事实不变。
-
-## 10. Node 2：Native execution parity — complete after simplification
-
-### 用户结果
-
-Pi 与 Codex 都可以在同一合同下推进 Work；Work 不按 provider、Runtime、Git 或内容分类。
-
-### 简化后的主流程
-
-```text
-Machine claim
-→ PostgreSQL 创建 active Run + Attempt
-→ Claim 返回 immutable Work context
-→ one concrete adapter Execute
-→ strict understanding/next_step decode
-→ Machine fenced Commit 更新 Work
-```
-
-Host 启动时选择一个可用 executor。claim 后不自动 fallback。Pi/Codex 保留各自 native protocol，只共享 Diagnose、Execute 和 conformance behavior。
-
-### 保留证据
-
-- strict model output 才能形成 candidate update；
-- 只有 PostgreSQL fenced Commit 才修改 Work；
-- Codex terminal 无法证明时保持 Unknown；
-- current Attempt 不请求 repository capability；
-- core/schema/claim 没有 provider/runtime/model/session 字段；
-- Pi/Codex live canary 继续有效。
-
-## 11. Node 3：Host interruption recovery
-
-### 用户结果
-
-Host 失败后新的 Attempt 从持久 Work 安全继续，旧 Host 不能晚到提交。
-
-### 主流程
-
-```text
-active Attempt lease expires
-→ next Machine claim locks the Run
-→ old Attempt becomes expired
-→ fence increases
-→ new Attempt receives the same fixed Work context
-→ fresh Execute
-→ only new fence may commit
-```
-
-### 实现顺序
-
-1. expired lease 不能 renew；
-2. claim 原子 recovery rotation；
-3. concurrent recovery 单 winner；
-4. late renew/commit/finish rejection；
-5. public-process Host interruption E2E。
-
-### 明确不做
-
-- native Session evidence、resume、archive 或 cleanup protocol；
-- 接管运行中的 turn；
-- Agent credential rotation；
-- provider checkpoint/event abstraction；
-- failed/unknown Run 自动重试；成员只能在 Work 上显式 `Try again`；
-- claim 后切换 adapter。
+1. 新 Run 最多固定 32 条、合计 256 KiB Work Message；成功只推进该 range，余量由后续 Run 无遗漏继续；recovery 保持原 range。
+2. Host 严格解码有界 claim，overflow、unknown field 与 trailing JSON fail closed。
+3. Work list 返回最多 50 条轻量 summaries；Work detail 消息页最多 50 条且文本合计最多 256 KiB；exclusive cursor 绑定准确 Space/Work；删除 list N+1。
+4. member 与 Machine credential surfaces 统一 `Cache-Control: no-store`。
+5. Machine 事实与 PKI 归入既有 `internal/machine` owner；Host 只保留本地执行。
+6. User OpenAPI 覆盖现有 Machine enrollment/revocation，并返回当前成员及 Work owner/author display name；CLI member transport收敛到一个窄 User API adapter，Machine mTLS 保持独立。
+7. Web 可以加载更早 Work/消息，只显示数据库证明的等待事实；pending storage runtime-validated 且 read-back verified。
+8. Work/Run 文本在进入 PostgreSQL 前拒绝 invalid UTF-8 与 NUL；Machine route UUID fail closed。
+9. 删除被替代的代码、测试 plumbing 和重复 canonical prose；不削弱现有 authority/privacy evidence。
 
 ### 关闭证据
 
-- recovery 总是增加 fence；
-- expired lease 永远不能复活；
-- 旧 Host 三种 mutation 全部被拒绝；
-- 新 Attempt 从 Work context fresh Execute；
-- failed/unknown 保持 terminal，且只有 active member 的幂等 `Try again` 允许一个 fresh Run；
-- User API 只公开 derived `needs_retry`，不公开 outcome、Run 或 retry generation；
-- recovery 前后 fixed Work context 完全相同；
-- 没有 provider/runtime/session state 进入 core。
+- 真实 PostgreSQL 证明 count/byte range continuation、cursor isolation、跨 Machine recovery 和 stale writer rejection；
+- HTTP/Host tests 证明 no-store、strict claim decode 与 bounded responses；
+- generated protocol clean，Web/CLI/Product journeys 通过；
+- `make check`、聚焦 review、普通 correction commit、push 与 CI 成功。
 
-## 12. Node 4：Private Conversation — complete
+### 明确不做
 
-### 用户结果
+Node 5、Result/Needs You、native Session recovery、Agent direct tools、新 owner/API audience、provider registry、全局 Web state/router/query framework，以及为该切割新增 compatibility layer。
 
-成员在 Web 中选择一个 Space 后私聊 Carry。普通问题得到一条私人回复；清晰的自然语言委托直接、幂等创建一份共享 Work，并在私人回复中提供入口。同一 Space 的其他成员看不到私人原文。
+## 8. 已完成基线：M0 与 M1
 
-### 进入原则
+详细 Node 关闭记录属于 Git/PR 历史；当前稳定行为由 Product、Architecture、协议和测试定义。
 
-这条 journey 已经证明独立隐私、参与者和 message lifecycle，因此建立 Conversation owner。第一条旅程每个 `(Space, member)` 只有一个内部 Conversation，Carry 是隐含参与者；不建立通用 Message package、Work Offer、Question 或多个可命名 Conversation。
+- **Node 0 — Foundation/Machine enrollment:** 发布 `carry-server` 与 `carry`；成员以 User identity enrollment/revoke Machine；Host 只使用独立 Machine mTLS；private key 与 pending enrollment identity 先以 `0600` 保存；Runtime diagnosis 只在本地。
+- **Node 1 — First durable Work:** CLI/Web 可幂等创建、读取和补充 Work；PostgreSQL 保持消息顺序与重启后连续性；Web 用 HttpOnly Browser Session，不保存长期 bearer；内部 sequence/CAS 不进入 User API。
+- **Node 2 — Native execution parity:** Pi/Codex 保留原生 adapter，只共享 Carry-owned Execute/Reply 合同；strict output 只有经 Machine fenced commit 才能修改 owner facts；核心不保存 provider/runtime/model/session。
+- **Node 3 — Host interruption recovery:** expired Attempt 永不复活；新 Machine/Attempt 增加 fence 并取得相同 fixed Run range；旧 Machine renew/commit/finish 均失败；Failed/Unknown 只由成员幂等 `Try again` 开启 fresh Run。
+- **Node 4 — Private Conversation:** 每个 `(Space, member)` 一个私人 Conversation、一个 outstanding turn；User API 与 Agent context 有界；exact Machine claim/fence/lease 才能读 fixed context；reply-once commit 可原子创建至多一份 Work，但 Work 不保存私人 source、digest 或 transcript；Browser 只保存随机 request key并 fail-closed sign-out。
 
-Space-enrolled Machine 是该 Space 的受信 Carry 执行基础设施。它只能通过 exact private reply claim、current fence 和 unexpired database-time lease 读取一段有界 fixed context；没有通用 Machine Conversation list/read API。要求连 Space 管理者控制的 Host 都无法读取私人内容，需要另一条成员专属或端到端加密旅程。
-
-当前每个 Conversation 同时只接受一个尚未回复的 member turn。相同 request replay 返回原消息；不同新消息在 Carry 回复前冲突。queued follow-up、reply graph、streaming 和成员 CLI chat 不进入本 Node。
-
-Agent 只解释自然语言并返回严格 `reply` 与可空 `delegation_goal`。actor、creator、owner、Space、idempotency 和 authority 只能来自 authenticated source member、当前 Membership 和 PostgreSQL；清晰委托不增加统一确认步骤，含糊内容只得到私人澄清。
-
-### 固定界限
-
-- member/reply text 各最多 16 KiB UTF-8；
-- private Agent context 最多 32 条完整消息且最多 256 KiB；
-- User API 每页最多 50 条，支持 newest initial page 与 before/after cursor；
-- Web 只持久保存随机 pending request key，不保存私人文本或 deterministic text digest；
-- Work 不保存 Conversation/message identity、private digest 或可反向读取的 source relation；
-- Run 仍只拥有 Work 推进，不泛化成 Work/Conversation union；
-- 不建立 deletion/retention、summary、provider Session 或 native resume。
-
-### 实现顺序
-
-1. private Conversation admission/read：Membership、连续顺序、请求幂等、单一 outstanding turn、分页与 same-Space negative privacy；
-2. private reply execution：Machine claim/renew/recovery、fixed context、Pi/Codex strict reply parity、reply-once commit；
-3. explicit delegation：reply 与至多一份 Work 在同一事务提交，source member 成为 creator/owner，只保存 private-side Work link；
-4. Web journey：pending-key reconciliation、polling、disabled composer、Work link、reload 与 fail-closed sign-out。
-
-### 关闭证据
-
-- 同一 member request key 与文本返回同一消息，不同文本冲突；
-- pending reply 存在时不同 POST 冲突，消息顺序在并发下连续；
-- same-Space member、former member、cross-Space caller 和 Work query 都不能读取私人原文；
-- private reply 并发 claim 一个 winner，recovery 增加 fence 并返回 byte-equivalent fixed context；
-- stale、expired、revoked 或 cross-Space Machine 不能 renew/首次 commit；
-- first commit 需要 live lease；同 Machine/fence/output digest 的 completed replay 在 Machine 与 member 仍 active 时返回原 reply/Work，不需要旧 lease且不产生第二后果；
-- 普通问题不创建 Work；同一明确 source message 的并发/retry commit 只创建一个 Work；
-- member removal before commit 同时阻止 reply 与 Work；
-- Agent 不能伪造 actor、owner、Space、idempotency 或权限；unknown fields fail closed；
-- Work API、Run context、日志与 generated User protocol 无私人 source relation/text；
-- initial transcript 与 polling 有界，browser storage 无私人文本或其 deterministic digest；
-- sign-out 同时隐藏 Conversation 与 Work；
-- Pi 与 Codex 通过相同 private-reply conformance；
-- real PostgreSQL focused tests、`make check-go`、`make check-web`、`make check-product` 和 `make check` 通过；
-- M1 boundary 三门独立 review 无 blocker。
+M1 基线明确不包含 native Session recovery、Agent credential/API、provider routing、Work Offer、queued private turns、retention lifecycle 或 Work/Conversation target union。
 
 ## 13. Node 5：结果检查与 Needs You
 

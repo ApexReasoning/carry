@@ -315,10 +315,15 @@ textarea::placeholder {
   align-items: center;
   gap: 1rem;
 }
+.member-name,
 .space-name {
   color: var(--muted);
   font-size: 0.9rem;
   font-weight: 600;
+}
+.member-name {
+  padding-right: 1rem;
+  border-right: 1px solid var(--line);
 }
 .space-picker {
   display: flex;

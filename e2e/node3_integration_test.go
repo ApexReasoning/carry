@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ApexReasoning/carry/internal/host/machinefile"
+	"github.com/ApexReasoning/carry/internal/machine/machinefile"
 	carrypostgres "github.com/ApexReasoning/carry/internal/postgres"
 )
 
@@ -83,18 +83,19 @@ func TestInterruptedHostWorkContinuesWithNewAttempt(t *testing.T) {
 	firstPrompt := filepath.Join(temporary, "first-attempt-prompt.json")
 	secondPrompt := filepath.Join(temporary, "second-attempt-prompt.json")
 	terminalSelected := filepath.Join(temporary, "terminal-attempt-selected")
-	hostEnvironment := append(clientEnvironment,
-		"PATH="+binDirectory,
-		"CARRY_FAKE_PI_FIRST_STARTED="+firstStarted,
-		"CARRY_FAKE_PI_FIRST_SELECTED="+firstSelected,
-		"CARRY_FAKE_PI_FIRST_PROMPT="+firstPrompt,
-		"CARRY_FAKE_PI_SECOND_PROMPT="+secondPrompt,
-		"CARRY_FAKE_PI_TERMINAL_SELECTED="+terminalSelected,
-	)
+	agentEnvironment := []string{
+		"PATH=" + binDirectory,
+		"CARRY_FAKE_PI_FIRST_STARTED=" + firstStarted,
+		"CARRY_FAKE_PI_FIRST_SELECTED=" + firstSelected,
+		"CARRY_FAKE_PI_FIRST_PROMPT=" + firstPrompt,
+		"CARRY_FAKE_PI_SECOND_PROMPT=" + secondPrompt,
+		"CARRY_FAKE_PI_TERMINAL_SELECTED=" + terminalSelected,
+	}
+	firstHostEnvironment := append(append([]string{}, clientEnvironment...), agentEnvironment...)
 
 	firstHost := exec.Command(carry, "host", "start")
 	firstHost.Dir = root
-	firstHost.Env = append(os.Environ(), hostEnvironment...)
+	firstHost.Env = append(os.Environ(), firstHostEnvironment...)
 	firstLog := &lockedBuffer{}
 	firstHost.Stdout = firstLog
 	firstHost.Stderr = firstLog
@@ -114,15 +115,16 @@ func TestInterruptedHostWorkContinuesWithNewAttempt(t *testing.T) {
 	defer pool.Close()
 	var oldRunID string
 	var oldAttemptID string
+	var oldMachineID string
 	var oldFence int64
 	if err := pool.QueryRow(context.Background(), `
-		select run.run_id, attempt.attempt_id, attempt.fence
+		select run.run_id, attempt.attempt_id, attempt.machine_id, attempt.fence
 		from runs as run
 		join run_attempts as attempt on attempt.run_id = run.run_id
 		where run.work_id = $1
 		order by attempt.fence
 		limit 1
-	`, workID).Scan(&oldRunID, &oldAttemptID, &oldFence); err != nil {
+	`, workID).Scan(&oldRunID, &oldAttemptID, &oldMachineID, &oldFence); err != nil {
 		t.Fatalf("load interrupted Attempt: %v", err)
 	}
 	if _, err := pool.Exec(context.Background(), `
@@ -135,10 +137,21 @@ func TestInterruptedHostWorkContinuesWithNewAttempt(t *testing.T) {
 		t.Fatalf("expire interrupted Attempt lease: %v", err)
 	}
 
+	replacementConfigDirectory := filepath.Join(temporary, "replacement-config")
+	replacementClientEnvironment := []string{"CARRY_CONFIG_DIR=" + replacementConfigDirectory}
+	run(t, root, replacementClientEnvironment, carry, "login",
+		"--server", serverURL,
+		"--ca-cert", filepath.Join(pkiDirectory, "ca.pem"),
+		"--token", bootstrap.UserToken,
+	)
+	run(t, root, replacementClientEnvironment, carry, "host", "enroll",
+		"--space", bootstrap.SpaceID, "--name", "replacement-recovery-host",
+	)
+	replacementHostEnvironment := append(append([]string{}, replacementClientEnvironment...), agentEnvironment...)
 	secondContext, cancelSecond := context.WithCancel(context.Background())
 	secondHost := exec.CommandContext(secondContext, carry, "host", "start")
 	secondHost.Dir = root
-	secondHost.Env = append(os.Environ(), hostEnvironment...)
+	secondHost.Env = append(os.Environ(), replacementHostEnvironment...)
 	secondLog := &lockedBuffer{}
 	secondHost.Stdout = secondLog
 	secondHost.Stderr = secondLog
@@ -150,6 +163,19 @@ func TestInterruptedHostWorkContinuesWithNewAttempt(t *testing.T) {
 		t, root, carry, clientEnvironment, workID,
 		"Recovered after Host interruption.", secondLog,
 	)
+	var recoveredMachineID string
+	if err := pool.QueryRow(context.Background(), `
+		select machine_id
+		from run_attempts
+		where run_id = $1 and fence > $2
+		order by fence desc
+		limit 1
+	`, oldRunID, oldFence).Scan(&recoveredMachineID); err != nil {
+		t.Fatalf("load recovery Machine: %v", err)
+	}
+	if recoveredMachineID == oldMachineID {
+		t.Fatalf("recovery reused Machine %s instead of crossing Machines", recoveredMachineID)
+	}
 	firstPromptBytes, err := os.ReadFile(firstPrompt)
 	if err != nil {
 		t.Fatalf("read first recovery prompt: %v", err)

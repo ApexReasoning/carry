@@ -34,6 +34,12 @@ func TestParseServerURLRequiresHTTPSRoot(t *testing.T) {
 
 func TestMachineClaimUsesOnlyMTLSClientAndReturnsCompleteContext(t *testing.T) {
 	t.Parallel()
+	const (
+		runID     = "8b673a9d-71ce-4d4f-babc-9124a020bf11"
+		attemptID = "d10d356f-257a-46bd-b68d-b340e3e7bbc9"
+		workID    = "53c97fa6-4d78-4fd0-82b4-6cd0419c876d"
+		memberID  = "29b83126-8337-431c-a568-8bfda5670501"
+	)
 
 	connection := machineHTTP{
 		serverURL: "https://carry.example.com",
@@ -42,11 +48,11 @@ func TestMachineClaimUsesOnlyMTLSClientAndReturnsCompleteContext(t *testing.T) {
 				t.Fatalf("Machine claim request = %s, Authorization %q", request.URL, request.Header.Get("Authorization"))
 			}
 			return jsonResponse(http.StatusOK, `{
-				"run_id":"run-1","attempt_id":"attempt-1","work_id":"work-1","space_id":"space-1",
+				"run_id":"`+runID+`","attempt_id":"`+attemptID+`","work_id":"`+workID+`",
 				"fence":2,"lease_expires_at":"2030-01-01T00:00:00Z","goal":"Prepare renewal",
 				"current_understanding":"Finance approved","current_next_step":"Apply wording",
 				"base_understanding_version":3,"input_end_seq":5,
-				"messages":[{"author_user_id":"member-1","text":"Legal supplied wording"}]
+				"messages":[{"author_user_id":"`+memberID+`","text":"Legal supplied wording"}]
 			}`), nil
 		})},
 	}
@@ -55,9 +61,77 @@ func TestMachineClaimUsesOnlyMTLSClientAndReturnsCompleteContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("claim Run: %v", err)
 	}
-	if claim.RunID != "run-1" || claim.BaseUnderstandingVersion != 3 ||
+	if claim.RunID != runID || claim.BaseUnderstandingVersion != 3 ||
 		len(claim.Messages) != 1 || claim.Messages[0].Text != "Legal supplied wording" {
 		t.Fatalf("claim = %#v", claim)
+	}
+}
+
+func TestMachineClaimAcceptsWorstCaseBoundedEscapedContext(t *testing.T) {
+	t.Parallel()
+	messages := make([]runMessageWire, 0, run.MaxInputMessages)
+	for range run.MaxInputMessages {
+		messages = append(messages, runMessageWire{
+			AuthorUserID: "29b83126-8337-431c-a568-8bfda5670501",
+			Text:         strings.Repeat("\x01", run.MaxInputTextBytes/run.MaxInputMessages),
+		})
+	}
+	encoded, err := json.Marshal(runClaimWire{
+		RunID: "8b673a9d-71ce-4d4f-babc-9124a020bf11", AttemptID: "d10d356f-257a-46bd-b68d-b340e3e7bbc9",
+		WorkID: "53c97fa6-4d78-4fd0-82b4-6cd0419c876d", Fence: 2,
+		LeaseExpiresAt: time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC),
+		Goal:           strings.Repeat("\x01", 2000), CurrentUnderstanding: strings.Repeat("\x01", run.MaxUnderstandingBytes),
+		CurrentNextStep: strings.Repeat("\x01", run.MaxNextStepBytes), BaseUnderstandingVersion: 3,
+		InputEndSeq: 33, Messages: messages,
+	})
+	if err != nil {
+		t.Fatalf("encode worst-case Run claim: %v", err)
+	}
+	if len(encoded) >= maxRunClaimWireBytes {
+		t.Fatalf("worst-case Run claim bytes = %d, limit = %d", len(encoded), maxRunClaimWireBytes)
+	}
+	connection := machineHTTP{
+		serverURL: "https://carry.example.com",
+		client: &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+			return jsonResponse(http.StatusOK, string(encoded)), nil
+		})},
+	}
+	claim, err := connection.Claim(context.Background())
+	if err != nil {
+		t.Fatalf("decode worst-case Run claim: %v", err)
+	}
+	if len(claim.Messages) != run.MaxInputMessages {
+		t.Fatalf("decoded message count = %d", len(claim.Messages))
+	}
+}
+
+func TestMachineClaimRejectsUnboundedOrInexactJSON(t *testing.T) {
+	t.Parallel()
+	valid := `{
+		"run_id":"8b673a9d-71ce-4d4f-babc-9124a020bf11",
+		"attempt_id":"d10d356f-257a-46bd-b68d-b340e3e7bbc9",
+		"work_id":"53c97fa6-4d78-4fd0-82b4-6cd0419c876d","fence":1,
+		"lease_expires_at":"2030-01-01T00:00:00Z","goal":"Prepare renewal",
+		"current_understanding":"","current_next_step":"","base_understanding_version":0,
+		"input_end_seq":1,"messages":[]
+	}`
+	cases := map[string]string{
+		"unknown field":   strings.Replace(valid, `"messages":[]`, `"messages":[],"space_id":"forbidden"`, 1),
+		"trailing JSON":   valid + `{}`,
+		"over byte limit": strings.Repeat(" ", maxRunClaimWireBytes+1),
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			connection := machineHTTP{
+				serverURL: "https://carry.example.com",
+				client: &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+					return jsonResponse(http.StatusOK, body), nil
+				})},
+			}
+			if _, err := connection.Claim(context.Background()); err == nil {
+				t.Fatal("invalid Run claim was accepted")
+			}
+		})
 	}
 }
 

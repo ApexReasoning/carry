@@ -18,18 +18,22 @@ func newListCommand(configDirectory string, output io.Writer) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			works, err := client.list(command.Context(), selectedSpaceID)
+			page, err := client.ListWorks(command.Context(), selectedSpaceID, "")
 			if err != nil {
 				return err
 			}
-			if len(works) == 0 {
+			if len(page.Works) == 0 {
 				_, err = fmt.Fprintln(output, "No Work.")
 				return err
 			}
-			for _, item := range works {
+			for _, item := range page.Works {
 				if _, err := fmt.Fprintf(output, "%s\t%s\t%s\n", item.WorkID, item.Lifecycle, item.Goal); err != nil {
 					return err
 				}
+			}
+			if page.HasEarlier {
+				_, err = fmt.Fprintln(output, "Earlier Work is not shown.")
+				return err
 			}
 			return nil
 		},

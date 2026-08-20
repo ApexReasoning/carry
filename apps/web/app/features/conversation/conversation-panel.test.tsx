@@ -65,7 +65,7 @@ test("sends with Enter, disables the pending composer, and polls only after the 
 
   await screen.findByText("When does the renewal window close?");
   expect(composer).toBeDisabled();
-  expect(screen.getByText(/Carry is replying/)).toBeVisible();
+  expect(screen.getByText(/Waiting for Carry’s reply/)).toBeVisible();
   expect(window.sessionStorage.length).toBe(0);
 
   await screen.findByText(
@@ -290,6 +290,60 @@ test("prepends before pages and appends after polling without a full-history rel
   expect(fullLoads.filter((query) => query === "")).toHaveLength(1);
   expect(fullLoads.some((query) => query.startsWith("?before="))).toBe(true);
   expect(fullLoads.some((query) => query.startsWith("?after="))).toBe(true);
+});
+
+test("replaces a stale private request identity after an authoritative conflict", async () => {
+  const staleRequestID = pendingConversationRequestID(memberID, spaceID);
+  const requestIDs: Array<string> = [];
+  let posts = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request =
+        input instanceof Request ? input : new Request(input, init);
+      if (request.method === "GET") {
+        return json({
+          messages: Array.from({ length: 50 }, (_, index) =>
+            numberedMessage(index + 50),
+          ),
+        });
+      }
+      posts += 1;
+      const requestID = request.headers.get("Idempotency-Key") ?? "";
+      requestIDs.push(requestID);
+      if (posts === 1) {
+        return new Response(
+          JSON.stringify({
+            error: "idempotency key refers to different private input",
+          }),
+          { status: 409, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return json({
+        ...privateMessage(
+          memberMessageID,
+          "member",
+          "Send the current question",
+        ),
+        request_id: requestID,
+      });
+    }),
+  );
+
+  const user = userEvent.setup();
+  renderPanel();
+  const composer = await screen.findByLabelText("Message Carry privately");
+  await user.type(composer, "Send the current question");
+  await user.click(screen.getByRole("button", { name: "Send privately" }));
+
+  await screen.findByText(/changed in another browser/);
+  expect(window.sessionStorage.length).toBe(0);
+  expect(requestIDs).toEqual([staleRequestID]);
+
+  await user.click(screen.getByRole("button", { name: "Send privately" }));
+  await screen.findByText("Send the current question");
+  expect(requestIDs).toHaveLength(2);
+  expect(requestIDs[1]).not.toBe(staleRequestID);
 });
 
 test("resets the visible private transcript when the selected Space changes", async () => {

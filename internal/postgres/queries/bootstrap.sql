@@ -12,9 +12,11 @@ SELECT
     user_token.token_hash,
     user_token.expires_at
 FROM carry_users AS carry_user
-JOIN space_memberships AS membership ON membership.user_id = carry_user.user_id
-JOIN spaces AS space ON space.space_id = membership.space_id
-JOIN user_tokens AS user_token ON user_token.user_id = carry_user.user_id
+INNER JOIN
+    space_memberships AS membership
+    ON carry_user.user_id = membership.user_id
+INNER JOIN spaces AS space ON membership.space_id = space.space_id
+INNER JOIN user_tokens AS user_token ON carry_user.user_id = user_token.user_id
 WHERE
     carry_user.user_id = sqlc.arg(user_id)
     AND space.space_id = sqlc.arg(space_id)
@@ -42,9 +44,12 @@ VALUES (
 );
 
 -- name: AuthenticateUserToken :one
-SELECT user_id
-FROM user_tokens
+SELECT
+    token.user_id,
+    carry_user.display_name
+FROM user_tokens AS token
+INNER JOIN carry_users AS carry_user ON token.user_id = carry_user.user_id
 WHERE
-    token_hash = sqlc.arg(token_hash)
-    AND revoked_at IS null
-    AND expires_at > transaction_timestamp();
+    token.token_hash = sqlc.arg(token_hash)
+    AND token.revoked_at IS null
+    AND token.expires_at > transaction_timestamp();

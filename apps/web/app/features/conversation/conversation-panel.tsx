@@ -59,9 +59,9 @@ export function ConversationPanel({
           <h2 id="conversation-title">Talk to Carry</h2>
         </div>
         <p className="conversation-privacy">
-          Other members in this Space cannot see this conversation. A clear
-          delegation can create shared Work without sharing your private
-          message.
+          Other members in this Space cannot see this conversation. When you
+          clearly ask Carry to take responsibility, it can create shared Work
+          without copying your private message.
         </p>
       </header>
 
@@ -95,7 +95,7 @@ export function ConversationPanel({
         ) : conversation.messages.length === 0 ? (
           <p className="conversation-empty">
             Ask a question or give Carry a responsibility. Nothing here is
-            shared with the Space unless your clear delegation creates Work.
+            shared with the Space unless you clearly ask Carry to take it on.
           </p>
         ) : (
           <ol className="conversation-messages">
@@ -136,7 +136,7 @@ export function ConversationPanel({
 
       <p className="conversation-status" aria-live="polite">
         {conversation.awaitingReply
-          ? "Carry is replying. You can send another message after this reply."
+          ? "Waiting for Carry’s reply. You can send another message after it arrives."
           : "Carry handles one private message at a time."}
       </p>
 
@@ -146,7 +146,7 @@ export function ConversationPanel({
           id="private-message"
           name="private-message"
           rows={3}
-          placeholder="Ask a question or delegate a responsibility"
+          placeholder="Ask a question or give Carry a responsibility"
           value={text}
           onChange={(event) => {
             setText(event.target.value);

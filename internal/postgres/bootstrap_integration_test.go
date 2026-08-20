@@ -83,8 +83,8 @@ func TestBootstrapTokenAuthenticatesMember(t *testing.T) {
 	if err != nil {
 		t.Fatalf("authenticate token: %v", err)
 	}
-	if member.UserID != result.UserID {
-		t.Fatalf("authenticated user = %s, want %s", member.UserID, result.UserID)
+	if member.UserID != result.UserID || member.DisplayName != "Katherine" {
+		t.Fatalf("authenticated user = %#v, want %s named Katherine", member, result.UserID)
 	}
 	if _, err := store.AuthenticateUserToken(ctx, "carry_user_not-a-token"); !errors.Is(err, identity.ErrUnauthenticated) {
 		t.Fatalf("invalid token error = %v, want identity.ErrUnauthenticated", err)

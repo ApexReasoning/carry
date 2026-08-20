@@ -22,11 +22,12 @@ INSERT INTO browser_sessions (
 RETURNING user_id, expires_at;
 
 -- name: AuthenticateBrowserSession :one
-SELECT browser_session.user_id
+SELECT browser_session.user_id, carry_user.display_name
 FROM browser_sessions AS browser_session
 INNER JOIN user_tokens AS user_token
     ON user_token.token_id = browser_session.source_token_id
     AND user_token.user_id = browser_session.user_id
+INNER JOIN carry_users AS carry_user ON carry_user.user_id = browser_session.user_id
 WHERE
     browser_session.session_digest = sqlc.arg(session_digest)
     AND browser_session.revoked_at IS NULL

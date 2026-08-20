@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import {
+  APIResponseError,
   listConversationMessages,
   MutationOutcomeUnknownError,
   sendConversationMessage,
@@ -101,6 +102,22 @@ export function useConversation(memberID: string, spaceID: string) {
       clearAdmittedIdentity(memberID, spaceID, requestID);
       return true;
     } catch (caught) {
+      if (caught instanceof APIResponseError && caught.status === 409) {
+        try {
+          clearPendingConversationRequestID(memberID, spaceID, requestID);
+          const newest = await listConversationMessages(spaceID);
+          setMessages((current) => appendUnique(current, newest));
+          setError(
+            "This private conversation changed in another browser. Review the latest messages, then send again.",
+          );
+        } catch (reconciliationError) {
+          setIdentityBlocked(true);
+          setError(
+            `Carry could not replace the stale private request identity: ${errorMessage(reconciliationError)}`,
+          );
+        }
+        return false;
+      }
       if (caught instanceof MutationOutcomeUnknownError) {
         try {
           const newest = await listConversationMessages(spaceID);
@@ -127,12 +144,13 @@ export function useConversation(memberID: string, spaceID: string) {
   }
 
   async function loadEarlier(): Promise<void> {
-    if (loadingEarlier || messages.length === 0) return;
+    const firstMessage = messages[0];
+    if (loadingEarlier || !firstMessage) return;
     setLoadingEarlier(true);
     setError(null);
     try {
       const earlier = await listConversationMessages(spaceID, {
-        before: messages[0]!.message_id,
+        before: firstMessage.message_id,
       });
       setMessages((current) => prependUnique(earlier, current));
       setCanLoadEarlier(earlier.length === pageSize);

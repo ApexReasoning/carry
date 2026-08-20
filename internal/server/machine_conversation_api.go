@@ -62,7 +62,6 @@ func (api machineConversationAPI) claim(response http.ResponseWriter, request *h
 	for _, message := range claim.Messages {
 		messages = append(messages, conversationContextMessageWire{Author: message.Author, Text: message.Text})
 	}
-	response.Header().Set("Cache-Control", "no-store")
 	writeJSON(response, http.StatusOK, conversationReplyClaimWire{
 		SourceMessageID: claim.SourceMessageID,
 		Fence:           claim.Fence,

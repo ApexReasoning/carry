@@ -26,25 +26,44 @@ func (q *Queries) AdvanceWorkInputHead(ctx context.Context, workID string) (int6
 }
 
 const createWork = `-- name: CreateWork :one
-INSERT INTO works (
-    work_id,
-    space_id,
-    goal,
-    owner_user_id,
-    creator_user_id,
-    create_idempotency_key,
-    create_request_digest
-) VALUES (
-    $1,
-    $2,
-    $3,
-    $4,
-    $5,
-    $6,
-    $7
+WITH created AS (
+    INSERT INTO works (
+        work_id,
+        space_id,
+        goal,
+        owner_user_id,
+        creator_user_id,
+        create_idempotency_key,
+        create_request_digest
+    ) VALUES (
+        $1,
+        $2,
+        $3,
+        $4,
+        $5,
+        $6,
+        $7
+    )
+    ON CONFLICT (space_id, creator_user_id, create_idempotency_key) DO NOTHING
+    RETURNING work_id, space_id, goal, lifecycle, owner_user_id, creator_user_id, input_head_seq, create_idempotency_key, create_request_digest, created_at, applied_input_seq, understanding_version, understanding, next_step
 )
-ON CONFLICT (space_id, creator_user_id, create_idempotency_key) DO NOTHING
-RETURNING work_id, space_id, goal, lifecycle, owner_user_id, creator_user_id, created_at
+SELECT
+    created.work_id,
+    created.space_id,
+    created.goal,
+    created.lifecycle,
+    created.owner_user_id,
+    owner.display_name AS owner_display_name,
+    created.creator_user_id,
+    creator.display_name AS creator_display_name,
+    created.input_head_seq,
+    created.applied_input_seq,
+    created.understanding,
+    created.next_step,
+    created.created_at
+FROM created
+JOIN carry_users AS owner ON owner.user_id = created.owner_user_id
+JOIN carry_users AS creator ON creator.user_id = created.creator_user_id
 `
 
 type CreateWorkParams struct {
@@ -58,13 +77,19 @@ type CreateWorkParams struct {
 }
 
 type CreateWorkRow struct {
-	WorkID        string
-	SpaceID       string
-	Goal          string
-	Lifecycle     string
-	OwnerUserID   string
-	CreatorUserID string
-	CreatedAt     pgtype.Timestamptz
+	WorkID             string
+	SpaceID            string
+	Goal               string
+	Lifecycle          string
+	OwnerUserID        string
+	OwnerDisplayName   string
+	CreatorUserID      string
+	CreatorDisplayName string
+	InputHeadSeq       int64
+	AppliedInputSeq    int64
+	Understanding      *string
+	NextStep           *string
+	CreatedAt          pgtype.Timestamptz
 }
 
 func (q *Queries) CreateWork(ctx context.Context, arg CreateWorkParams) (CreateWorkRow, error) {
@@ -84,31 +109,49 @@ func (q *Queries) CreateWork(ctx context.Context, arg CreateWorkParams) (CreateW
 		&i.Goal,
 		&i.Lifecycle,
 		&i.OwnerUserID,
+		&i.OwnerDisplayName,
 		&i.CreatorUserID,
+		&i.CreatorDisplayName,
+		&i.InputHeadSeq,
+		&i.AppliedInputSeq,
+		&i.Understanding,
+		&i.NextStep,
 		&i.CreatedAt,
 	)
 	return i, err
 }
 
 const createWorkMessage = `-- name: CreateWorkMessage :one
-INSERT INTO work_messages (
-    message_id,
-    work_id,
-    author_user_id,
-    text,
-    input_seq,
-    idempotency_key,
-    request_digest
-) VALUES (
-    $1,
-    $2,
-    $3,
-    $4,
-    $5,
-    $6,
-    $7
+WITH created AS (
+    INSERT INTO work_messages (
+        message_id,
+        work_id,
+        author_user_id,
+        text,
+        input_seq,
+        idempotency_key,
+        request_digest
+    ) VALUES (
+        $1,
+        $2,
+        $3,
+        $4,
+        $5,
+        $6,
+        $7
+    )
+    RETURNING message_id, work_id, author_user_id, text, input_seq, idempotency_key, request_digest, created_at
 )
-RETURNING message_id, work_id, author_user_id, text, input_seq, created_at
+SELECT
+    created.message_id,
+    created.work_id,
+    created.author_user_id,
+    author.display_name AS author_display_name,
+    created.text,
+    created.input_seq,
+    created.created_at
+FROM created
+JOIN carry_users AS author ON author.user_id = created.author_user_id
 `
 
 type CreateWorkMessageParams struct {
@@ -122,12 +165,13 @@ type CreateWorkMessageParams struct {
 }
 
 type CreateWorkMessageRow struct {
-	MessageID    string
-	WorkID       string
-	AuthorUserID string
-	Text         string
-	InputSeq     int64
-	CreatedAt    pgtype.Timestamptz
+	MessageID         string
+	WorkID            string
+	AuthorUserID      string
+	AuthorDisplayName string
+	Text              string
+	InputSeq          int64
+	CreatedAt         pgtype.Timestamptz
 }
 
 func (q *Queries) CreateWorkMessage(ctx context.Context, arg CreateWorkMessageParams) (CreateWorkMessageRow, error) {
@@ -145,6 +189,7 @@ func (q *Queries) CreateWorkMessage(ctx context.Context, arg CreateWorkMessagePa
 		&i.MessageID,
 		&i.WorkID,
 		&i.AuthorUserID,
+		&i.AuthorDisplayName,
 		&i.Text,
 		&i.InputSeq,
 		&i.CreatedAt,
@@ -153,10 +198,30 @@ func (q *Queries) CreateWorkMessage(ctx context.Context, arg CreateWorkMessagePa
 }
 
 const findWorkByCreateIdempotency = `-- name: FindWorkByCreateIdempotency :one
-SELECT work.work_id, work.space_id, work.goal, work.lifecycle, work.owner_user_id, work.creator_user_id,
-    work.input_head_seq, work.applied_input_seq, work.understanding_version, work.understanding, work.next_step,
-    work.created_at, work.create_request_digest
+SELECT
+    work.work_id,
+    work.space_id,
+    work.goal,
+    work.lifecycle,
+    work.owner_user_id,
+    owner.display_name AS owner_display_name,
+    work.creator_user_id,
+    creator.display_name AS creator_display_name,
+    work.input_head_seq,
+    work.applied_input_seq,
+    work.understanding,
+    work.next_step,
+    work.created_at,
+    work.create_request_digest,
+    EXISTS (
+        SELECT 1 FROM runs
+        WHERE runs.work_id = work.work_id
+          AND runs.state IN ('failed', 'unknown')
+          AND runs.retry_requested_at IS NULL
+    ) AS needs_retry
 FROM works AS work
+JOIN carry_users AS owner ON owner.user_id = work.owner_user_id
+JOIN carry_users AS creator ON creator.user_id = work.creator_user_id
 WHERE
     work.space_id = $1
     AND work.creator_user_id = $2
@@ -170,19 +235,21 @@ type FindWorkByCreateIdempotencyParams struct {
 }
 
 type FindWorkByCreateIdempotencyRow struct {
-	WorkID               string
-	SpaceID              string
-	Goal                 string
-	Lifecycle            string
-	OwnerUserID          string
-	CreatorUserID        string
-	InputHeadSeq         int64
-	AppliedInputSeq      int64
-	UnderstandingVersion int64
-	Understanding        *string
-	NextStep             *string
-	CreatedAt            pgtype.Timestamptz
-	CreateRequestDigest  []byte
+	WorkID              string
+	SpaceID             string
+	Goal                string
+	Lifecycle           string
+	OwnerUserID         string
+	OwnerDisplayName    string
+	CreatorUserID       string
+	CreatorDisplayName  string
+	InputHeadSeq        int64
+	AppliedInputSeq     int64
+	Understanding       *string
+	NextStep            *string
+	CreatedAt           pgtype.Timestamptz
+	CreateRequestDigest []byte
+	NeedsRetry          bool
 }
 
 func (q *Queries) FindWorkByCreateIdempotency(ctx context.Context, arg FindWorkByCreateIdempotencyParams) (FindWorkByCreateIdempotencyRow, error) {
@@ -194,25 +261,36 @@ func (q *Queries) FindWorkByCreateIdempotency(ctx context.Context, arg FindWorkB
 		&i.Goal,
 		&i.Lifecycle,
 		&i.OwnerUserID,
+		&i.OwnerDisplayName,
 		&i.CreatorUserID,
+		&i.CreatorDisplayName,
 		&i.InputHeadSeq,
 		&i.AppliedInputSeq,
-		&i.UnderstandingVersion,
 		&i.Understanding,
 		&i.NextStep,
 		&i.CreatedAt,
 		&i.CreateRequestDigest,
+		&i.NeedsRetry,
 	)
 	return i, err
 }
 
 const findWorkMessageByIdempotency = `-- name: FindWorkMessageByIdempotency :one
-SELECT message_id, work_id, author_user_id, text, input_seq, created_at, request_digest
-FROM work_messages
+SELECT
+    message.message_id,
+    message.work_id,
+    message.author_user_id,
+    author.display_name AS author_display_name,
+    message.text,
+    message.input_seq,
+    message.created_at,
+    message.request_digest
+FROM work_messages AS message
+JOIN carry_users AS author ON author.user_id = message.author_user_id
 WHERE
-    work_id = $1
-    AND author_user_id = $2
-    AND idempotency_key = $3
+    message.work_id = $1
+    AND message.author_user_id = $2
+    AND message.idempotency_key = $3
 `
 
 type FindWorkMessageByIdempotencyParams struct {
@@ -222,13 +300,14 @@ type FindWorkMessageByIdempotencyParams struct {
 }
 
 type FindWorkMessageByIdempotencyRow struct {
-	MessageID     string
-	WorkID        string
-	AuthorUserID  string
-	Text          string
-	InputSeq      int64
-	CreatedAt     pgtype.Timestamptz
-	RequestDigest []byte
+	MessageID         string
+	WorkID            string
+	AuthorUserID      string
+	AuthorDisplayName string
+	Text              string
+	InputSeq          int64
+	CreatedAt         pgtype.Timestamptz
+	RequestDigest     []byte
 }
 
 func (q *Queries) FindWorkMessageByIdempotency(ctx context.Context, arg FindWorkMessageByIdempotencyParams) (FindWorkMessageByIdempotencyRow, error) {
@@ -238,6 +317,7 @@ func (q *Queries) FindWorkMessageByIdempotency(ctx context.Context, arg FindWork
 		&i.MessageID,
 		&i.WorkID,
 		&i.AuthorUserID,
+		&i.AuthorDisplayName,
 		&i.Text,
 		&i.InputSeq,
 		&i.CreatedAt,
@@ -246,35 +326,59 @@ func (q *Queries) FindWorkMessageByIdempotency(ctx context.Context, arg FindWork
 	return i, err
 }
 
-const listWorkMessages = `-- name: ListWorkMessages :many
-SELECT message_id, work_id, author_user_id, text, input_seq, created_at
-FROM work_messages
-WHERE work_id = $1
-ORDER BY input_seq ASC
+const listNewestWorkMessages = `-- name: ListNewestWorkMessages :many
+WITH candidates AS (
+    SELECT message_id, work_id, author_user_id, text, input_seq, created_at
+    FROM work_messages
+    WHERE work_id = $1
+    ORDER BY input_seq DESC
+    LIMIT 50
+), bounded AS (
+    SELECT
+        candidates.message_id, candidates.work_id, candidates.author_user_id, candidates.text, candidates.input_seq, candidates.created_at,
+        sum(octet_length(text)) OVER (
+            ORDER BY input_seq DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        ) AS text_bytes
+    FROM candidates
+)
+SELECT
+    bounded.message_id,
+    bounded.work_id,
+    bounded.author_user_id,
+    author.display_name AS author_display_name,
+    bounded.text,
+    bounded.input_seq,
+    bounded.created_at
+FROM bounded
+JOIN carry_users AS author ON author.user_id = bounded.author_user_id
+WHERE bounded.text_bytes <= 262144
+ORDER BY bounded.input_seq
 `
 
-type ListWorkMessagesRow struct {
-	MessageID    string
-	WorkID       string
-	AuthorUserID string
-	Text         string
-	InputSeq     int64
-	CreatedAt    pgtype.Timestamptz
+type ListNewestWorkMessagesRow struct {
+	MessageID         string
+	WorkID            string
+	AuthorUserID      string
+	AuthorDisplayName string
+	Text              string
+	InputSeq          int64
+	CreatedAt         pgtype.Timestamptz
 }
 
-func (q *Queries) ListWorkMessages(ctx context.Context, workID string) ([]ListWorkMessagesRow, error) {
-	rows, err := q.db.Query(ctx, listWorkMessages, workID)
+func (q *Queries) ListNewestWorkMessages(ctx context.Context, workID string) ([]ListNewestWorkMessagesRow, error) {
+	rows, err := q.db.Query(ctx, listNewestWorkMessages, workID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListWorkMessagesRow
+	var items []ListNewestWorkMessagesRow
 	for rows.Next() {
-		var i ListWorkMessagesRow
+		var i ListNewestWorkMessagesRow
 		if err := rows.Scan(
 			&i.MessageID,
 			&i.WorkID,
 			&i.AuthorUserID,
+			&i.AuthorDisplayName,
 			&i.Text,
 			&i.InputSeq,
 			&i.CreatedAt,
@@ -289,50 +393,141 @@ func (q *Queries) ListWorkMessages(ctx context.Context, workID string) ([]ListWo
 	return items, nil
 }
 
-const listWorks = `-- name: ListWorks :many
-SELECT work.work_id, work.space_id, work.goal, work.lifecycle, work.owner_user_id, work.creator_user_id,
-    work.input_head_seq, work.applied_input_seq, work.understanding_version, work.understanding, work.next_step, work.created_at
+const listNewestWorks = `-- name: ListNewestWorks :many
+SELECT
+    work.work_id,
+    work.space_id,
+    work.goal,
+    work.lifecycle,
+    work.owner_user_id,
+    owner.display_name AS owner_display_name,
+    work.creator_user_id,
+    creator.display_name AS creator_display_name,
+    work.input_head_seq,
+    work.applied_input_seq,
+    work.created_at,
+    EXISTS (
+        SELECT 1 FROM runs
+        WHERE runs.work_id = work.work_id
+          AND runs.state IN ('failed', 'unknown')
+          AND runs.retry_requested_at IS NULL
+    ) AS needs_retry
 FROM works AS work
+JOIN carry_users AS owner ON owner.user_id = work.owner_user_id
+JOIN carry_users AS creator ON creator.user_id = work.creator_user_id
 WHERE work.space_id = $1
 ORDER BY work.created_at DESC, work.work_id DESC
+LIMIT 51
 `
 
-type ListWorksRow struct {
-	WorkID               string
-	SpaceID              string
-	Goal                 string
-	Lifecycle            string
-	OwnerUserID          string
-	CreatorUserID        string
-	InputHeadSeq         int64
-	AppliedInputSeq      int64
-	UnderstandingVersion int64
-	Understanding        *string
-	NextStep             *string
-	CreatedAt            pgtype.Timestamptz
+type ListNewestWorksRow struct {
+	WorkID             string
+	SpaceID            string
+	Goal               string
+	Lifecycle          string
+	OwnerUserID        string
+	OwnerDisplayName   string
+	CreatorUserID      string
+	CreatorDisplayName string
+	InputHeadSeq       int64
+	AppliedInputSeq    int64
+	CreatedAt          pgtype.Timestamptz
+	NeedsRetry         bool
 }
 
-func (q *Queries) ListWorks(ctx context.Context, spaceID string) ([]ListWorksRow, error) {
-	rows, err := q.db.Query(ctx, listWorks, spaceID)
+func (q *Queries) ListNewestWorks(ctx context.Context, spaceID string) ([]ListNewestWorksRow, error) {
+	rows, err := q.db.Query(ctx, listNewestWorks, spaceID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListWorksRow
+	var items []ListNewestWorksRow
 	for rows.Next() {
-		var i ListWorksRow
+		var i ListNewestWorksRow
 		if err := rows.Scan(
 			&i.WorkID,
 			&i.SpaceID,
 			&i.Goal,
 			&i.Lifecycle,
 			&i.OwnerUserID,
+			&i.OwnerDisplayName,
 			&i.CreatorUserID,
+			&i.CreatorDisplayName,
 			&i.InputHeadSeq,
 			&i.AppliedInputSeq,
-			&i.UnderstandingVersion,
-			&i.Understanding,
-			&i.NextStep,
+			&i.CreatedAt,
+			&i.NeedsRetry,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listWorkMessagesBefore = `-- name: ListWorkMessagesBefore :many
+WITH candidates AS (
+    SELECT message_id, work_id, author_user_id, text, input_seq, created_at
+    FROM work_messages
+    WHERE work_id = $1 AND input_seq < $2
+    ORDER BY input_seq DESC
+    LIMIT 50
+), bounded AS (
+    SELECT
+        candidates.message_id, candidates.work_id, candidates.author_user_id, candidates.text, candidates.input_seq, candidates.created_at,
+        sum(octet_length(text)) OVER (
+            ORDER BY input_seq DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        ) AS text_bytes
+    FROM candidates
+)
+SELECT
+    bounded.message_id,
+    bounded.work_id,
+    bounded.author_user_id,
+    author.display_name AS author_display_name,
+    bounded.text,
+    bounded.input_seq,
+    bounded.created_at
+FROM bounded
+JOIN carry_users AS author ON author.user_id = bounded.author_user_id
+WHERE bounded.text_bytes <= 262144
+ORDER BY bounded.input_seq
+`
+
+type ListWorkMessagesBeforeParams struct {
+	WorkID         string
+	CursorSequence int64
+}
+
+type ListWorkMessagesBeforeRow struct {
+	MessageID         string
+	WorkID            string
+	AuthorUserID      string
+	AuthorDisplayName string
+	Text              string
+	InputSeq          int64
+	CreatedAt         pgtype.Timestamptz
+}
+
+func (q *Queries) ListWorkMessagesBefore(ctx context.Context, arg ListWorkMessagesBeforeParams) ([]ListWorkMessagesBeforeRow, error) {
+	rows, err := q.db.Query(ctx, listWorkMessagesBefore, arg.WorkID, arg.CursorSequence)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListWorkMessagesBeforeRow
+	for rows.Next() {
+		var i ListWorkMessagesBeforeRow
+		if err := rows.Scan(
+			&i.MessageID,
+			&i.WorkID,
+			&i.AuthorUserID,
+			&i.AuthorDisplayName,
+			&i.Text,
+			&i.InputSeq,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -345,10 +540,116 @@ func (q *Queries) ListWorks(ctx context.Context, spaceID string) ([]ListWorksRow
 	return items, nil
 }
 
-const loadWork = `-- name: LoadWork :one
-SELECT work.work_id, work.space_id, work.goal, work.lifecycle, work.owner_user_id, work.creator_user_id,
-    work.input_head_seq, work.applied_input_seq, work.understanding_version, work.understanding, work.next_step, work.created_at
+const listWorksBefore = `-- name: ListWorksBefore :many
+SELECT
+    work.work_id,
+    work.space_id,
+    work.goal,
+    work.lifecycle,
+    work.owner_user_id,
+    owner.display_name AS owner_display_name,
+    work.creator_user_id,
+    creator.display_name AS creator_display_name,
+    work.input_head_seq,
+    work.applied_input_seq,
+    work.created_at,
+    EXISTS (
+        SELECT 1 FROM runs
+        WHERE runs.work_id = work.work_id
+          AND runs.state IN ('failed', 'unknown')
+          AND runs.retry_requested_at IS NULL
+    ) AS needs_retry
 FROM works AS work
+JOIN carry_users AS owner ON owner.user_id = work.owner_user_id
+JOIN carry_users AS creator ON creator.user_id = work.creator_user_id
+WHERE
+    work.space_id = $1
+    AND (work.created_at, work.work_id) < (
+        $2::timestamptz,
+        $3::uuid
+    )
+ORDER BY work.created_at DESC, work.work_id DESC
+LIMIT 51
+`
+
+type ListWorksBeforeParams struct {
+	SpaceID         string
+	CursorCreatedAt pgtype.Timestamptz
+	CursorWorkID    string
+}
+
+type ListWorksBeforeRow struct {
+	WorkID             string
+	SpaceID            string
+	Goal               string
+	Lifecycle          string
+	OwnerUserID        string
+	OwnerDisplayName   string
+	CreatorUserID      string
+	CreatorDisplayName string
+	InputHeadSeq       int64
+	AppliedInputSeq    int64
+	CreatedAt          pgtype.Timestamptz
+	NeedsRetry         bool
+}
+
+func (q *Queries) ListWorksBefore(ctx context.Context, arg ListWorksBeforeParams) ([]ListWorksBeforeRow, error) {
+	rows, err := q.db.Query(ctx, listWorksBefore, arg.SpaceID, arg.CursorCreatedAt, arg.CursorWorkID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListWorksBeforeRow
+	for rows.Next() {
+		var i ListWorksBeforeRow
+		if err := rows.Scan(
+			&i.WorkID,
+			&i.SpaceID,
+			&i.Goal,
+			&i.Lifecycle,
+			&i.OwnerUserID,
+			&i.OwnerDisplayName,
+			&i.CreatorUserID,
+			&i.CreatorDisplayName,
+			&i.InputHeadSeq,
+			&i.AppliedInputSeq,
+			&i.CreatedAt,
+			&i.NeedsRetry,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const loadWork = `-- name: LoadWork :one
+SELECT
+    work.work_id,
+    work.space_id,
+    work.goal,
+    work.lifecycle,
+    work.owner_user_id,
+    owner.display_name AS owner_display_name,
+    work.creator_user_id,
+    creator.display_name AS creator_display_name,
+    work.input_head_seq,
+    work.applied_input_seq,
+    work.understanding,
+    work.next_step,
+    work.created_at,
+    EXISTS (
+        SELECT 1 FROM runs
+        WHERE runs.work_id = work.work_id
+          AND runs.state IN ('failed', 'unknown')
+          AND runs.retry_requested_at IS NULL
+    ) AS needs_retry
+FROM works AS work
+JOIN carry_users AS owner ON owner.user_id = work.owner_user_id
+JOIN carry_users AS creator ON creator.user_id = work.creator_user_id
 WHERE work.space_id = $1 AND work.work_id = $2
 FOR SHARE OF work
 `
@@ -359,18 +660,20 @@ type LoadWorkParams struct {
 }
 
 type LoadWorkRow struct {
-	WorkID               string
-	SpaceID              string
-	Goal                 string
-	Lifecycle            string
-	OwnerUserID          string
-	CreatorUserID        string
-	InputHeadSeq         int64
-	AppliedInputSeq      int64
-	UnderstandingVersion int64
-	Understanding        *string
-	NextStep             *string
-	CreatedAt            pgtype.Timestamptz
+	WorkID             string
+	SpaceID            string
+	Goal               string
+	Lifecycle          string
+	OwnerUserID        string
+	OwnerDisplayName   string
+	CreatorUserID      string
+	CreatorDisplayName string
+	InputHeadSeq       int64
+	AppliedInputSeq    int64
+	Understanding      *string
+	NextStep           *string
+	CreatedAt          pgtype.Timestamptz
+	NeedsRetry         bool
 }
 
 func (q *Queries) LoadWork(ctx context.Context, arg LoadWorkParams) (LoadWorkRow, error) {
@@ -382,13 +685,15 @@ func (q *Queries) LoadWork(ctx context.Context, arg LoadWorkParams) (LoadWorkRow
 		&i.Goal,
 		&i.Lifecycle,
 		&i.OwnerUserID,
+		&i.OwnerDisplayName,
 		&i.CreatorUserID,
+		&i.CreatorDisplayName,
 		&i.InputHeadSeq,
 		&i.AppliedInputSeq,
-		&i.UnderstandingVersion,
 		&i.Understanding,
 		&i.NextStep,
 		&i.CreatedAt,
+		&i.NeedsRetry,
 	)
 	return i, err
 }
@@ -463,18 +768,62 @@ func (q *Queries) LockWork(ctx context.Context, arg LockWorkParams) (LockWorkRow
 	return i, err
 }
 
-const workNeedsRetry = `-- name: WorkNeedsRetry :one
+const workHasMessagesBefore = `-- name: WorkHasMessagesBefore :one
 SELECT EXISTS (
-    SELECT 1 FROM runs
-    WHERE work_id = $1
-      AND state IN ('failed', 'unknown')
-      AND retry_requested_at IS NULL
+    SELECT 1 FROM work_messages
+    WHERE work_id = $1 AND input_seq < $2
 )
 `
 
-func (q *Queries) WorkNeedsRetry(ctx context.Context, workID string) (bool, error) {
-	row := q.db.QueryRow(ctx, workNeedsRetry, workID)
+type WorkHasMessagesBeforeParams struct {
+	WorkID   string
+	InputSeq int64
+}
+
+func (q *Queries) WorkHasMessagesBefore(ctx context.Context, arg WorkHasMessagesBeforeParams) (bool, error) {
+	row := q.db.QueryRow(ctx, workHasMessagesBefore, arg.WorkID, arg.InputSeq)
 	var exists bool
 	err := row.Scan(&exists)
 	return exists, err
+}
+
+const workListCursor = `-- name: WorkListCursor :one
+SELECT created_at, work_id
+FROM works
+WHERE space_id = $1 AND work_id = $2
+`
+
+type WorkListCursorParams struct {
+	SpaceID string
+	WorkID  string
+}
+
+type WorkListCursorRow struct {
+	CreatedAt pgtype.Timestamptz
+	WorkID    string
+}
+
+func (q *Queries) WorkListCursor(ctx context.Context, arg WorkListCursorParams) (WorkListCursorRow, error) {
+	row := q.db.QueryRow(ctx, workListCursor, arg.SpaceID, arg.WorkID)
+	var i WorkListCursorRow
+	err := row.Scan(&i.CreatedAt, &i.WorkID)
+	return i, err
+}
+
+const workMessageCursorSequence = `-- name: WorkMessageCursorSequence :one
+SELECT input_seq
+FROM work_messages
+WHERE work_id = $1 AND message_id = $2
+`
+
+type WorkMessageCursorSequenceParams struct {
+	WorkID    string
+	MessageID string
+}
+
+func (q *Queries) WorkMessageCursorSequence(ctx context.Context, arg WorkMessageCursorSequenceParams) (int64, error) {
+	row := q.db.QueryRow(ctx, workMessageCursorSequence, arg.WorkID, arg.MessageID)
+	var input_seq int64
+	err := row.Scan(&input_seq)
+	return input_seq, err
 }

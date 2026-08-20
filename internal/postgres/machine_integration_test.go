@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ApexReasoning/carry/internal/host"
+	"github.com/ApexReasoning/carry/internal/machine"
 	"github.com/ApexReasoning/carry/internal/postgres/dbsqlc"
 	"github.com/ApexReasoning/carry/internal/space"
 	"github.com/google/uuid"
@@ -30,7 +30,7 @@ func TestMachineEnrollmentRequiresPermissionAndIsIdempotent(t *testing.T) {
 		t.Fatalf("bootstrap: %v", err)
 	}
 
-	command := host.EnrollMachineCommand{
+	command := machine.EnrollMachineCommand{
 		MachineID: uuid.NewString(), SpaceID: bootstrap.SpaceID, DisplayName: "lab-mac",
 		PublicKeyDER: []byte("public-key"), CertificatePEM: []byte("certificate"),
 		CertificateSerial: uuid.NewString(), EnrolledByUserID: bootstrap.UserID,
@@ -53,7 +53,7 @@ func TestMachineEnrollmentRequiresPermissionAndIsIdempotent(t *testing.T) {
 	conflict.PublicKeyDER = []byte("different-public-key")
 	conflict.CertificatePEM = []byte("different-certificate")
 	conflict.CertificateSerial = uuid.NewString()
-	if _, err := store.EnrollMachine(ctx, conflict); !errors.Is(err, host.ErrIdempotencyConflict) {
+	if _, err := store.EnrollMachine(ctx, conflict); !errors.Is(err, machine.ErrIdempotencyConflict) {
 		t.Fatalf("conflicting enrollment error = %v", err)
 	}
 	displayNameConflict := command
@@ -61,7 +61,7 @@ func TestMachineEnrollmentRequiresPermissionAndIsIdempotent(t *testing.T) {
 	displayNameConflict.DisplayName = "another-lab-mac"
 	displayNameConflict.CertificatePEM = []byte("another-certificate")
 	displayNameConflict.CertificateSerial = uuid.NewString()
-	if _, err := store.EnrollMachine(ctx, displayNameConflict); !errors.Is(err, host.ErrIdempotencyConflict) {
+	if _, err := store.EnrollMachine(ctx, displayNameConflict); !errors.Is(err, machine.ErrIdempotencyConflict) {
 		t.Fatalf("changed display name enrollment error = %v", err)
 	}
 
@@ -97,14 +97,14 @@ func TestConcurrentMachineEnrollmentReturnsTheDurableWinner(t *testing.T) {
 	}
 
 	const callers = 8
-	results := make(chan host.MachineEnrollment, callers)
+	results := make(chan machine.MachineEnrollment, callers)
 	errorsFound := make(chan error, callers)
 	var wait sync.WaitGroup
 	wait.Add(callers)
 	for range callers {
 		go func() {
 			defer wait.Done()
-			enrollment, enrollErr := store.EnrollMachine(ctx, host.EnrollMachineCommand{
+			enrollment, enrollErr := store.EnrollMachine(ctx, machine.EnrollMachineCommand{
 				MachineID: uuid.NewString(), SpaceID: bootstrap.SpaceID, DisplayName: "materials-host",
 				PublicKeyDER: []byte("same-public-key"), CertificatePEM: []byte(uuid.NewString()),
 				CertificateSerial: uuid.NewString(), EnrolledByUserID: bootstrap.UserID,
@@ -124,7 +124,7 @@ func TestConcurrentMachineEnrollmentReturnsTheDurableWinner(t *testing.T) {
 		t.Fatalf("concurrent enrollment: %v", enrollErr)
 	}
 
-	var winner host.MachineEnrollment
+	var winner machine.MachineEnrollment
 	for enrollment := range results {
 		if winner.MachineID == "" {
 			winner = enrollment

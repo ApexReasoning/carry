@@ -46,6 +46,7 @@ func TestCreateWorkTakesOwnerFromAuthenticatedMember(t *testing.T) {
 	if commands.create.IdempotencyKey != "renewal-analysis" {
 		t.Fatalf("idempotency key = %q", commands.create.IdempotencyKey)
 	}
+	assertNoStore(t, response)
 }
 
 func TestCreateWorkRejectsCallerNominatedOwner(t *testing.T) {
@@ -71,6 +72,7 @@ func TestCreateWorkRejectsCallerNominatedOwner(t *testing.T) {
 	if commands.create.Goal != "" {
 		t.Fatalf("invalid request reached Work command: %#v", commands.create)
 	}
+	assertNoStore(t, response)
 }
 
 func TestAppendWorkMessageUsesAuthenticatedAuthor(t *testing.T) {
@@ -110,7 +112,7 @@ func TestAppendWorkMessageAcceptsWorstCaseEscapedValidEnvelope(t *testing.T) {
 		spaceID = "2ba3dd27-1b41-453c-8057-91f31a0d13b1"
 		workID  = "3ce2b155-b998-458e-9e5e-f022ca509135"
 	)
-	text := strings.Repeat("\x00", 60*1024)
+	text := strings.Repeat("\x01", 60*1024)
 	body, err := json.Marshal(struct {
 		Text string `json:"text"`
 	}{Text: text})
@@ -138,6 +140,60 @@ func TestAppendWorkMessageAcceptsWorstCaseEscapedValidEnvelope(t *testing.T) {
 	}
 	if commands.append.Text != text {
 		t.Fatalf("decoded message bytes = %d, want %d", len(commands.append.Text), len(text))
+	}
+}
+
+func TestWorkReadCursorsAreBoundedAndExact(t *testing.T) {
+	t.Parallel()
+	const (
+		spaceID  = "2ba3dd27-1b41-453c-8057-91f31a0d13b1"
+		workID   = "3ce2b155-b998-458e-9e5e-f022ca509135"
+		cursorID = "4f7d55d9-157a-42dc-b339-e415487a1d60"
+	)
+	queries := &recordingWorkQueries{page: work.Page{
+		Works: []work.Summary{{WorkID: workID, SpaceID: spaceID, Goal: "Prepare renewal", Lifecycle: work.LifecycleOpen,
+			OwnerUserID: "member-9", OwnerDisplayName: "Mina", CreatorUserID: "member-9", CreatorDisplayName: "Mina"}},
+		HasEarlier: true,
+	}}
+	handler := workTestAPI(t, &recordingWorkCommands{}, queries)
+	request := httptest.NewRequest(http.MethodGet, "/v1/spaces/"+spaceID+"/works?before="+cursorID, nil)
+	request.Header.Set("Authorization", "Bearer member-token")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || queries.listCommand.Before != cursorID ||
+		!strings.Contains(response.Body.String(), `"has_earlier_works":true`) ||
+		!strings.Contains(response.Body.String(), `"owner_display_name":"Mina"`) {
+		t.Fatalf("list response = %d %s; command = %#v", response.Code, response.Body.String(), queries.listCommand)
+	}
+	assertNoStore(t, response)
+
+	request = httptest.NewRequest(http.MethodGet, "/v1/spaces/"+spaceID+"/works/"+workID+"?before="+cursorID, nil)
+	request.Header.Set("Authorization", "Bearer member-token")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || queries.loadCommand.BeforeMessage != cursorID {
+		t.Fatalf("load response = %d %s; command = %#v", response.Code, response.Body.String(), queries.loadCommand)
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/v1/spaces/"+spaceID+"/works?before="+cursorID+"&before="+workID, nil)
+	request.Header.Set("Authorization", "Bearer member-token")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("duplicate cursor status = %d, body = %s", response.Code, response.Body.String())
+	}
+}
+
+func TestWorkStoreCursorErrorsAreBadRequests(t *testing.T) {
+	t.Parallel()
+	const spaceID = "2ba3dd27-1b41-453c-8057-91f31a0d13b1"
+	handler := workTestAPI(t, &recordingWorkCommands{}, &recordingWorkQueries{listErr: work.ErrInvalidCursor})
+	request := httptest.NewRequest(http.MethodGet, "/v1/spaces/"+spaceID+"/works", nil)
+	request.Header.Set("Authorization", "Bearer member-token")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("cursor error status = %d, body = %s", response.Code, response.Body.String())
 	}
 }
 
@@ -208,16 +264,22 @@ func (s *recordingWorkCommands) RequestWorkRetry(_ context.Context, command work
 }
 
 type recordingWorkQueries struct {
-	listed  []work.Work
-	details work.Details
+	page        work.Page
+	details     work.Details
+	listCommand work.ListCommand
+	loadCommand work.LoadCommand
+	listErr     error
+	loadErr     error
 }
 
-func (s *recordingWorkQueries) ListWorks(context.Context, string, string) ([]work.Work, error) {
-	return s.listed, nil
+func (s *recordingWorkQueries) ListWorks(_ context.Context, command work.ListCommand) (work.Page, error) {
+	s.listCommand = command
+	return s.page, s.listErr
 }
 
-func (s *recordingWorkQueries) LoadWork(context.Context, string, string, string) (work.Details, error) {
-	return s.details, nil
+func (s *recordingWorkQueries) LoadWork(_ context.Context, command work.LoadCommand) (work.Details, error) {
+	s.loadCommand = command
+	return s.details, s.loadErr
 }
 
 var _ MachineEnrollmentStore = (*recordingMachineEnrollments)(nil)

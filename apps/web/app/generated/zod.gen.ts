@@ -13,8 +13,15 @@ export const zMembership = z.object({
 });
 
 export const zMember = z.object({
-  user_id: z.string(),
+  user_id: z.uuid(),
+  display_name: z.string(),
   spaces: z.array(zMembership),
+});
+
+export const zMachineEnrollment = z.object({
+  machine_id: z.uuid(),
+  space_id: z.uuid(),
+  certificate_pem: z.string(),
 });
 
 export const zConversationMessage = z.object({
@@ -31,10 +38,26 @@ export const zWork = z.object({
   space_id: z.uuid(),
   goal: z.string(),
   lifecycle: z.enum(["open"]),
-  owner_user_id: z.string(),
-  creator_user_id: z.string(),
+  owner_user_id: z.uuid(),
+  owner_display_name: z.string(),
+  creator_user_id: z.uuid(),
+  creator_display_name: z.string(),
   understanding: z.string(),
   next_step: z.string(),
+  has_unapplied_input: z.boolean(),
+  needs_retry: z.boolean(),
+  created_at: z.iso.datetime({ offset: true }),
+});
+
+export const zWorkSummary = z.object({
+  work_id: z.uuid(),
+  space_id: z.uuid(),
+  goal: z.string(),
+  lifecycle: z.enum(["open"]),
+  owner_user_id: z.uuid(),
+  owner_display_name: z.string(),
+  creator_user_id: z.uuid(),
+  creator_display_name: z.string(),
   has_unapplied_input: z.boolean(),
   needs_retry: z.boolean(),
   created_at: z.iso.datetime({ offset: true }),
@@ -43,7 +66,8 @@ export const zWork = z.object({
 export const zWorkMessage = z.object({
   message_id: z.uuid(),
   work_id: z.uuid(),
-  author_user_id: z.string(),
+  author_user_id: z.uuid(),
+  author_display_name: z.string(),
   text: z.string(),
   created_at: z.iso.datetime({ offset: true }),
 });
@@ -57,6 +81,10 @@ export const zIdempotencyKey = z.string().min(1).max(255);
 export const zBeforeConversationMessage = z.uuid();
 
 export const zAfterConversationMessage = z.uuid();
+
+export const zBeforeWork = z.uuid();
+
+export const zBeforeWorkMessage = z.uuid();
 
 /**
  * Browser session created
@@ -72,6 +100,33 @@ export const zRevokeCurrentBrowserSessionResponse = z.void();
  * Current member and Spaces
  */
 export const zLoadCurrentMemberResponse = zMember;
+
+export const zEnrollMachineBody = z.object({
+  space_id: z.uuid(),
+  display_name: z.string().min(1),
+  public_key: z.string(),
+});
+
+export const zEnrollMachineHeaders = z.object({
+  "Idempotency-Key": z.string().min(1).max(255),
+});
+
+/**
+ * Machine enrolled or idempotently replayed
+ */
+export const zEnrollMachineResponse = zMachineEnrollment;
+
+export const zRevokeMachineBody = z.object({
+  space_id: z.uuid(),
+  machine_id: z.uuid(),
+});
+
+/**
+ * Machine revoked
+ */
+export const zRevokeMachineResponse = z.object({
+  status: z.literal("revoked"),
+});
 
 export const zListConversationMessagesPath = z.object({
   spaceID: z.uuid(),
@@ -110,11 +165,16 @@ export const zListWorksPath = z.object({
   spaceID: z.uuid(),
 });
 
+export const zListWorksQuery = z.object({
+  before: z.uuid().optional(),
+});
+
 /**
- * Work visible in the Space
+ * Newest or cursor-relative Work summaries visible in the Space
  */
 export const zListWorksResponse = z.object({
-  works: z.array(zWork),
+  works: z.array(zWorkSummary).max(50),
+  has_earlier_works: z.boolean(),
 });
 
 export const zCreateWorkBody = z.object({
@@ -139,12 +199,17 @@ export const zLoadWorkPath = z.object({
   workID: z.uuid(),
 });
 
+export const zLoadWorkQuery = z.object({
+  before: z.uuid().optional(),
+});
+
 /**
- * Work and its ordered member messages
+ * Work and its newest or cursor-relative ordered member message page
  */
 export const zLoadWorkResponse = z.object({
   work: zWork,
-  messages: z.array(zWorkMessage),
+  messages: z.array(zWorkMessage).max(50),
+  has_earlier_messages: z.boolean(),
 });
 
 export const zAppendWorkMessageBody = z.object({

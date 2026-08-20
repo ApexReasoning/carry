@@ -12,11 +12,12 @@ import (
 )
 
 const authenticateBrowserSession = `-- name: AuthenticateBrowserSession :one
-SELECT browser_session.user_id
+SELECT browser_session.user_id, carry_user.display_name
 FROM browser_sessions AS browser_session
 INNER JOIN user_tokens AS user_token
     ON user_token.token_id = browser_session.source_token_id
     AND user_token.user_id = browser_session.user_id
+INNER JOIN carry_users AS carry_user ON carry_user.user_id = browser_session.user_id
 WHERE
     browser_session.session_digest = $1
     AND browser_session.revoked_at IS NULL
@@ -25,11 +26,16 @@ WHERE
     AND user_token.expires_at > transaction_timestamp()
 `
 
-func (q *Queries) AuthenticateBrowserSession(ctx context.Context, sessionDigest []byte) (string, error) {
+type AuthenticateBrowserSessionRow struct {
+	UserID      string
+	DisplayName string
+}
+
+func (q *Queries) AuthenticateBrowserSession(ctx context.Context, sessionDigest []byte) (AuthenticateBrowserSessionRow, error) {
 	row := q.db.QueryRow(ctx, authenticateBrowserSession, sessionDigest)
-	var user_id string
-	err := row.Scan(&user_id)
-	return user_id, err
+	var i AuthenticateBrowserSessionRow
+	err := row.Scan(&i.UserID, &i.DisplayName)
+	return i, err
 }
 
 const createBrowserSession = `-- name: CreateBrowserSession :one

@@ -164,11 +164,11 @@ Work 是连续性的事实源。它保存：
 
 目标是 Work 的稳定字段。第一轮执行读取目标，但不再把目标复制成一条 tagged Agent input。
 
-Work Messages 按准确顺序追加。Run 固定本次要应用到哪里的输入上限；执行上下文只包含：
+Work Messages 按准确顺序追加。新 Run 选择尚未应用输入的最长连续前缀，最多 32 条 Work Message 且消息文本合计最多 256 KiB；合法单条消息总能进入某个 Run。Run 持久固定本次输入上下限，成功后只推进到该上限，余量由后续 Run 继续。Recovery 使用原范围，不重新扩张。执行上下文只包含：
 
 - goal；
 - previous understanding 与 next step；
-- 本次新增消息，保持顺序和真实作者。
+- 本次有界新增消息，保持顺序和真实作者。
 
 模型不需要 input sequence、base version、Run ID、Attempt ID、fence 或 Machine identity。这些物理字段由 Host 保留并只用于提交。
 
@@ -235,7 +235,7 @@ Machine claim 在一个 PostgreSQL 事务中：
 
 ### 8.2 Claim descriptor
 
-Claim 只包含当前 Host 真正需要的字段：
+Claim 只包含当前 Host 真正需要且可由有界 wire 完整传输的字段：
 
 - Run、Attempt、Work identity；
 - fence 与 lease expiry；
@@ -314,12 +314,14 @@ Codex 缓冲结束但缺少准确 terminal notification 时，只可有界只读
 User API 只表达成员旅程：
 
 - 建立/撤销 Browser Session；
-- 读取当前成员与 Spaces；
+- 读取当前具名成员与 Spaces；
 - 分页读取并幂等追加当前成员在一个 Space 中的私人 Conversation；
-- 创建、列出、读取 Work；
+- 创建 Work，分页列出轻量 Work summaries，并分页读取一份 Work 的有界消息历史；
 - 追加 Work Message；
 - 对需要成员选择的 Work 显式请求重新推进；
 - enrollment/revocation Machine。
+
+所有 credential-bearing User API 与 Host API 响应统一 `Cache-Control: no-store`。Work list 使用 Work UUID 作为 exclusive cursor，每页最多 50 条 summary；Work detail 的消息页使用 Message UUID cursor，同时最多 50 条且消息文本合计最多 256 KiB。cursor 必须属于准确 Space/Work。User API 返回 Identity 当前 display name 作为读取时 projection，不把名字复制成 Work 持久事实。
 
 User Work response 包含：
 
@@ -402,10 +404,12 @@ apps/
   web/
 internal/
   cli/
+    userapi/
   identity/
   space/
   conversation/
   work/
+  machine/
   run/
   host/
   agent/
@@ -468,12 +472,14 @@ protocol/
 - Run 与 Attempt 在 claim 事务中一起建立，没有 pending Run；
 - expired Attempt 不能 renew 复活；
 - recovery 增加 fence，旧 Host 不能 commit 或 finish；
+- 预存的大量 Work Messages 被切成有界连续 Run ranges，后续 Run 无遗漏、无重复地继续；
 - Work 运行期间到达的新消息不会被旧 range 错误标记已应用；
 - Failed/Unknown 不自动 replay，active member 的幂等 `Try again` 才允许一个 fresh Run；
 - Commit 直接更新 Work 当前理解，不创建 revision row；
 - revoked Machine 不能领取或修改执行；
 - Pi 与 Codex 分别通过同一 execution conformance；
-- User API 不暴露内部 sequence/version/Run/Attempt；
+- User API 的 Work summaries 与消息历史有界分页，不暴露内部 sequence/version/Run/Attempt；
+- credential-bearing response 都是 `no-store`；
 - PostgreSQL focused tests 使用真实隔离数据库，缺失数据库不是 pass。
 
 ## 16. 明确不采用

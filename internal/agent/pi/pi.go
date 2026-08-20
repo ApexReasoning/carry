@@ -26,7 +26,7 @@ func (adapter *Adapter) Diagnose(ctx context.Context) error {
 	if _, err := exec.LookPath("pi"); err != nil {
 		return fmt.Errorf("%w: Pi executable: %v", host.ErrAgentUnavailable, err)
 	}
-	probeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	var output boundedBuffer
 	command := exec.CommandContext(probeCtx, "pi", "--version")

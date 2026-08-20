@@ -4,11 +4,14 @@ import (
 	"errors"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const (
 	MaxUnderstandingBytes = 60 * 1024
 	MaxNextStepBytes      = 8 * 1024
+	MaxInputMessages      = 32
+	MaxInputTextBytes     = 256 * 1024
 )
 
 var (
@@ -70,10 +73,15 @@ type FinishCommand struct {
 func ValidateUnderstandingUpdate(understanding string, nextStep string) (string, string, error) {
 	understanding = strings.TrimSpace(understanding)
 	nextStep = strings.TrimSpace(nextStep)
-	if understanding == "" || nextStep == "" || len(understanding) > MaxUnderstandingBytes || len(nextStep) > MaxNextStepBytes {
+	if understanding == "" || nextStep == "" || len(understanding) > MaxUnderstandingBytes ||
+		len(nextStep) > MaxNextStepBytes || !validText(understanding) || !validText(nextStep) {
 		return "", "", ErrInvalidUpdate
 	}
 	return understanding, nextStep, nil
+}
+
+func validText(value string) bool {
+	return utf8.ValidString(value) && !strings.ContainsRune(value, 0)
 }
 
 func ValidateUnresolvedOutcome(outcome State) error {

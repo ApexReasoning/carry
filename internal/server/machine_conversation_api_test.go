@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/ApexReasoning/carry/internal/conversation"
-	"github.com/ApexReasoning/carry/internal/host"
+	"github.com/ApexReasoning/carry/internal/machine"
 )
 
 const machineConversationSourceID = "8fd9dfd3-35db-4384-b674-e462aee445ef"
@@ -194,7 +194,7 @@ func TestMachineConversationRoutesRejectMemberCredentialsAndMapReplyErrors(t *te
 		status int
 	}{
 		{name: "empty", err: conversation.ErrNoReplyAvailable, status: http.StatusNoContent},
-		{name: "revoked", err: host.ErrMachineRevoked, status: http.StatusForbidden},
+		{name: "revoked", err: machine.ErrMachineRevoked, status: http.StatusForbidden},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			errorStore := &recordingMachineConversations{err: testCase.err}
@@ -236,7 +236,7 @@ func TestMachineConversationRoutesRejectMemberCredentialsAndMapReplyErrors(t *te
 
 func machineConversationTestAPI(
 	t *testing.T,
-	authority *host.CertificateAuthority,
+	authority *machine.CertificateAuthority,
 	conversations MachineConversationStore,
 ) http.Handler {
 	t.Helper()

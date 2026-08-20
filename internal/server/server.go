@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -47,8 +48,19 @@ func newServer(
 	})
 	// Fetch-Metadata and Origin checks protect browser mutations while CLI and
 	// Machine requests, which carry neither browser header, remain supported.
-	server.handler = http.NewCrossOriginProtection().Handler(router)
+	// noStoreV1 stays outside that protection so even early rejections and
+	// unmatched credential-surface responses cannot be cached.
+	server.handler = noStoreV1(http.NewCrossOriginProtection().Handler(router))
 	return server
+}
+
+func noStoreV1(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/v1" || strings.HasPrefix(request.URL.Path, "/v1/") {
+			response.Header().Set("Cache-Control", "no-store")
+		}
+		next.ServeHTTP(response, request)
+	})
 }
 
 // Handler returns the fully composed HTTP surface.

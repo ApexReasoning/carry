@@ -90,6 +90,7 @@ export function App() {
           </span>
         </a>
         <div className="header-actions">
+          <span className="member-name">{session.member.display_name}</span>
           {session.member.spaces.length > 1 ? (
             <label className="space-picker">
               <span className="space-picker-label">Space</span>
@@ -161,9 +162,11 @@ export function App() {
               <div className="work-grid">
                 <WorkList
                   works={board.works}
+                  hasEarlier={board.hasEarlierWorks}
                   selectedWorkID={board.details?.work.work_id ?? null}
                   busy={busy}
                   onSelect={(workID) => void board.selectWork(workID)}
+                  onLoadEarlier={() => void board.loadEarlierWorks()}
                 />
                 <WorkDetail
                   key={board.details?.work.work_id ?? "no-work-selected"}
@@ -172,6 +175,7 @@ export function App() {
                   currentMemberID={session.member.user_id}
                   onMessage={board.addMessage}
                   onRetry={board.retryCurrentWork}
+                  onLoadEarlierMessages={() => void board.loadEarlierMessages()}
                 />
               </div>
             </section>

@@ -5,6 +5,7 @@ import { beforeEach, expect, test, vi } from "vitest";
 import { App } from "./carry-app";
 
 const spaceID = "11111111-1111-4111-8111-111111111111";
+const authenticatedMemberID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const workID = "22222222-2222-4222-8222-222222222222";
 const messageID = "33333333-3333-4333-8333-333333333333";
 const secondWorkID = "44444444-4444-4444-8444-444444444444";
@@ -33,7 +34,8 @@ test("exchanges a member token without storing it and creates durable Work", asy
         if (!sessionEstablished)
           return json({ error: "member authentication is required" }, 401);
         return json({
-          user_id: "member-1",
+          user_id: authenticatedMemberID,
+          display_name: "Alex Morgan",
           spaces: [
             { space_id: spaceID, name: "Research", can_enroll_machines: true },
           ],
@@ -47,7 +49,10 @@ test("exchanges a member token without storing it and creates durable Work", asy
         return new Response(null, { status: 204 });
       }
       if (request.method === "GET" && path === `/v1/spaces/${spaceID}/works`) {
-        return json({ works: created ? [work()] : [] });
+        return json({
+          works: created ? [work()] : [],
+          has_earlier_works: false,
+        });
       }
       if (request.method === "POST" && path === `/v1/spaces/${spaceID}/works`) {
         expect(request.headers.get("Idempotency-Key")).toBeTruthy();
@@ -84,6 +89,7 @@ test("exchanges a member token without storing it and creates durable Work", asy
               : "",
           },
           messages: messageAdded ? [message()] : [],
+          has_earlier_messages: false,
         });
       }
       throw new Error(`unexpected request: ${request.method} ${path}`);
@@ -139,7 +145,8 @@ test("clears a message draft when the member selects another Work", async () => 
         if (!sessionEstablished)
           return json({ error: "member authentication is required" }, 401);
         return json({
-          user_id: "member-1",
+          user_id: authenticatedMemberID,
+          display_name: "Alex Morgan",
           spaces: [
             { space_id: spaceID, name: "Research", can_enroll_machines: true },
           ],
@@ -155,6 +162,7 @@ test("clears a message draft when the member selects another Work", async () => 
             work(workID, "Review customer renewals"),
             work(secondWorkID, "Prepare the support themes"),
           ],
+          has_earlier_works: false,
         });
       }
       if (
@@ -164,6 +172,7 @@ test("clears a message draft when the member selects another Work", async () => 
         return json({
           work: work(workID, "Review customer renewals"),
           messages: [],
+          has_earlier_messages: false,
         });
       }
       if (
@@ -173,6 +182,7 @@ test("clears a message draft when the member selects another Work", async () => 
         return json({
           work: work(secondWorkID, "Prepare the support themes"),
           messages: [],
+          has_earlier_messages: false,
         });
       }
       throw new Error(`unexpected request: ${request.method} ${path}`);
@@ -221,7 +231,8 @@ test("reuses the same Work identity after a create response is lost", async () =
         if (!sessionEstablished)
           return json({ error: "member authentication is required" }, 401);
         return json({
-          user_id: "member-1",
+          user_id: authenticatedMemberID,
+          display_name: "Alex Morgan",
           spaces: [
             { space_id: spaceID, name: "Research", can_enroll_machines: true },
           ],
@@ -232,7 +243,7 @@ test("reuses the same Work identity after a create response is lost", async () =
         return new Response(null, { status: 204 });
       }
       if (request.method === "GET" && path === `/v1/spaces/${spaceID}/works`) {
-        return json({ works: [] });
+        return json({ works: [], has_earlier_works: false });
       }
       if (request.method === "POST" && path === `/v1/spaces/${spaceID}/works`) {
         createKeys.push(request.headers.get("Idempotency-Key"));
@@ -253,6 +264,7 @@ test("reuses the same Work identity after a create response is lost", async () =
             has_unapplied_input: false,
           },
           messages: [message()],
+          has_earlier_messages: false,
         });
       }
       throw new Error(`unexpected request: ${request.method} ${path}`);
@@ -304,7 +316,8 @@ test("reuses a pending Work identity after remount", async () => {
         if (!sessionEstablished)
           return json({ error: "authentication required" }, 401);
         return json({
-          user_id: "member-1",
+          user_id: authenticatedMemberID,
+          display_name: "Alex Morgan",
           spaces: [
             { space_id: spaceID, name: "Research", can_enroll_machines: true },
           ],
@@ -315,7 +328,7 @@ test("reuses a pending Work identity after remount", async () => {
         return new Response(null, { status: 204 });
       }
       if (request.method === "GET" && path === `/v1/spaces/${spaceID}/works`)
-        return json({ works: [] });
+        return json({ works: [], has_earlier_works: false });
       if (request.method === "POST" && path === `/v1/spaces/${spaceID}/works`) {
         createKeys.push(request.headers.get("Idempotency-Key"));
         if (createKeys.length === 1) throw new TypeError("response lost");
@@ -325,7 +338,11 @@ test("reuses a pending Work identity after remount", async () => {
         request.method === "GET" &&
         path === `/v1/spaces/${spaceID}/works/${workID}`
       ) {
-        return json({ work: work(), messages: [] });
+        return json({
+          work: work(),
+          messages: [],
+          has_earlier_messages: false,
+        });
       }
       throw new Error(`unexpected request: ${request.method} ${path}`);
     }),
@@ -373,7 +390,8 @@ test("requires an explicit Space choice when several are available", async () =>
         if (!sessionEstablished)
           return json({ error: "authentication required" }, 401);
         return json({
-          user_id: "member-1",
+          user_id: authenticatedMemberID,
+          display_name: "Alex Morgan",
           spaces: [
             { space_id: spaceID, name: "Research", can_enroll_machines: true },
             {
@@ -390,7 +408,7 @@ test("requires an explicit Space choice when several are available", async () =>
       }
       if (request.method === "GET" && path.endsWith("/works")) {
         workLists.push(path);
-        return json({ works: [] });
+        return json({ works: [], has_earlier_works: false });
       }
       throw new Error(`unexpected request: ${request.method} ${path}`);
     }),
@@ -425,7 +443,8 @@ test("keeps Work hidden across an unconfirmed sign-out reload", async () => {
       }
       if (request.method === "GET" && path === "/v1/me") {
         return json({
-          user_id: "member-1",
+          user_id: authenticatedMemberID,
+          display_name: "Alex Morgan",
           spaces: [
             {
               space_id: spaceID,
@@ -436,7 +455,7 @@ test("keeps Work hidden across an unconfirmed sign-out reload", async () => {
         });
       }
       if (request.method === "GET" && path.endsWith("/works")) {
-        return json({ works: [work()] });
+        return json({ works: [work()], has_earlier_works: false });
       }
       if (
         request.method === "DELETE" &&
@@ -503,7 +522,8 @@ test("falls back from a failed URL latch without reopening Work", async () => {
       }
       if (request.method === "GET" && path === "/v1/me") {
         return json({
-          user_id: "member-1",
+          user_id: authenticatedMemberID,
+          display_name: "Alex Morgan",
           spaces: [
             {
               space_id: spaceID,
@@ -514,7 +534,7 @@ test("falls back from a failed URL latch without reopening Work", async () => {
         });
       }
       if (request.method === "GET" && path.endsWith("/works")) {
-        return json({ works: [work()] });
+        return json({ works: [work()], has_earlier_works: false });
       }
       if (
         request.method === "DELETE" &&
@@ -574,7 +594,8 @@ test("reconciles a lost Work retry response by reloading the Work", async () => 
       if (isConversationList(request, path)) return json({ messages: [] });
       if (request.method === "GET" && path === "/v1/me") {
         return json({
-          user_id: "member-1",
+          user_id: authenticatedMemberID,
+          display_name: "Alex Morgan",
           spaces: [
             {
               space_id: spaceID,
@@ -585,7 +606,10 @@ test("reconciles a lost Work retry response by reloading the Work", async () => 
         });
       }
       if (request.method === "GET" && path.endsWith("/works")) {
-        return json({ works: [{ ...work(), needs_retry: true }] });
+        return json({
+          works: [{ ...work(), needs_retry: true }],
+          has_earlier_works: false,
+        });
       }
       if (
         request.method === "GET" &&
@@ -594,6 +618,7 @@ test("reconciles a lost Work retry response by reloading the Work", async () => 
         return json({
           work: { ...work(), needs_retry: !retryRequested },
           messages: [],
+          has_earlier_messages: false,
         });
       }
       if (
@@ -634,7 +659,8 @@ test("reconciles an old retry identity before authorizing a later terminal Run",
       if (isConversationList(request, path)) return json({ messages: [] });
       if (request.method === "GET" && path === "/v1/me") {
         return json({
-          user_id: "member-1",
+          user_id: authenticatedMemberID,
+          display_name: "Alex Morgan",
           spaces: [
             {
               space_id: spaceID,
@@ -645,7 +671,10 @@ test("reconciles an old retry identity before authorizing a later terminal Run",
         });
       }
       if (request.method === "GET" && path.endsWith("/works")) {
-        return json({ works: [{ ...work(), needs_retry: true }] });
+        return json({
+          works: [{ ...work(), needs_retry: true }],
+          has_earlier_works: false,
+        });
       }
       if (
         request.method === "GET" &&
@@ -656,6 +685,7 @@ test("reconciles an old retry identity before authorizing a later terminal Run",
         return json({
           work: { ...work(), needs_retry: needsRetry },
           messages: [],
+          has_earlier_messages: false,
         });
       }
       if (
@@ -710,14 +740,15 @@ test("opens shared Work from a private Carry reply without copying private text"
       const path = new URL(request.url).pathname;
       if (request.method === "GET" && path === "/v1/me") {
         return json({
-          user_id: "member-1",
+          user_id: authenticatedMemberID,
+          display_name: "Alex Morgan",
           spaces: [
             { space_id: spaceID, name: "Research", can_enroll_machines: true },
           ],
         });
       }
       if (request.method === "GET" && path.endsWith("/works")) {
-        return json({ works: [] });
+        return json({ works: [], has_earlier_works: false });
       }
       if (request.method === "GET" && path.endsWith("/conversation/messages")) {
         return json({
@@ -746,6 +777,7 @@ test("opens shared Work from a private Carry reply without copying private text"
         return json({
           work: work(secondWorkID, "Prepare the launch brief"),
           messages: [],
+          has_earlier_messages: false,
         });
       }
       throw new Error(`unexpected request: ${request.method} ${path}`);
@@ -783,14 +815,15 @@ test("reconciles an unknown browser-session exchange", async () => {
         if (!sessionEstablished)
           return json({ error: "authentication required" }, 401);
         return json({
-          user_id: "member-1",
+          user_id: authenticatedMemberID,
+          display_name: "Alex Morgan",
           spaces: [
             { space_id: spaceID, name: "Research", can_enroll_machines: true },
           ],
         });
       }
       if (request.method === "GET" && path === `/v1/spaces/${spaceID}/works`)
-        return json({ works: [] });
+        return json({ works: [], has_earlier_works: false });
       throw new Error(`unexpected request: ${request.method} ${path}`);
     }),
   );
@@ -812,8 +845,10 @@ function work(id = workID, goal = "Review customer renewals") {
     space_id: spaceID,
     goal,
     lifecycle: "open",
-    owner_user_id: "member-1",
-    creator_user_id: "member-1",
+    owner_user_id: authenticatedMemberID,
+    owner_display_name: "Alex Morgan",
+    creator_user_id: authenticatedMemberID,
+    creator_display_name: "Alex Morgan",
     understanding: "",
     has_unapplied_input: true,
     needs_retry: false,
@@ -826,7 +861,8 @@ function message() {
   return {
     message_id: messageID,
     work_id: workID,
-    author_user_id: "member-1",
+    author_user_id: authenticatedMemberID,
+    author_display_name: "Alex Morgan",
     text: "  Renewal date is 30 September  ",
     created_at: "2026-08-19T00:01:00+08:00",
   };

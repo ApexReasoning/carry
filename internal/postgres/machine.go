@@ -5,25 +5,22 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
-	"github.com/ApexReasoning/carry/internal/host"
+	"github.com/ApexReasoning/carry/internal/machine"
 	"github.com/ApexReasoning/carry/internal/postgres/dbsqlc"
 	"github.com/ApexReasoning/carry/internal/space"
 	"github.com/jackc/pgx/v5"
 )
 
-func (s *Store) EnrollMachine(ctx context.Context, command host.EnrollMachineCommand) (host.MachineEnrollment, error) {
-	if strings.TrimSpace(command.MachineID) == "" || strings.TrimSpace(command.SpaceID) == "" ||
-		strings.TrimSpace(command.DisplayName) == "" || len(command.PublicKeyDER) == 0 ||
-		len(command.CertificatePEM) == 0 || strings.TrimSpace(command.CertificateSerial) == "" ||
-		strings.TrimSpace(command.EnrolledByUserID) == "" || strings.TrimSpace(command.IdempotencyKey) == "" {
-		return host.MachineEnrollment{}, errors.New("complete Machine enrollment is required")
+func (s *Store) EnrollMachine(ctx context.Context, command machine.EnrollMachineCommand) (machine.MachineEnrollment, error) {
+	normalizedDisplayName, err := machine.ValidateEnrollment(command)
+	if err != nil {
+		return machine.MachineEnrollment{}, err
 	}
 
 	transaction, err := s.pool.Begin(ctx)
 	if err != nil {
-		return host.MachineEnrollment{}, fmt.Errorf("begin Machine enrollment: %w", err)
+		return machine.MachineEnrollment{}, fmt.Errorf("begin Machine enrollment: %w", err)
 	}
 	defer func() {
 		_ = transaction.Rollback(context.Background())
@@ -31,18 +28,17 @@ func (s *Store) EnrollMachine(ctx context.Context, command host.EnrollMachineCom
 	queries := s.queries.WithTx(transaction)
 
 	if err := requireMachineEnrollmentPermission(ctx, queries, command.SpaceID, command.EnrolledByUserID); err != nil {
-		return host.MachineEnrollment{}, err
+		return machine.MachineEnrollment{}, err
 	}
-	normalizedDisplayName := strings.TrimSpace(command.DisplayName)
 	created, err := queries.CreateMachine(ctx, dbsqlc.CreateMachineParams{
 		MachineID: command.MachineID, SpaceID: command.SpaceID,
 		DisplayName: normalizedDisplayName, PublicKeyDer: command.PublicKeyDER,
 		CertificatePem: command.CertificatePEM, CertificateSerial: command.CertificateSerial,
 		EnrolledByUserID: command.EnrolledByUserID, EnrollmentIdempotencyKey: command.IdempotencyKey,
 	})
-	var enrollment host.MachineEnrollment
+	var enrollment machine.MachineEnrollment
 	if err == nil {
-		enrollment = host.MachineEnrollment{
+		enrollment = machine.MachineEnrollment{
 			MachineID: created.MachineID, SpaceID: created.SpaceID, CertificatePEM: created.CertificatePem,
 		}
 	} else if errors.Is(err, pgx.ErrNoRows) {
@@ -50,17 +46,17 @@ func (s *Store) EnrollMachine(ctx context.Context, command host.EnrollMachineCom
 			ctx, queries, command.SpaceID, command.EnrolledByUserID, command.IdempotencyKey,
 		)
 		if loadErr != nil {
-			return host.MachineEnrollment{}, loadErr
+			return machine.MachineEnrollment{}, loadErr
 		}
 		if existing.displayName != normalizedDisplayName || !bytes.Equal(existing.publicKeyDER, command.PublicKeyDER) {
-			return host.MachineEnrollment{}, host.ErrIdempotencyConflict
+			return machine.MachineEnrollment{}, machine.ErrIdempotencyConflict
 		}
 		enrollment = existing.enrollment
 	} else {
-		return host.MachineEnrollment{}, fmt.Errorf("insert Machine enrollment: %w", err)
+		return machine.MachineEnrollment{}, fmt.Errorf("insert Machine enrollment: %w", err)
 	}
 	if err := transaction.Commit(ctx); err != nil {
-		return host.MachineEnrollment{}, fmt.Errorf("commit Machine enrollment: %w", err)
+		return machine.MachineEnrollment{}, fmt.Errorf("commit Machine enrollment: %w", err)
 	}
 	return enrollment, nil
 }
@@ -84,7 +80,7 @@ func requireMachineEnrollmentPermission(
 }
 
 type storedMachineEnrollment struct {
-	enrollment   host.MachineEnrollment
+	enrollment   machine.MachineEnrollment
 	displayName  string
 	publicKeyDER []byte
 }
@@ -103,7 +99,7 @@ func loadEnrollmentByIdempotency(
 		return storedMachineEnrollment{}, fmt.Errorf("load idempotent Machine enrollment: %w", err)
 	}
 	return storedMachineEnrollment{
-		enrollment: host.MachineEnrollment{
+		enrollment: machine.MachineEnrollment{
 			MachineID: row.MachineID, SpaceID: row.SpaceID, CertificatePEM: row.CertificatePem,
 		},
 		displayName:  row.DisplayName,
@@ -131,7 +127,7 @@ func (s *Store) RevokeMachine(ctx context.Context, userID string, spaceID string
 		return fmt.Errorf("revoke Machine: %w", err)
 	}
 	if rowsAffected == 0 {
-		return host.ErrMachineNotFound
+		return machine.ErrMachineNotFound
 	}
 	if err := transaction.Commit(ctx); err != nil {
 		return fmt.Errorf("commit Machine revocation: %w", err)

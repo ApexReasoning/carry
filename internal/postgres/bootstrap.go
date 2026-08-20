@@ -145,12 +145,12 @@ func (s *Store) Bootstrap(ctx context.Context, command BootstrapCommand) (Bootst
 
 func (s *Store) AuthenticateUserToken(ctx context.Context, secret string) (identity.AuthenticatedUser, error) {
 	hash := identity.HashUserToken(secret)
-	userID, err := s.queries.AuthenticateUserToken(ctx, hash[:])
+	user, err := s.queries.AuthenticateUserToken(ctx, hash[:])
 	if errors.Is(err, pgx.ErrNoRows) {
 		return identity.AuthenticatedUser{}, identity.ErrUnauthenticated
 	}
 	if err != nil {
 		return identity.AuthenticatedUser{}, fmt.Errorf("authenticate user token: %w", err)
 	}
-	return identity.AuthenticatedUser{UserID: userID}, nil
+	return identity.AuthenticatedUser{UserID: user.UserID, DisplayName: user.DisplayName}, nil
 }

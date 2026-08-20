@@ -53,11 +53,7 @@ func (s *Store) CreateWork(ctx context.Context, command work.CreateCommand) (wor
 		if !bytes.Equal(existing.CreateRequestDigest, digest[:]) {
 			return work.Work{}, work.ErrIdempotencyConflict
 		}
-		needsRetry, loadErr := queries.WorkNeedsRetry(ctx, existing.WorkID)
-		if loadErr != nil {
-			return work.Work{}, fmt.Errorf("load Work retry state: %w", loadErr)
-		}
-		result := workFromIdempotencyRow(existing, needsRetry)
+		result := workFromIdempotencyRow(existing)
 		if err := transaction.Commit(ctx); err != nil {
 			return work.Work{}, fmt.Errorf("commit idempotent work creation: %w", err)
 		}
@@ -73,77 +69,120 @@ func (s *Store) CreateWork(ctx context.Context, command work.CreateCommand) (wor
 	return result, nil
 }
 
-func (s *Store) ListWorks(ctx context.Context, userID string, spaceID string) ([]work.Work, error) {
+func (s *Store) ListWorks(ctx context.Context, command work.ListCommand) (work.Page, error) {
 	transaction, err := s.pool.Begin(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("begin work list: %w", err)
+		return work.Page{}, fmt.Errorf("begin work list: %w", err)
 	}
 	defer func() { _ = transaction.Rollback(context.Background()) }()
 	queries := s.queries.WithTx(transaction)
-	if err := lockActiveWorkMembership(ctx, queries, spaceID, userID); err != nil {
-		return nil, err
+	if err := lockActiveWorkMembership(ctx, queries, command.SpaceID, command.UserID); err != nil {
+		return work.Page{}, err
 	}
-	rows, err := queries.ListWorks(ctx, spaceID)
-	if err != nil {
-		return nil, fmt.Errorf("list works: %w", err)
-	}
-	works := make([]work.Work, 0, len(rows))
-	for _, row := range rows {
-		needsRetry, retryErr := queries.WorkNeedsRetry(ctx, row.WorkID)
-		if retryErr != nil {
-			return nil, fmt.Errorf("load Work retry state: %w", retryErr)
+
+	var summaries []work.Summary
+	if command.Before == "" {
+		rows, listErr := queries.ListNewestWorks(ctx, command.SpaceID)
+		if listErr != nil {
+			return work.Page{}, fmt.Errorf("list newest Works: %w", listErr)
 		}
-		works = append(works, work.Work{
-			WorkID: row.WorkID, SpaceID: row.SpaceID, Goal: row.Goal,
-			Lifecycle: work.Lifecycle(row.Lifecycle), OwnerUserID: row.OwnerUserID,
-			CreatorUserID:     row.CreatorUserID,
-			Understanding:     textValue(row.Understanding),
-			NextStep:          textValue(row.NextStep),
-			HasUnappliedInput: row.AppliedInputSeq < row.InputHeadSeq,
-			NeedsRetry:        needsRetry,
-			CreatedAt:         row.CreatedAt.Time,
+		summaries = make([]work.Summary, 0, len(rows))
+		for _, row := range rows {
+			summaries = append(summaries, summaryFromNewestRow(row))
+		}
+	} else {
+		cursor, cursorErr := queries.WorkListCursor(ctx, dbsqlc.WorkListCursorParams{
+			SpaceID: command.SpaceID, WorkID: command.Before,
 		})
+		if errors.Is(cursorErr, pgx.ErrNoRows) {
+			return work.Page{}, work.ErrInvalidCursor
+		}
+		if cursorErr != nil {
+			return work.Page{}, fmt.Errorf("load Work list cursor: %w", cursorErr)
+		}
+		rows, listErr := queries.ListWorksBefore(ctx, dbsqlc.ListWorksBeforeParams{
+			SpaceID: command.SpaceID, CursorCreatedAt: cursor.CreatedAt, CursorWorkID: cursor.WorkID,
+		})
+		if listErr != nil {
+			return work.Page{}, fmt.Errorf("list Works before cursor: %w", listErr)
+		}
+		summaries = make([]work.Summary, 0, len(rows))
+		for _, row := range rows {
+			summaries = append(summaries, summaryFromBeforeRow(row))
+		}
+	}
+
+	page := work.Page{Works: summaries}
+	if len(page.Works) > work.ListPageSize {
+		page.Works = page.Works[:work.ListPageSize]
+		page.HasEarlier = true
 	}
 	if err := transaction.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("commit work list: %w", err)
+		return work.Page{}, fmt.Errorf("commit work list: %w", err)
 	}
-	return works, nil
+	return page, nil
 }
 
-func (s *Store) LoadWork(ctx context.Context, userID string, spaceID string, workID string) (work.Details, error) {
+func (s *Store) LoadWork(ctx context.Context, command work.LoadCommand) (work.Details, error) {
 	transaction, err := s.pool.Begin(ctx)
 	if err != nil {
 		return work.Details{}, fmt.Errorf("begin work load: %w", err)
 	}
 	defer func() { _ = transaction.Rollback(context.Background()) }()
 	queries := s.queries.WithTx(transaction)
-	if err := lockActiveWorkMembership(ctx, queries, spaceID, userID); err != nil {
+	if err := lockActiveWorkMembership(ctx, queries, command.SpaceID, command.UserID); err != nil {
 		return work.Details{}, err
 	}
-	row, err := queries.LoadWork(ctx, dbsqlc.LoadWorkParams{SpaceID: spaceID, WorkID: workID})
+	row, err := queries.LoadWork(ctx, dbsqlc.LoadWorkParams{SpaceID: command.SpaceID, WorkID: command.WorkID})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return work.Details{}, work.ErrNotFound
 	}
 	if err != nil {
 		return work.Details{}, fmt.Errorf("load work: %w", err)
 	}
-	needsRetry, err := queries.WorkNeedsRetry(ctx, workID)
-	if err != nil {
-		return work.Details{}, fmt.Errorf("load Work retry state: %w", err)
-	}
-	messageRows, err := queries.ListWorkMessages(ctx, workID)
-	if err != nil {
-		return work.Details{}, fmt.Errorf("list work messages: %w", err)
-	}
-	messages := make([]work.Message, 0, len(messageRows))
-	for _, message := range messageRows {
-		messages = append(messages, work.Message{
-			MessageID: message.MessageID, WorkID: message.WorkID,
-			AuthorUserID: message.AuthorUserID, Text: message.Text,
-			InputSeq: message.InputSeq, CreatedAt: message.CreatedAt.Time,
+
+	messages := make([]work.Message, 0, work.MessagePageSize)
+	if command.BeforeMessage == "" {
+		messageRows, listErr := queries.ListNewestWorkMessages(ctx, command.WorkID)
+		if listErr != nil {
+			return work.Details{}, fmt.Errorf("list newest Work messages: %w", listErr)
+		}
+		for _, message := range messageRows {
+			messages = append(messages, messageFromNewestRow(message))
+		}
+	} else {
+		cursorSequence, cursorErr := queries.WorkMessageCursorSequence(ctx, dbsqlc.WorkMessageCursorSequenceParams{
+			WorkID: command.WorkID, MessageID: command.BeforeMessage,
 		})
+		if errors.Is(cursorErr, pgx.ErrNoRows) {
+			return work.Details{}, work.ErrInvalidCursor
+		}
+		if cursorErr != nil {
+			return work.Details{}, fmt.Errorf("load Work message cursor: %w", cursorErr)
+		}
+		messageRows, listErr := queries.ListWorkMessagesBefore(ctx, dbsqlc.ListWorkMessagesBeforeParams{
+			WorkID: command.WorkID, CursorSequence: cursorSequence,
+		})
+		if listErr != nil {
+			return work.Details{}, fmt.Errorf("list Work messages before cursor: %w", listErr)
+		}
+		for _, message := range messageRows {
+			messages = append(messages, messageFromBeforeRow(message))
+		}
 	}
-	result := work.Details{Work: workFromLoadRow(row, needsRetry), Messages: messages}
+
+	hasEarlier := false
+	if len(messages) > 0 {
+		hasEarlier, err = queries.WorkHasMessagesBefore(ctx, dbsqlc.WorkHasMessagesBeforeParams{
+			WorkID: command.WorkID, InputSeq: messages[0].InputSeq,
+		})
+		if err != nil {
+			return work.Details{}, fmt.Errorf("check earlier Work messages: %w", err)
+		}
+	}
+	result := work.Details{
+		Work: workFromLoadRow(row), Messages: messages, HasEarlierMessages: hasEarlier,
+	}
 	if err := transaction.Commit(ctx); err != nil {
 		return work.Details{}, fmt.Errorf("commit work load: %w", err)
 	}
@@ -190,8 +229,8 @@ func (s *Store) AppendWorkMessage(ctx context.Context, command work.AppendMessag
 		}
 		result := work.Message{
 			MessageID: existing.MessageID, WorkID: existing.WorkID,
-			AuthorUserID: existing.AuthorUserID, Text: existing.Text,
-			InputSeq: existing.InputSeq, CreatedAt: existing.CreatedAt.Time,
+			AuthorUserID: existing.AuthorUserID, AuthorDisplayName: existing.AuthorDisplayName,
+			Text: existing.Text, InputSeq: existing.InputSeq, CreatedAt: existing.CreatedAt.Time,
 		}
 		if err := transaction.Commit(ctx); err != nil {
 			return work.Message{}, fmt.Errorf("commit idempotent work message: %w", err)
@@ -221,7 +260,8 @@ func (s *Store) AppendWorkMessage(ctx context.Context, command work.AppendMessag
 	}
 	result := work.Message{
 		MessageID: row.MessageID, WorkID: row.WorkID, AuthorUserID: row.AuthorUserID,
-		Text: row.Text, InputSeq: row.InputSeq, CreatedAt: row.CreatedAt.Time,
+		AuthorDisplayName: row.AuthorDisplayName, Text: row.Text,
+		InputSeq: row.InputSeq, CreatedAt: row.CreatedAt.Time,
 	}
 	if err := transaction.Commit(ctx); err != nil {
 		return work.Message{}, fmt.Errorf("commit work message: %w", err)
@@ -245,34 +285,73 @@ func lockActiveWorkMembership(ctx context.Context, queries *dbsqlc.Queries, spac
 func workFromCreateRow(row dbsqlc.CreateWorkRow) work.Work {
 	return work.Work{
 		WorkID: row.WorkID, SpaceID: row.SpaceID, Goal: row.Goal,
-		Lifecycle: work.Lifecycle(row.Lifecycle), OwnerUserID: row.OwnerUserID,
-		CreatorUserID:     row.CreatorUserID,
-		HasUnappliedInput: true,
-		CreatedAt:         row.CreatedAt.Time,
-	}
-}
-
-func workFromIdempotencyRow(row dbsqlc.FindWorkByCreateIdempotencyRow, needsRetry bool) work.Work {
-	return work.Work{
-		WorkID: row.WorkID, SpaceID: row.SpaceID, Goal: row.Goal,
-		Lifecycle: work.Lifecycle(row.Lifecycle), OwnerUserID: row.OwnerUserID,
-		CreatorUserID: row.CreatorUserID,
+		Lifecycle:   work.Lifecycle(row.Lifecycle),
+		OwnerUserID: row.OwnerUserID, OwnerDisplayName: row.OwnerDisplayName,
+		CreatorUserID: row.CreatorUserID, CreatorDisplayName: row.CreatorDisplayName,
 		Understanding: textValue(row.Understanding), NextStep: textValue(row.NextStep),
 		HasUnappliedInput: row.AppliedInputSeq < row.InputHeadSeq,
-		NeedsRetry:        needsRetry,
 		CreatedAt:         row.CreatedAt.Time,
 	}
 }
 
-func workFromLoadRow(row dbsqlc.LoadWorkRow, needsRetry bool) work.Work {
+func workFromIdempotencyRow(row dbsqlc.FindWorkByCreateIdempotencyRow) work.Work {
 	return work.Work{
 		WorkID: row.WorkID, SpaceID: row.SpaceID, Goal: row.Goal,
-		Lifecycle: work.Lifecycle(row.Lifecycle), OwnerUserID: row.OwnerUserID,
-		CreatorUserID:     row.CreatorUserID,
-		Understanding:     textValue(row.Understanding),
-		NextStep:          textValue(row.NextStep),
-		HasUnappliedInput: row.AppliedInputSeq < row.InputHeadSeq,
-		NeedsRetry:        needsRetry,
-		CreatedAt:         row.CreatedAt.Time,
+		Lifecycle:   work.Lifecycle(row.Lifecycle),
+		OwnerUserID: row.OwnerUserID, OwnerDisplayName: row.OwnerDisplayName,
+		CreatorUserID: row.CreatorUserID, CreatorDisplayName: row.CreatorDisplayName,
+		Understanding: textValue(row.Understanding), NextStep: textValue(row.NextStep),
+		HasUnappliedInput: row.AppliedInputSeq < row.InputHeadSeq, NeedsRetry: row.NeedsRetry,
+		CreatedAt: row.CreatedAt.Time,
+	}
+}
+
+func workFromLoadRow(row dbsqlc.LoadWorkRow) work.Work {
+	return work.Work{
+		WorkID: row.WorkID, SpaceID: row.SpaceID, Goal: row.Goal,
+		Lifecycle:   work.Lifecycle(row.Lifecycle),
+		OwnerUserID: row.OwnerUserID, OwnerDisplayName: row.OwnerDisplayName,
+		CreatorUserID: row.CreatorUserID, CreatorDisplayName: row.CreatorDisplayName,
+		Understanding: textValue(row.Understanding), NextStep: textValue(row.NextStep),
+		HasUnappliedInput: row.AppliedInputSeq < row.InputHeadSeq, NeedsRetry: row.NeedsRetry,
+		CreatedAt: row.CreatedAt.Time,
+	}
+}
+
+func summaryFromNewestRow(row dbsqlc.ListNewestWorksRow) work.Summary {
+	return work.Summary{
+		WorkID: row.WorkID, SpaceID: row.SpaceID, Goal: row.Goal,
+		Lifecycle:   work.Lifecycle(row.Lifecycle),
+		OwnerUserID: row.OwnerUserID, OwnerDisplayName: row.OwnerDisplayName,
+		CreatorUserID: row.CreatorUserID, CreatorDisplayName: row.CreatorDisplayName,
+		HasUnappliedInput: row.AppliedInputSeq < row.InputHeadSeq, NeedsRetry: row.NeedsRetry,
+		CreatedAt: row.CreatedAt.Time,
+	}
+}
+
+func summaryFromBeforeRow(row dbsqlc.ListWorksBeforeRow) work.Summary {
+	return work.Summary{
+		WorkID: row.WorkID, SpaceID: row.SpaceID, Goal: row.Goal,
+		Lifecycle:   work.Lifecycle(row.Lifecycle),
+		OwnerUserID: row.OwnerUserID, OwnerDisplayName: row.OwnerDisplayName,
+		CreatorUserID: row.CreatorUserID, CreatorDisplayName: row.CreatorDisplayName,
+		HasUnappliedInput: row.AppliedInputSeq < row.InputHeadSeq, NeedsRetry: row.NeedsRetry,
+		CreatedAt: row.CreatedAt.Time,
+	}
+}
+
+func messageFromNewestRow(row dbsqlc.ListNewestWorkMessagesRow) work.Message {
+	return work.Message{
+		MessageID: row.MessageID, WorkID: row.WorkID,
+		AuthorUserID: row.AuthorUserID, AuthorDisplayName: row.AuthorDisplayName,
+		Text: row.Text, InputSeq: row.InputSeq, CreatedAt: row.CreatedAt.Time,
+	}
+}
+
+func messageFromBeforeRow(row dbsqlc.ListWorkMessagesBeforeRow) work.Message {
+	return work.Message{
+		MessageID: row.MessageID, WorkID: row.WorkID,
+		AuthorUserID: row.AuthorUserID, AuthorDisplayName: row.AuthorDisplayName,
+		Text: row.Text, InputSeq: row.InputSeq, CreatedAt: row.CreatedAt.Time,
 	}
 }

@@ -10,6 +10,7 @@ type WorkDetailProps = {
   currentMemberID: string;
   onMessage: (text: string) => Promise<boolean>;
   onRetry: () => Promise<void>;
+  onLoadEarlierMessages: () => void;
 };
 
 export function WorkDetail({
@@ -18,6 +19,7 @@ export function WorkDetail({
   currentMemberID,
   onMessage,
   onRetry,
+  onLoadEarlierMessages,
 }: WorkDetailProps) {
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -42,7 +44,9 @@ export function WorkDetail({
   }
 
   const responsible =
-    details.work.owner_user_id === currentMemberID ? "You" : "Another member";
+    details.work.owner_user_id === currentMemberID
+      ? "You"
+      : details.work.owner_display_name;
 
   return (
     <article className="work-detail" aria-labelledby="work-detail-title">
@@ -111,6 +115,16 @@ export function WorkDetail({
 
       <section className="message-section" aria-labelledby="messages-title">
         <h3 id="messages-title">Messages</h3>
+        {details.has_earlier_messages ? (
+          <button
+            className="ghost-button load-earlier"
+            type="button"
+            onClick={onLoadEarlierMessages}
+            disabled={busy}
+          >
+            Load earlier messages
+          </button>
+        ) : null}
         {details.messages.length === 0 ? (
           <p className="empty-copy">
             Nothing recorded yet. Add the facts Carry needs below.
@@ -124,7 +138,7 @@ export function WorkDetail({
                   <span className="message-author">
                     {message.author_user_id === currentMemberID
                       ? "You"
-                      : "Another member"}
+                      : message.author_display_name}
                   </span>
                   <time dateTime={message.created_at}>
                     {formatWorkTime(message.created_at)}

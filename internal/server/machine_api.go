@@ -7,9 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ApexReasoning/carry/internal/host"
+	"github.com/ApexReasoning/carry/internal/machine"
 	"github.com/ApexReasoning/carry/internal/run"
-	"github.com/go-chi/chi/v5"
 )
 
 // MachineRunStore owns the exact transactions used by one mTLS-authenticated Host.
@@ -75,7 +74,7 @@ func requireMachine(next http.Handler) http.Handler {
 			writeAPIError(response, http.StatusUnauthorized, "Machine certificate is required")
 			return
 		}
-		machineID, err := host.MachineIDFromCertificate(request.TLS.PeerCertificates[0])
+		machineID, err := machine.MachineIDFromCertificate(request.TLS.PeerCertificates[0])
 		if err != nil {
 			writeAPIError(response, http.StatusUnauthorized, "Machine certificate is invalid")
 			return
@@ -112,7 +111,6 @@ func (api machineAPI) claimRun(response http.ResponseWriter, request *http.Reque
 	for _, message := range claim.Messages {
 		messages = append(messages, runMessageWire{AuthorUserID: message.AuthorUserID, Text: message.Text})
 	}
-	response.Header().Set("Cache-Control", "no-store")
 	writeJSON(response, http.StatusOK, runClaimWire{
 		RunID: claim.RunID, AttemptID: claim.AttemptID, WorkID: claim.WorkID,
 		Fence: claim.Fence, LeaseExpiresAt: claim.LeaseExpiresAt,
@@ -128,13 +126,16 @@ func (api machineAPI) renewRun(response http.ResponseWriter, request *http.Reque
 	if !ok {
 		return
 	}
+	runID, attemptID, ok := runAttemptPath(response, request)
+	if !ok {
+		return
+	}
 	var body renewRunAttemptRequest
 	if !decodeJSON(response, request, &body) {
 		return
 	}
 	leaseExpiresAt, err := api.store.RenewRunAttempt(
-		request.Context(), machineID,
-		chi.URLParam(request, "run_id"), chi.URLParam(request, "attempt_id"), body.Fence,
+		request.Context(), machineID, runID, attemptID, body.Fence,
 	)
 	if err != nil {
 		writeStoreError(response, err)
@@ -150,13 +151,17 @@ func (api machineAPI) commitUnderstanding(response http.ResponseWriter, request 
 	if !ok {
 		return
 	}
+	runID, attemptID, ok := runAttemptPath(response, request)
+	if !ok {
+		return
+	}
 	var body commitUnderstandingRequest
 	if !decodeJSON(response, request, &body) {
 		return
 	}
 	if err := api.store.CommitWorkUnderstanding(request.Context(), run.CommitCommand{
-		MachineID: machineID, RunID: chi.URLParam(request, "run_id"),
-		AttemptID: chi.URLParam(request, "attempt_id"), Fence: body.Fence,
+		MachineID: machineID, RunID: runID,
+		AttemptID: attemptID, Fence: body.Fence,
 		BaseUnderstandingVersion: body.BaseUnderstandingVersion,
 		InputEndSeq:              body.InputEndSeq, Understanding: body.Understanding, NextStep: body.NextStep,
 	}); err != nil {
@@ -171,16 +176,32 @@ func (api machineAPI) finishAttempt(response http.ResponseWriter, request *http.
 	if !ok {
 		return
 	}
+	runID, attemptID, ok := runAttemptPath(response, request)
+	if !ok {
+		return
+	}
 	var body finishAttemptRequest
 	if !decodeJSON(response, request, &body) {
 		return
 	}
 	if err := api.store.FinishUnresolvedAttempt(request.Context(), run.FinishCommand{
-		MachineID: machineID, RunID: chi.URLParam(request, "run_id"),
-		AttemptID: chi.URLParam(request, "attempt_id"), Fence: body.Fence, Outcome: body.Outcome,
+		MachineID: machineID, RunID: runID,
+		AttemptID: attemptID, Fence: body.Fence, Outcome: body.Outcome,
 	}); err != nil {
 		writeStoreError(response, err)
 		return
 	}
 	response.WriteHeader(http.StatusNoContent)
+}
+
+func runAttemptPath(response http.ResponseWriter, request *http.Request) (string, string, bool) {
+	runID, ok := pathUUID(response, request, "run_id")
+	if !ok {
+		return "", "", false
+	}
+	attemptID, ok := pathUUID(response, request, "attempt_id")
+	if !ok {
+		return "", "", false
+	}
+	return runID, attemptID, true
 }

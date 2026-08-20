@@ -16,13 +16,29 @@ import type {
   Member,
   Work,
   WorkMessage,
+  WorkSummary,
 } from "./generated/types.gen";
 
 export class MutationOutcomeUnknownError extends Error {}
 
+export class APIResponseError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+}
+
+export type WorkPage = {
+  works: Array<WorkSummary>;
+  has_earlier_works: boolean;
+};
+
 export type WorkDetails = {
   work: Work;
   messages: Array<WorkMessage>;
+  has_earlier_messages: boolean;
 };
 
 client.setConfig({
@@ -93,13 +109,16 @@ export async function sendConversationMessage(
   );
 }
 
-export async function listWorks(spaceID: string): Promise<Array<Work>> {
+export async function listWorks(
+  spaceID: string,
+  before?: string,
+): Promise<WorkPage> {
   const result = await listWorksRequest({
     ...sameOrigin,
     path: { spaceID },
+    query: before ? { before } : undefined,
   });
-  return requireData(result.data, result.response, result.error, "List Work")
-    .works;
+  return requireData(result.data, result.response, result.error, "List Work");
 }
 
 export async function createWork(
@@ -124,10 +143,12 @@ export async function createWork(
 export async function loadWork(
   spaceID: string,
   workID: string,
+  beforeMessage?: string,
 ): Promise<WorkDetails> {
   const result = await loadWorkRequest({
     ...sameOrigin,
     path: { spaceID, workID },
+    query: beforeMessage ? { before: beforeMessage } : undefined,
   });
   return requireData(result.data, result.response, result.error, "Load Work");
 }
@@ -215,14 +236,17 @@ function requireSuccess(
   if (response?.ok) {
     return;
   }
-  if (isAPIError(error)) {
-    throw new Error(error.error);
+  if (isAPIError(error) && response) {
+    throw new APIResponseError(error.error, response.status);
   }
   if (error instanceof Error) {
     throw new Error(`${action} failed: ${error.message}`);
   }
   if (response) {
-    throw new Error(`${action} failed (${response.status})`);
+    throw new APIResponseError(
+      `${action} failed (${response.status})`,
+      response.status,
+    );
   }
   throw new Error(`${action} failed before receiving a response`);
 }

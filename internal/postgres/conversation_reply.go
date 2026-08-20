@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/ApexReasoning/carry/internal/conversation"
-	"github.com/ApexReasoning/carry/internal/host"
+	machinedomain "github.com/ApexReasoning/carry/internal/machine"
 	"github.com/ApexReasoning/carry/internal/postgres/dbsqlc"
 	"github.com/ApexReasoning/carry/internal/work"
 	"github.com/google/uuid"
@@ -19,7 +19,7 @@ import (
 // ClaimConversationReply grants one Machine a bounded fixed private context.
 func (s *Store) ClaimConversationReply(ctx context.Context, machineID string) (conversation.ReplyClaim, error) {
 	if uuid.Validate(machineID) != nil {
-		return conversation.ReplyClaim{}, host.ErrMachineNotFound
+		return conversation.ReplyClaim{}, machinedomain.ErrMachineNotFound
 	}
 	transaction, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -46,7 +46,7 @@ func (s *Store) ClaimConversationReply(ctx context.Context, machineID string) (c
 	}
 	machineUUID, err := postgresUUID(machineID)
 	if err != nil {
-		return conversation.ReplyClaim{}, host.ErrMachineNotFound
+		return conversation.ReplyClaim{}, machinedomain.ErrMachineNotFound
 	}
 	assignment, err := queries.AssignConversationReply(ctx, dbsqlc.AssignConversationReplyParams{
 		MachineID: machineUUID, ContextStartSeq: &contextStart, ContextEndSeq: &contextEnd,
@@ -237,17 +237,17 @@ func (s *Store) CommitConversationReply(
 }
 
 func lockActiveReplyMachine(ctx context.Context, queries *dbsqlc.Queries, machineID string) (string, error) {
-	machine, err := queries.LockClaimingMachine(ctx, machineID)
+	claimingMachine, err := queries.LockClaimingMachine(ctx, machineID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return "", host.ErrMachineNotFound
+		return "", machinedomain.ErrMachineNotFound
 	}
 	if err != nil {
 		return "", fmt.Errorf("lock private reply Machine: %w", err)
 	}
-	if machine.RevokedAt.Valid {
-		return "", host.ErrMachineRevoked
+	if claimingMachine.RevokedAt.Valid {
+		return "", machinedomain.ErrMachineRevoked
 	}
-	return machine.SpaceID, nil
+	return claimingMachine.SpaceID, nil
 }
 
 func fixedReplyContextRange(

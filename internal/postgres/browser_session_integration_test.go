@@ -32,8 +32,8 @@ func TestBrowserSessionStoresOnlyHashAndFollowsSourceTokenRevocation(t *testing.
 	if err != nil {
 		t.Fatalf("authenticate browser session: %v", err)
 	}
-	if authenticated.UserID != bootstrap.UserID {
-		t.Fatalf("browser session user = %s, want %s", authenticated.UserID, bootstrap.UserID)
+	if authenticated.UserID != bootstrap.UserID || authenticated.DisplayName != "Mary" {
+		t.Fatalf("browser session user = %#v, want %s named Mary", authenticated, bootstrap.UserID)
 	}
 	var plaintextMatches int
 	if err := pool.QueryRow(ctx, `

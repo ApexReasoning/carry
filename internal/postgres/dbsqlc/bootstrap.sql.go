@@ -12,19 +12,27 @@ import (
 )
 
 const authenticateUserToken = `-- name: AuthenticateUserToken :one
-SELECT user_id
-FROM user_tokens
+SELECT
+    token.user_id,
+    carry_user.display_name
+FROM user_tokens AS token
+INNER JOIN carry_users AS carry_user ON token.user_id = carry_user.user_id
 WHERE
-    token_hash = $1
-    AND revoked_at IS null
-    AND expires_at > transaction_timestamp()
+    token.token_hash = $1
+    AND token.revoked_at IS null
+    AND token.expires_at > transaction_timestamp()
 `
 
-func (q *Queries) AuthenticateUserToken(ctx context.Context, tokenHash []byte) (string, error) {
+type AuthenticateUserTokenRow struct {
+	UserID      string
+	DisplayName string
+}
+
+func (q *Queries) AuthenticateUserToken(ctx context.Context, tokenHash []byte) (AuthenticateUserTokenRow, error) {
 	row := q.db.QueryRow(ctx, authenticateUserToken, tokenHash)
-	var user_id string
-	err := row.Scan(&user_id)
-	return user_id, err
+	var i AuthenticateUserTokenRow
+	err := row.Scan(&i.UserID, &i.DisplayName)
+	return i, err
 }
 
 const createBootstrapMembership = `-- name: CreateBootstrapMembership :exec
@@ -118,9 +126,11 @@ SELECT
     user_token.token_hash,
     user_token.expires_at
 FROM carry_users AS carry_user
-JOIN space_memberships AS membership ON membership.user_id = carry_user.user_id
-JOIN spaces AS space ON space.space_id = membership.space_id
-JOIN user_tokens AS user_token ON user_token.user_id = carry_user.user_id
+INNER JOIN
+    space_memberships AS membership
+    ON carry_user.user_id = membership.user_id
+INNER JOIN spaces AS space ON membership.space_id = space.space_id
+INNER JOIN user_tokens AS user_token ON carry_user.user_id = user_token.user_id
 WHERE
     carry_user.user_id = $1
     AND space.space_id = $2

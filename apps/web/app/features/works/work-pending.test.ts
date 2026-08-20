@@ -13,7 +13,7 @@ beforeEach(() => {
   window.sessionStorage.clear();
 });
 
-test("persists separate private identities for pending Work mutations", async () => {
+test("persists separate content-free identities for pending Work mutations", async () => {
   const create = await pendingCreateIdentity(
     "member-1",
     "space-1",
@@ -60,7 +60,24 @@ test("retains one retry identity until its exact request is reconciled", async (
   expect(nextChoice.idempotencyKey).not.toBe(first.idempotencyKey);
 });
 
-test("fails closed when a pending identity cannot be saved", async () => {
+test("fails closed on malformed pending identities", async () => {
+  for (const malformed of [
+    "not JSON",
+    "[]",
+    JSON.stringify({ invalid: crypto.randomUUID() }),
+    JSON.stringify({ ["a".repeat(64)]: "not-a-uuid" }),
+    JSON.stringify({
+      ["a".repeat(64)]: { idempotencyKey: crypto.randomUUID() },
+    }),
+  ]) {
+    window.sessionStorage.setItem(storageKey, malformed);
+    await expect(
+      pendingCreateIdentity("member-1", "space-1", "Review renewals"),
+    ).rejects.toThrow("Pending Work identities are invalid");
+  }
+});
+
+test("fails closed when a pending identity cannot be published", async () => {
   const save = vi
     .spyOn(window.sessionStorage, "setItem")
     .mockImplementation(() => {
@@ -71,4 +88,26 @@ test("fails closed when a pending identity cannot be saved", async () => {
     pendingCreateIdentity("member-1", "space-1", "Review renewals"),
   ).rejects.toThrow("storage unavailable");
   save.mockRestore();
+});
+
+test("fails closed when a pending identity write cannot be read back", async () => {
+  const read = vi
+    .spyOn(window.sessionStorage, "getItem")
+    .mockReturnValueOnce(null)
+    .mockReturnValueOnce(null);
+
+  await expect(
+    pendingCreateIdentity("member-1", "space-1", "Review renewals"),
+  ).rejects.toThrow("could not be saved");
+  read.mockRestore();
+});
+
+test("fails closed when a reconciled identity cannot be cleared", async () => {
+  const identity = await pendingRetryIdentity("member-1", "space-1", "work-1");
+  const remove = vi
+    .spyOn(window.sessionStorage, "removeItem")
+    .mockImplementation(() => undefined);
+
+  expect(() => clearPendingIdentity(identity)).toThrow("could not be cleared");
+  remove.mockRestore();
 });

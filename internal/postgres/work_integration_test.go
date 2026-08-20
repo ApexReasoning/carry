@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -84,20 +85,146 @@ func TestConcurrentWorkCreationReturnsOneDurableWork(t *testing.T) {
 	}
 
 	restartedStore := NewStore(pool)
-	details, err := restartedStore.LoadWork(ctx, bootstrap.UserID, bootstrap.SpaceID, workID)
+	details, err := restartedStore.LoadWork(ctx, work.LoadCommand{UserID: bootstrap.UserID, SpaceID: bootstrap.SpaceID, WorkID: workID})
 	if err != nil {
 		t.Fatalf("load Work after Store restart: %v", err)
 	}
 	if details.Work.Goal != command.Goal || len(details.Messages) != 0 {
 		t.Fatalf("loaded Work = %#v", details)
 	}
-	listed, err := restartedStore.ListWorks(ctx, bootstrap.UserID, bootstrap.SpaceID)
+	listed, err := restartedStore.ListWorks(ctx, work.ListCommand{UserID: bootstrap.UserID, SpaceID: bootstrap.SpaceID})
 	if err != nil {
 		t.Fatalf("list Works: %v", err)
 	}
-	if len(listed) != 1 || listed[0].WorkID != workID {
+	if len(listed.Works) != 1 || listed.Works[0].WorkID != workID {
 		t.Fatalf("listed Works = %#v", listed)
 	}
+}
+
+func TestWorkQueriesUseBoundedCursorPagesAndDisplayNames(t *testing.T) {
+	t.Run("Work summaries", func(t *testing.T) {
+		ctx := context.Background()
+		pool := openMigratedTestPool(t, ctx)
+		store := NewStore(pool)
+		bootstrap, err := bootstrapForTest(ctx, store, BootstrapCommand{
+			DisplayName: "Pagination Member", SpaceName: "Bounded Work Space",
+			TokenExpiresAt: time.Now().Add(time.Hour),
+		})
+		if err != nil {
+			t.Fatalf("bootstrap: %v", err)
+		}
+		ids := make([]string, 0, work.ListPageSize+2)
+		for index := range work.ListPageSize + 2 {
+			created, createErr := store.CreateWork(ctx, work.CreateCommand{
+				SpaceID: bootstrap.SpaceID, CreatorUserID: bootstrap.UserID,
+				Goal:           fmt.Sprintf("Bounded responsibility %02d", index),
+				IdempotencyKey: fmt.Sprintf("bounded-work-%02d", index),
+			})
+			if createErr != nil {
+				t.Fatalf("create Work %d: %v", index, createErr)
+			}
+			ids = append(ids, created.WorkID)
+		}
+		if _, err := pool.Exec(ctx, `update works set created_at = '2026-08-20T00:00:00Z' where space_id = $1`, bootstrap.SpaceID); err != nil {
+			t.Fatalf("align Work timestamps: %v", err)
+		}
+		sort.Sort(sort.Reverse(sort.StringSlice(ids)))
+		first, err := store.ListWorks(ctx, work.ListCommand{UserID: bootstrap.UserID, SpaceID: bootstrap.SpaceID})
+		if err != nil {
+			t.Fatalf("list newest Work page: %v", err)
+		}
+		if len(first.Works) != work.ListPageSize || !first.HasEarlier || first.Works[0].WorkID != ids[0] ||
+			first.Works[0].OwnerDisplayName != "Pagination Member" {
+			t.Fatalf("newest Work page = %#v", first)
+		}
+		second, err := store.ListWorks(ctx, work.ListCommand{
+			UserID: bootstrap.UserID, SpaceID: bootstrap.SpaceID,
+			Before: first.Works[len(first.Works)-1].WorkID,
+		})
+		if err != nil {
+			t.Fatalf("list older Work page: %v", err)
+		}
+		if len(second.Works) != 2 || second.HasEarlier || second.Works[0].WorkID != ids[50] {
+			t.Fatalf("older Work page = %#v", second)
+		}
+		if _, err := store.ListWorks(ctx, work.ListCommand{
+			UserID: bootstrap.UserID, SpaceID: bootstrap.SpaceID, Before: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+		}); !errors.Is(err, work.ErrInvalidCursor) {
+			t.Fatalf("invalid Work cursor error = %v", err)
+		}
+	})
+
+	t.Run("Work messages", func(t *testing.T) {
+		ctx := context.Background()
+		pool := openMigratedTestPool(t, ctx)
+		store := NewStore(pool)
+		bootstrap, err := bootstrapForTest(ctx, store, BootstrapCommand{
+			DisplayName: "Message Author", SpaceName: "Bounded Message Space",
+			TokenExpiresAt: time.Now().Add(time.Hour),
+		})
+		if err != nil {
+			t.Fatalf("bootstrap: %v", err)
+		}
+		created, err := store.CreateWork(ctx, work.CreateCommand{
+			SpaceID: bootstrap.SpaceID, CreatorUserID: bootstrap.UserID,
+			Goal: "Keep a bounded message history", IdempotencyKey: "bounded-message-work",
+		})
+		if err != nil {
+			t.Fatalf("create Work: %v", err)
+		}
+		text := strings.Repeat("m", work.MaxMessageBytes)
+		messageIDs := make([]string, 0, 5)
+		for index := range 5 {
+			message, appendErr := store.AppendWorkMessage(ctx, work.AppendMessageCommand{
+				WorkID: created.WorkID, SpaceID: bootstrap.SpaceID, AuthorUserID: bootstrap.UserID,
+				Text: text, IdempotencyKey: fmt.Sprintf("bounded-message-%d", index),
+			})
+			if appendErr != nil {
+				t.Fatalf("append message %d: %v", index, appendErr)
+			}
+			messageIDs = append(messageIDs, message.MessageID)
+		}
+		first, err := store.LoadWork(ctx, work.LoadCommand{
+			UserID: bootstrap.UserID, SpaceID: bootstrap.SpaceID, WorkID: created.WorkID,
+		})
+		if err != nil {
+			t.Fatalf("load newest Work messages: %v", err)
+		}
+		if len(first.Messages) != 4 || !first.HasEarlierMessages ||
+			first.Messages[0].AuthorDisplayName != "Message Author" || first.Messages[0].MessageID != messageIDs[1] {
+			t.Fatalf("newest message page = %#v", first)
+		}
+		older, err := store.LoadWork(ctx, work.LoadCommand{
+			UserID: bootstrap.UserID, SpaceID: bootstrap.SpaceID, WorkID: created.WorkID,
+			BeforeMessage: first.Messages[0].MessageID,
+		})
+		if err != nil {
+			t.Fatalf("load older Work messages: %v", err)
+		}
+		if len(older.Messages) != 1 || older.HasEarlierMessages || older.Messages[0].MessageID != messageIDs[0] {
+			t.Fatalf("older message page = %#v", older)
+		}
+		other, err := store.CreateWork(ctx, work.CreateCommand{
+			SpaceID: bootstrap.SpaceID, CreatorUserID: bootstrap.UserID,
+			Goal: "Own a foreign message cursor", IdempotencyKey: "foreign-cursor-work",
+		})
+		if err != nil {
+			t.Fatalf("create other Work: %v", err)
+		}
+		foreign, err := store.AppendWorkMessage(ctx, work.AppendMessageCommand{
+			WorkID: other.WorkID, SpaceID: bootstrap.SpaceID, AuthorUserID: bootstrap.UserID,
+			Text: "Foreign cursor", IdempotencyKey: "foreign-cursor-message",
+		})
+		if err != nil {
+			t.Fatalf("append foreign cursor message: %v", err)
+		}
+		if _, err := store.LoadWork(ctx, work.LoadCommand{
+			UserID: bootstrap.UserID, SpaceID: bootstrap.SpaceID, WorkID: created.WorkID,
+			BeforeMessage: foreign.MessageID,
+		}); !errors.Is(err, work.ErrInvalidCursor) {
+			t.Fatalf("foreign Work message cursor error = %v", err)
+		}
+	})
 }
 
 func TestConcurrentWorkMessagesReceiveContinuousInputSequence(t *testing.T) {
@@ -177,7 +304,7 @@ func TestConcurrentWorkMessagesReceiveContinuousInputSequence(t *testing.T) {
 		t.Fatalf("conflicting Message error = %v", err)
 	}
 
-	details, err := NewStore(pool).LoadWork(ctx, bootstrap.UserID, bootstrap.SpaceID, created.WorkID)
+	details, err := NewStore(pool).LoadWork(ctx, work.LoadCommand{UserID: bootstrap.UserID, SpaceID: bootstrap.SpaceID, WorkID: created.WorkID})
 	if err != nil {
 		t.Fatalf("load Work after appends: %v", err)
 	}
@@ -237,7 +364,7 @@ func TestLoadWorkHoldsAConsistentHeadAndMessageSnapshot(t *testing.T) {
 	case <-time.After(100 * time.Millisecond):
 	}
 
-	messages, err := queries.ListWorkMessages(ctx, created.WorkID)
+	messages, err := queries.ListNewestWorkMessages(ctx, created.WorkID)
 	if err != nil {
 		t.Fatalf("list messages in coherent read: %v", err)
 	}
@@ -256,7 +383,7 @@ func TestLoadWorkHoldsAConsistentHeadAndMessageSnapshot(t *testing.T) {
 		t.Fatal("append remained blocked after coherent read committed")
 	}
 
-	details, err := store.LoadWork(ctx, bootstrap.UserID, bootstrap.SpaceID, created.WorkID)
+	details, err := store.LoadWork(ctx, work.LoadCommand{UserID: bootstrap.UserID, SpaceID: bootstrap.SpaceID, WorkID: created.WorkID})
 	if err != nil {
 		t.Fatalf("load Work after append: %v", err)
 	}
@@ -289,7 +416,7 @@ func TestWorkAccessRequiresCurrentSpaceMembership(t *testing.T) {
 	`, bootstrap.SpaceID, bootstrap.UserID); err != nil {
 		t.Fatalf("revoke membership: %v", err)
 	}
-	if _, err := store.LoadWork(ctx, bootstrap.UserID, bootstrap.SpaceID, created.WorkID); !errors.Is(err, space.ErrForbidden) {
+	if _, err := store.LoadWork(ctx, work.LoadCommand{UserID: bootstrap.UserID, SpaceID: bootstrap.SpaceID, WorkID: created.WorkID}); !errors.Is(err, space.ErrForbidden) {
 		t.Fatalf("load after membership revocation error = %v", err)
 	}
 	if _, err := store.AppendWorkMessage(ctx, work.AppendMessageCommand{

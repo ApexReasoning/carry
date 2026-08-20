@@ -25,6 +25,9 @@ func TestHealthReportsReady(t *testing.T) {
 	if got := response.Body.String(); got != "{\"status\":\"ready\"}\n" {
 		t.Fatalf("health body = %q", got)
 	}
+	if got := response.Header().Get("Cache-Control"); got != "" {
+		t.Fatalf("public health Cache-Control = %q, want unset", got)
+	}
 }
 
 func TestHealthReportsUnavailableWhenDatabaseFails(t *testing.T) {
@@ -66,6 +69,21 @@ type failingReadiness struct{}
 
 func (failingReadiness) Ping(context.Context) error {
 	return errors.New("database unavailable")
+}
+
+func TestUnmatchedV1ResponseIsNotStored(t *testing.T) {
+	t.Parallel()
+
+	request := httptest.NewRequest(http.MethodGet, "/v1/not-a-route", nil)
+	response := httptest.NewRecorder()
+	healthTestAPI(t, nil).ServeHTTP(response, request)
+
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("unmatched v1 status = %d, want %d", response.Code, http.StatusNotFound)
+	}
+	if got := response.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("unmatched v1 Cache-Control = %q, want no-store", got)
+	}
 }
 
 func TestHealthRejectsUnsupportedMethod(t *testing.T) {

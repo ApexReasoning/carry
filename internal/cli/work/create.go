@@ -28,7 +28,7 @@ func newCreateCommand(configDirectory string, output io.Writer) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			created, err := client.create(command.Context(), selectedSpaceID, goal, idempotencyKey)
+			created, err := client.CreateWork(command.Context(), selectedSpaceID, goal, idempotencyKey)
 			if err != nil {
 				return err
 			}

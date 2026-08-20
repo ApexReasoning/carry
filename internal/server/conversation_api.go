@@ -42,7 +42,6 @@ func (api conversationAPI) mount(router chi.Router) {
 }
 
 func (api conversationAPI) sendMessage(response http.ResponseWriter, request *http.Request) {
-	response.Header().Set("Cache-Control", "no-store")
 	member, ok := currentMember(response, request)
 	if !ok {
 		return
@@ -71,7 +70,6 @@ func (api conversationAPI) sendMessage(response http.ResponseWriter, request *ht
 }
 
 func (api conversationAPI) listMessages(response http.ResponseWriter, request *http.Request) {
-	response.Header().Set("Cache-Control", "no-store")
 	member, ok := currentMember(response, request)
 	if !ok {
 		return

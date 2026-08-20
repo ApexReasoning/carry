@@ -8,57 +8,163 @@ WHERE
 FOR SHARE;
 
 -- name: CreateWork :one
-INSERT INTO works (
-    work_id,
-    space_id,
-    goal,
-    owner_user_id,
-    creator_user_id,
-    create_idempotency_key,
-    create_request_digest
-) VALUES (
-    sqlc.arg(work_id),
-    sqlc.arg(space_id),
-    sqlc.arg(goal),
-    sqlc.arg(owner_user_id),
-    sqlc.arg(creator_user_id),
-    sqlc.arg(create_idempotency_key),
-    sqlc.arg(create_request_digest)
+WITH created AS (
+    INSERT INTO works (
+        work_id,
+        space_id,
+        goal,
+        owner_user_id,
+        creator_user_id,
+        create_idempotency_key,
+        create_request_digest
+    ) VALUES (
+        sqlc.arg(work_id),
+        sqlc.arg(space_id),
+        sqlc.arg(goal),
+        sqlc.arg(owner_user_id),
+        sqlc.arg(creator_user_id),
+        sqlc.arg(create_idempotency_key),
+        sqlc.arg(create_request_digest)
+    )
+    ON CONFLICT (space_id, creator_user_id, create_idempotency_key) DO NOTHING
+    RETURNING *
 )
-ON CONFLICT (space_id, creator_user_id, create_idempotency_key) DO NOTHING
-RETURNING work_id, space_id, goal, lifecycle, owner_user_id, creator_user_id, created_at;
+SELECT
+    created.work_id,
+    created.space_id,
+    created.goal,
+    created.lifecycle,
+    created.owner_user_id,
+    owner.display_name AS owner_display_name,
+    created.creator_user_id,
+    creator.display_name AS creator_display_name,
+    created.input_head_seq,
+    created.applied_input_seq,
+    created.understanding,
+    created.next_step,
+    created.created_at
+FROM created
+JOIN carry_users AS owner ON owner.user_id = created.owner_user_id
+JOIN carry_users AS creator ON creator.user_id = created.creator_user_id;
 
 -- name: FindWorkByCreateIdempotency :one
-SELECT work.work_id, work.space_id, work.goal, work.lifecycle, work.owner_user_id, work.creator_user_id,
-    work.input_head_seq, work.applied_input_seq, work.understanding_version, work.understanding, work.next_step,
-    work.created_at, work.create_request_digest
+SELECT
+    work.work_id,
+    work.space_id,
+    work.goal,
+    work.lifecycle,
+    work.owner_user_id,
+    owner.display_name AS owner_display_name,
+    work.creator_user_id,
+    creator.display_name AS creator_display_name,
+    work.input_head_seq,
+    work.applied_input_seq,
+    work.understanding,
+    work.next_step,
+    work.created_at,
+    work.create_request_digest,
+    EXISTS (
+        SELECT 1 FROM runs
+        WHERE runs.work_id = work.work_id
+          AND runs.state IN ('failed', 'unknown')
+          AND runs.retry_requested_at IS NULL
+    ) AS needs_retry
 FROM works AS work
+JOIN carry_users AS owner ON owner.user_id = work.owner_user_id
+JOIN carry_users AS creator ON creator.user_id = work.creator_user_id
 WHERE
     work.space_id = sqlc.arg(space_id)
     AND work.creator_user_id = sqlc.arg(creator_user_id)
     AND work.create_idempotency_key = sqlc.arg(create_idempotency_key);
 
--- name: ListWorks :many
-SELECT work.work_id, work.space_id, work.goal, work.lifecycle, work.owner_user_id, work.creator_user_id,
-    work.input_head_seq, work.applied_input_seq, work.understanding_version, work.understanding, work.next_step, work.created_at
+-- name: WorkListCursor :one
+SELECT created_at, work_id
+FROM works
+WHERE space_id = sqlc.arg(space_id) AND work_id = sqlc.arg(work_id);
+
+-- name: ListNewestWorks :many
+SELECT
+    work.work_id,
+    work.space_id,
+    work.goal,
+    work.lifecycle,
+    work.owner_user_id,
+    owner.display_name AS owner_display_name,
+    work.creator_user_id,
+    creator.display_name AS creator_display_name,
+    work.input_head_seq,
+    work.applied_input_seq,
+    work.created_at,
+    EXISTS (
+        SELECT 1 FROM runs
+        WHERE runs.work_id = work.work_id
+          AND runs.state IN ('failed', 'unknown')
+          AND runs.retry_requested_at IS NULL
+    ) AS needs_retry
 FROM works AS work
+JOIN carry_users AS owner ON owner.user_id = work.owner_user_id
+JOIN carry_users AS creator ON creator.user_id = work.creator_user_id
 WHERE work.space_id = sqlc.arg(space_id)
-ORDER BY work.created_at DESC, work.work_id DESC;
+ORDER BY work.created_at DESC, work.work_id DESC
+LIMIT 51;
+
+-- name: ListWorksBefore :many
+SELECT
+    work.work_id,
+    work.space_id,
+    work.goal,
+    work.lifecycle,
+    work.owner_user_id,
+    owner.display_name AS owner_display_name,
+    work.creator_user_id,
+    creator.display_name AS creator_display_name,
+    work.input_head_seq,
+    work.applied_input_seq,
+    work.created_at,
+    EXISTS (
+        SELECT 1 FROM runs
+        WHERE runs.work_id = work.work_id
+          AND runs.state IN ('failed', 'unknown')
+          AND runs.retry_requested_at IS NULL
+    ) AS needs_retry
+FROM works AS work
+JOIN carry_users AS owner ON owner.user_id = work.owner_user_id
+JOIN carry_users AS creator ON creator.user_id = work.creator_user_id
+WHERE
+    work.space_id = sqlc.arg(space_id)
+    AND (work.created_at, work.work_id) < (
+        sqlc.arg(cursor_created_at)::timestamptz,
+        sqlc.arg(cursor_work_id)::uuid
+    )
+ORDER BY work.created_at DESC, work.work_id DESC
+LIMIT 51;
 
 -- name: LoadWork :one
-SELECT work.work_id, work.space_id, work.goal, work.lifecycle, work.owner_user_id, work.creator_user_id,
-    work.input_head_seq, work.applied_input_seq, work.understanding_version, work.understanding, work.next_step, work.created_at
+SELECT
+    work.work_id,
+    work.space_id,
+    work.goal,
+    work.lifecycle,
+    work.owner_user_id,
+    owner.display_name AS owner_display_name,
+    work.creator_user_id,
+    creator.display_name AS creator_display_name,
+    work.input_head_seq,
+    work.applied_input_seq,
+    work.understanding,
+    work.next_step,
+    work.created_at,
+    EXISTS (
+        SELECT 1 FROM runs
+        WHERE runs.work_id = work.work_id
+          AND runs.state IN ('failed', 'unknown')
+          AND runs.retry_requested_at IS NULL
+    ) AS needs_retry
 FROM works AS work
+JOIN carry_users AS owner ON owner.user_id = work.owner_user_id
+JOIN carry_users AS creator ON creator.user_id = work.creator_user_id
 WHERE work.space_id = sqlc.arg(space_id) AND work.work_id = sqlc.arg(work_id)
 FOR SHARE OF work;
-
--- name: WorkNeedsRetry :one
-SELECT EXISTS (
-    SELECT 1 FROM runs
-    WHERE work_id = sqlc.arg(work_id)
-      AND state IN ('failed', 'unknown')
-      AND retry_requested_at IS NULL
-);
 
 -- name: LockWork :one
 SELECT work_id, space_id, goal, lifecycle, owner_user_id, creator_user_id,
@@ -68,12 +174,21 @@ WHERE space_id = sqlc.arg(space_id) AND work_id = sqlc.arg(work_id)
 FOR UPDATE;
 
 -- name: FindWorkMessageByIdempotency :one
-SELECT message_id, work_id, author_user_id, text, input_seq, created_at, request_digest
-FROM work_messages
+SELECT
+    message.message_id,
+    message.work_id,
+    message.author_user_id,
+    author.display_name AS author_display_name,
+    message.text,
+    message.input_seq,
+    message.created_at,
+    message.request_digest
+FROM work_messages AS message
+JOIN carry_users AS author ON author.user_id = message.author_user_id
 WHERE
-    work_id = sqlc.arg(work_id)
-    AND author_user_id = sqlc.arg(author_user_id)
-    AND idempotency_key = sqlc.arg(idempotency_key);
+    message.work_id = sqlc.arg(work_id)
+    AND message.author_user_id = sqlc.arg(author_user_id)
+    AND message.idempotency_key = sqlc.arg(idempotency_key);
 
 -- name: AdvanceWorkInputHead :one
 UPDATE works
@@ -82,27 +197,100 @@ WHERE work_id = sqlc.arg(work_id) AND lifecycle = 'open'
 RETURNING input_head_seq;
 
 -- name: CreateWorkMessage :one
-INSERT INTO work_messages (
-    message_id,
-    work_id,
-    author_user_id,
-    text,
-    input_seq,
-    idempotency_key,
-    request_digest
-) VALUES (
-    sqlc.arg(message_id),
-    sqlc.arg(work_id),
-    sqlc.arg(author_user_id),
-    sqlc.arg(text),
-    sqlc.arg(input_seq),
-    sqlc.arg(idempotency_key),
-    sqlc.arg(request_digest)
+WITH created AS (
+    INSERT INTO work_messages (
+        message_id,
+        work_id,
+        author_user_id,
+        text,
+        input_seq,
+        idempotency_key,
+        request_digest
+    ) VALUES (
+        sqlc.arg(message_id),
+        sqlc.arg(work_id),
+        sqlc.arg(author_user_id),
+        sqlc.arg(text),
+        sqlc.arg(input_seq),
+        sqlc.arg(idempotency_key),
+        sqlc.arg(request_digest)
+    )
+    RETURNING *
 )
-RETURNING message_id, work_id, author_user_id, text, input_seq, created_at;
+SELECT
+    created.message_id,
+    created.work_id,
+    created.author_user_id,
+    author.display_name AS author_display_name,
+    created.text,
+    created.input_seq,
+    created.created_at
+FROM created
+JOIN carry_users AS author ON author.user_id = created.author_user_id;
 
--- name: ListWorkMessages :many
-SELECT message_id, work_id, author_user_id, text, input_seq, created_at
+-- name: WorkMessageCursorSequence :one
+SELECT input_seq
 FROM work_messages
-WHERE work_id = sqlc.arg(work_id)
-ORDER BY input_seq ASC;
+WHERE work_id = sqlc.arg(work_id) AND message_id = sqlc.arg(message_id);
+
+-- name: ListNewestWorkMessages :many
+WITH candidates AS (
+    SELECT message_id, work_id, author_user_id, text, input_seq, created_at
+    FROM work_messages
+    WHERE work_id = sqlc.arg(work_id)
+    ORDER BY input_seq DESC
+    LIMIT 50
+), bounded AS (
+    SELECT
+        candidates.*,
+        sum(octet_length(text)) OVER (
+            ORDER BY input_seq DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        ) AS text_bytes
+    FROM candidates
+)
+SELECT
+    bounded.message_id,
+    bounded.work_id,
+    bounded.author_user_id,
+    author.display_name AS author_display_name,
+    bounded.text,
+    bounded.input_seq,
+    bounded.created_at
+FROM bounded
+JOIN carry_users AS author ON author.user_id = bounded.author_user_id
+WHERE bounded.text_bytes <= 262144
+ORDER BY bounded.input_seq;
+
+-- name: ListWorkMessagesBefore :many
+WITH candidates AS (
+    SELECT message_id, work_id, author_user_id, text, input_seq, created_at
+    FROM work_messages
+    WHERE work_id = sqlc.arg(work_id) AND input_seq < sqlc.arg(cursor_sequence)
+    ORDER BY input_seq DESC
+    LIMIT 50
+), bounded AS (
+    SELECT
+        candidates.*,
+        sum(octet_length(text)) OVER (
+            ORDER BY input_seq DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        ) AS text_bytes
+    FROM candidates
+)
+SELECT
+    bounded.message_id,
+    bounded.work_id,
+    bounded.author_user_id,
+    author.display_name AS author_display_name,
+    bounded.text,
+    bounded.input_seq,
+    bounded.created_at
+FROM bounded
+JOIN carry_users AS author ON author.user_id = bounded.author_user_id
+WHERE bounded.text_bytes <= 262144
+ORDER BY bounded.input_seq;
+
+-- name: WorkHasMessagesBefore :one
+SELECT EXISTS (
+    SELECT 1 FROM work_messages
+    WHERE work_id = sqlc.arg(work_id) AND input_seq < sqlc.arg(input_seq)
+);

@@ -1,15 +1,16 @@
 const storageKey = "carry.pending-work-mutations.v1";
+const digestPattern = /^[0-9a-f]{64}$/;
+const uuidPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-type PendingMutation = {
+type PendingMutations = Record<string, string>;
+
+type MutationCommand = {
   operation: "create" | "message" | "retry";
   memberID: string;
   spaceID: string;
   workID?: string;
-  digest: string;
-  idempotencyKey: string;
 };
-
-type PendingMutations = Record<string, PendingMutation>;
 
 type MutationIdentity = {
   digest: string;
@@ -46,15 +47,13 @@ export async function pendingRetryIdentity(
 
 export function clearPendingIdentity(identity: MutationIdentity): void {
   const pending = loadPending();
-  if (pending[identity.digest]?.idempotencyKey !== identity.idempotencyKey) {
-    return;
-  }
+  if (pending[identity.digest] !== identity.idempotencyKey) return;
   delete pending[identity.digest];
   savePending(pending);
 }
 
 async function pendingIdentity(
-  command: Omit<PendingMutation, "digest" | "idempotencyKey">,
+  command: MutationCommand,
   content: string,
 ): Promise<MutationIdentity> {
   const encoded = new TextEncoder().encode(
@@ -68,17 +67,12 @@ async function pendingIdentity(
   ).join("");
   const pending = loadPending();
   const existing = pending[digest];
-  if (existing) {
-    return { digest, idempotencyKey: existing.idempotencyKey };
-  }
-  const created: PendingMutation = {
-    ...command,
-    digest,
-    idempotencyKey: crypto.randomUUID(),
-  };
-  pending[digest] = created;
+  if (existing) return { digest, idempotencyKey: existing };
+
+  const idempotencyKey = crypto.randomUUID();
+  pending[digest] = idempotencyKey;
   savePending(pending);
-  return { digest, idempotencyKey: created.idempotencyKey };
+  return { digest, idempotencyKey };
 }
 
 function loadPending(): PendingMutations {
@@ -90,16 +84,35 @@ function loadPending(): PendingMutations {
   } catch (caught) {
     throw new Error("Pending Work identities are invalid", { cause: caught });
   }
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+  if (!isPendingMutations(value)) {
     throw new Error("Pending Work identities are invalid");
   }
-  return value as PendingMutations;
+  return value;
+}
+
+function isPendingMutations(value: unknown): value is PendingMutations {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  return Object.entries(value).every(
+    ([digest, idempotencyKey]) =>
+      digestPattern.test(digest) &&
+      typeof idempotencyKey === "string" &&
+      uuidPattern.test(idempotencyKey),
+  );
 }
 
 function savePending(pending: PendingMutations): void {
   if (Object.keys(pending).length === 0) {
     window.sessionStorage.removeItem(storageKey);
+    if (window.sessionStorage.getItem(storageKey) !== null) {
+      throw new Error("Pending Work identity could not be cleared");
+    }
     return;
   }
-  window.sessionStorage.setItem(storageKey, JSON.stringify(pending));
+  const encoded = JSON.stringify(pending);
+  window.sessionStorage.setItem(storageKey, encoded);
+  if (window.sessionStorage.getItem(storageKey) !== encoded) {
+    throw new Error("Pending Work identity could not be saved");
+  }
 }

@@ -15,10 +15,13 @@ import (
 
 	"github.com/ApexReasoning/carry/internal/conversation"
 	hostdomain "github.com/ApexReasoning/carry/internal/host"
-	"github.com/ApexReasoning/carry/internal/host/machinefile"
+	"github.com/ApexReasoning/carry/internal/machine/machinefile"
 	"github.com/ApexReasoning/carry/internal/run"
+	"github.com/ApexReasoning/carry/internal/work"
 	"github.com/google/uuid"
 )
+
+const maxRunClaimWireBytes = 2 << 20
 
 type machineHTTP struct {
 	client    *http.Client
@@ -84,11 +87,40 @@ func (c *machineHTTP) Claim(ctx context.Context) (run.Claim, error) {
 		)
 	}
 	var wire runClaimWire
-	if err := json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&wire); err != nil {
+	if err := decodeBoundedExactJSON(response.Body, maxRunClaimWireBytes, &wire); err != nil {
 		return run.Claim{}, fmt.Errorf("decode Run claim: %w", err)
 	}
+	if uuid.Validate(wire.RunID) != nil || uuid.Validate(wire.AttemptID) != nil ||
+		uuid.Validate(wire.WorkID) != nil || wire.Fence <= 0 || wire.LeaseExpiresAt.IsZero() ||
+		wire.BaseUnderstandingVersion < 0 || wire.InputEndSeq <= 0 {
+		return run.Claim{}, errors.New("decode Run claim: invalid authority")
+	}
+	goal, goalErr := work.NormalizeGoal(wire.Goal)
+	if goalErr != nil || goal != wire.Goal {
+		return run.Claim{}, errors.New("decode Run claim: invalid goal")
+	}
+	if (wire.CurrentUnderstanding == "") != (wire.CurrentNextStep == "") {
+		return run.Claim{}, errors.New("decode Run claim: invalid current understanding")
+	}
+	if wire.CurrentUnderstanding != "" {
+		understanding, nextStep, updateErr := run.ValidateUnderstandingUpdate(
+			wire.CurrentUnderstanding, wire.CurrentNextStep,
+		)
+		if updateErr != nil || understanding != wire.CurrentUnderstanding || nextStep != wire.CurrentNextStep {
+			return run.Claim{}, errors.New("decode Run claim: invalid current understanding")
+		}
+	}
+	if len(wire.Messages) > run.MaxInputMessages {
+		return run.Claim{}, errors.New("decode Run claim: invalid bounded messages")
+	}
 	messages := make([]run.Message, 0, len(wire.Messages))
+	messageTextBytes := 0
 	for _, message := range wire.Messages {
+		messageTextBytes += len(message.Text)
+		if uuid.Validate(message.AuthorUserID) != nil || work.ValidateMessage(message.Text) != nil ||
+			messageTextBytes > run.MaxInputTextBytes {
+			return run.Claim{}, errors.New("decode Run claim: invalid bounded messages")
+		}
 		messages = append(messages, run.Message{AuthorUserID: message.AuthorUserID, Text: message.Text})
 	}
 	return run.Claim{

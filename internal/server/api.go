@@ -8,7 +8,7 @@ import (
 	"net/http"
 
 	"github.com/ApexReasoning/carry/internal/conversation"
-	"github.com/ApexReasoning/carry/internal/host"
+	"github.com/ApexReasoning/carry/internal/machine"
 	"github.com/ApexReasoning/carry/internal/run"
 	"github.com/ApexReasoning/carry/internal/space"
 	"github.com/ApexReasoning/carry/internal/work"
@@ -35,21 +35,21 @@ func decodeJSON(response http.ResponseWriter, request *http.Request, destination
 
 func writeStoreError(response http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, space.ErrForbidden), errors.Is(err, host.ErrMachineRevoked):
+	case errors.Is(err, space.ErrForbidden), errors.Is(err, machine.ErrMachineRevoked):
 		writeAPIError(response, http.StatusForbidden, err.Error())
-	case errors.Is(err, host.ErrMachineNotFound), errors.Is(err, work.ErrNotFound):
+	case errors.Is(err, machine.ErrMachineNotFound), errors.Is(err, work.ErrNotFound):
 		writeAPIError(response, http.StatusNotFound, err.Error())
 	case errors.Is(err, run.ErrStaleAttempt):
 		writeAPIError(response, http.StatusConflict, "Run Attempt is stale or expired")
 	case errors.Is(err, conversation.ErrStaleReplyClaim):
 		writeAPIError(response, http.StatusConflict, "private Conversation reply claim is stale or expired")
-	case errors.Is(err, host.ErrIdempotencyConflict), errors.Is(err, work.ErrIdempotencyConflict),
+	case errors.Is(err, machine.ErrIdempotencyConflict), errors.Is(err, work.ErrIdempotencyConflict),
 		errors.Is(err, conversation.ErrIdempotencyConflict), errors.Is(err, conversation.ErrReplyPending),
 		errors.Is(err, conversation.ErrReplyConflict),
 		errors.Is(err, work.ErrNotOpen), errors.Is(err, work.ErrRetryNotNeeded):
 		writeAPIError(response, http.StatusConflict, err.Error())
-	case errors.Is(err, run.ErrInvalidUpdate), errors.Is(err, run.ErrInvalidOutcome), errors.Is(err, work.ErrInvalidGoal),
-		errors.Is(err, work.ErrInvalidMessage), errors.Is(err, work.ErrInvalidIdempotency),
+	case errors.Is(err, run.ErrInvalidUpdate), errors.Is(err, run.ErrInvalidOutcome), errors.Is(err, machine.ErrInvalidEnrollment), errors.Is(err, work.ErrInvalidGoal),
+		errors.Is(err, work.ErrInvalidMessage), errors.Is(err, work.ErrInvalidIdempotency), errors.Is(err, work.ErrInvalidCursor),
 		errors.Is(err, conversation.ErrInvalidText), errors.Is(err, conversation.ErrInvalidIdempotency),
 		errors.Is(err, conversation.ErrInvalidCursor), errors.Is(err, conversation.ErrInvalidContext):
 		writeAPIError(response, http.StatusBadRequest, err.Error())

@@ -8,7 +8,14 @@ import {
   retryWork,
   type WorkDetails,
 } from "../../carry-api";
-import type { Member, Work } from "../../generated/types.gen";
+import type { Member, WorkSummary } from "../../generated/types.gen";
+import {
+  emptyWorkPage,
+  mergeByID,
+  mergeDetails,
+  summaryFromWork,
+  upsertSummary,
+} from "./work-page";
 import {
   clearPendingIdentity,
   pendingCreateIdentity,
@@ -18,7 +25,8 @@ import {
 
 export function useWorkBoard(member: Member | null) {
   const [spaceID, setSpaceID] = useState<string | null>(null);
-  const [works, setWorks] = useState<Array<Work>>([]);
+  const [works, setWorks] = useState<Array<WorkSummary>>([]);
+  const [hasEarlierWorks, setHasEarlierWorks] = useState(false);
   const [details, setDetails] = useState<WorkDetails | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -31,12 +39,13 @@ export function useWorkBoard(member: Member | null) {
           ? (member.spaces[0]?.space_id ?? null)
           : null;
       try {
-        const loadedWorks = initialSpaceID
+        const page = initialSpaceID
           ? await listWorks(initialSpaceID)
-          : [];
+          : emptyWorkPage();
         if (!active) return;
         setSpaceID(initialSpaceID);
-        setWorks(loadedWorks);
+        setWorks(page.works);
+        setHasEarlierWorks(page.has_earlier_works);
         setDetails(null);
         setError(null);
       } catch (caught) {
@@ -52,15 +61,49 @@ export function useWorkBoard(member: Member | null) {
   async function selectSpace(selectedSpaceID: string) {
     if (!selectedSpaceID) return;
     await run(async () => {
-      setWorks(await listWorks(selectedSpaceID));
+      const page = await listWorks(selectedSpaceID);
       setSpaceID(selectedSpaceID);
+      setWorks(page.works);
+      setHasEarlierWorks(page.has_earlier_works);
       setDetails(null);
+    });
+  }
+
+  async function loadEarlierWorks(): Promise<void> {
+    if (!spaceID || !hasEarlierWorks || works.length === 0) return;
+    const cursor = works.at(-1)?.work_id;
+    if (!cursor) return;
+    await run(async () => {
+      const page = await listWorks(spaceID, cursor);
+      setWorks((current) => mergeByID(current, page.works, "work_id"));
+      setHasEarlierWorks(page.has_earlier_works);
     });
   }
 
   async function selectWork(workID: string) {
     if (!spaceID) return;
     await run(async () => updateDetails(await loadWork(spaceID, workID)));
+  }
+
+  async function loadEarlierMessages(): Promise<void> {
+    if (!spaceID || !details?.has_earlier_messages) return;
+    const cursor = details.messages[0]?.message_id;
+    if (!cursor) return;
+    const workID = details.work.work_id;
+    await run(async () => {
+      const earlier = await loadWork(spaceID, workID, cursor);
+      setDetails((current) => {
+        if (!current || current.work.work_id !== workID) return current;
+        return {
+          work: earlier.work,
+          messages: mergeByID(earlier.messages, current.messages, "message_id"),
+          has_earlier_messages: earlier.has_earlier_messages,
+        };
+      });
+      setWorks((current) =>
+        upsertSummary(current, summaryFromWork(earlier.work)),
+      );
+    });
   }
 
   async function addWork(goal: string): Promise<boolean> {
@@ -143,11 +186,10 @@ export function useWorkBoard(member: Member | null) {
   }
 
   function updateDetails(reloaded: WorkDetails) {
-    setDetails(reloaded);
-    setWorks((current) => [
-      reloaded.work,
-      ...current.filter((item) => item.work_id !== reloaded.work.work_id),
-    ]);
+    setDetails((current) => mergeDetails(current, reloaded));
+    setWorks((current) =>
+      upsertSummary(current, summaryFromWork(reloaded.work)),
+    );
   }
 
   async function run(operation: () => Promise<void>): Promise<unknown | null> {
@@ -167,11 +209,14 @@ export function useWorkBoard(member: Member | null) {
   return {
     spaceID,
     works,
+    hasEarlierWorks,
     details,
     busy,
     error,
     selectSpace,
+    loadEarlierWorks,
     selectWork,
+    loadEarlierMessages,
     addWork,
     addMessage,
     retryCurrentWork,

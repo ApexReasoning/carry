@@ -22,13 +22,13 @@ func newShowCommand(configDirectory string, output io.Writer) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			details, err := client.load(command.Context(), selectedSpaceID, workID)
+			details, err := client.LoadWork(command.Context(), selectedSpaceID, workID, "")
 			if err != nil {
 				return err
 			}
 			if _, err := fmt.Fprintf(
 				output, "Work %s\nGoal: %s\nStatus: %s\nOwner: %s\n",
-				details.Work.WorkID, details.Work.Goal, details.Work.Lifecycle, details.Work.OwnerUserID,
+				details.Work.WorkID, details.Work.Goal, details.Work.Lifecycle, details.Work.OwnerDisplayName,
 			); err != nil {
 				return err
 			}
@@ -62,9 +62,13 @@ func newShowCommand(configDirectory string, output io.Writer) *cobra.Command {
 				return err
 			}
 			for _, message := range details.Messages {
-				if _, err := fmt.Fprintf(output, "  %s: %s\n", message.AuthorUserID, message.Text); err != nil {
+				if _, err := fmt.Fprintf(output, "  %s: %s\n", message.AuthorDisplayName, message.Text); err != nil {
 					return err
 				}
+			}
+			if details.HasEarlierMessages {
+				_, err = fmt.Fprintln(output, "Earlier messages are not shown.")
+				return err
 			}
 			return nil
 		},

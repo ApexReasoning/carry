@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ApexReasoning/carry/internal/host"
 	"github.com/ApexReasoning/carry/internal/identity"
+	"github.com/ApexReasoning/carry/internal/machine"
 )
 
 func TestBrowserSessionExchangeSetsHostOnlyOpaqueCookie(t *testing.T) {
@@ -66,6 +66,9 @@ func TestCrossSiteBrowserSessionExchangeIsRejectedBeforeStore(t *testing.T) {
 	if response.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want %d", response.Code, http.StatusForbidden)
 	}
+	if got := response.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("cross-site rejection Cache-Control = %q, want no-store", got)
+	}
 	if sessions.sourceToken != "" {
 		t.Fatal("cross-site request reached browser session store")
 	}
@@ -98,7 +101,7 @@ func TestBrowserSessionAuthenticatesMemberRoute(t *testing.T) {
 
 	sessions := &recordingBrowserSessions{
 		authenticatedSecret: "opaque-session-secret",
-		user:                identity.AuthenticatedUser{UserID: "member-5"},
+		user:                identity.AuthenticatedUser{UserID: "member-5", DisplayName: "Mary"},
 	}
 	handler := browserTestAPI(t, sessions)
 	request := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
@@ -110,7 +113,8 @@ func TestBrowserSessionAuthenticatesMemberRoute(t *testing.T) {
 	if response.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d; body = %s", response.Code, http.StatusOK, response.Body.String())
 	}
-	if !strings.Contains(response.Body.String(), `"user_id":"member-5"`) {
+	if !strings.Contains(response.Body.String(), `"user_id":"member-5"`) ||
+		!strings.Contains(response.Body.String(), `"display_name":"Mary"`) {
 		t.Fatalf("response body = %s", response.Body.String())
 	}
 }
@@ -237,7 +241,7 @@ func TestMachineRouteRejectsMemberCredentialsEvenWithValidCertificate(t *testing
 
 func memberSurfaceTestAPI(
 	t *testing.T,
-	authority *host.CertificateAuthority,
+	authority *machine.CertificateAuthority,
 	tokens UserTokenAuthenticator,
 	sessions BrowserSessionStore,
 ) http.Handler {

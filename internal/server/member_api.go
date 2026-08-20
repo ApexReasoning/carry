@@ -39,9 +39,9 @@ func (api memberAPI) me(response http.ResponseWriter, request *http.Request) {
 			CanEnrollMachines: membership.CanEnrollMachines,
 		})
 	}
-	response.Header().Set("Cache-Control", "no-store")
 	writeJSON(response, http.StatusOK, struct {
-		UserID string           `json:"user_id"`
-		Spaces []membershipWire `json:"spaces"`
-	}{UserID: user.UserID, Spaces: spaces})
+		UserID      string           `json:"user_id"`
+		DisplayName string           `json:"display_name"`
+		Spaces      []membershipWire `json:"spaces"`
+	}{UserID: user.UserID, DisplayName: user.DisplayName, Spaces: spaces})
 }

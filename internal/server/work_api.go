@@ -18,10 +18,10 @@ type WorkCommands interface {
 	RequestWorkRetry(context.Context, work.RetryCommand) error
 }
 
-// WorkQueries loads Work facts under current Space membership.
+// WorkQueries loads bounded Work facts under current Space membership.
 type WorkQueries interface {
-	ListWorks(context.Context, string, string) ([]work.Work, error)
-	LoadWork(context.Context, string, string, string) (work.Details, error)
+	ListWorks(context.Context, work.ListCommand) (work.Page, error)
+	LoadWork(context.Context, work.LoadCommand) (work.Details, error)
 }
 
 type workAPI struct {
@@ -37,26 +37,43 @@ type appendWorkMessageRequest struct {
 	Text string `json:"text"`
 }
 
+type workSummaryWire struct {
+	WorkID             string         `json:"work_id"`
+	SpaceID            string         `json:"space_id"`
+	Goal               string         `json:"goal"`
+	Lifecycle          work.Lifecycle `json:"lifecycle"`
+	OwnerUserID        string         `json:"owner_user_id"`
+	OwnerDisplayName   string         `json:"owner_display_name"`
+	CreatorUserID      string         `json:"creator_user_id"`
+	CreatorDisplayName string         `json:"creator_display_name"`
+	HasUnappliedInput  bool           `json:"has_unapplied_input"`
+	NeedsRetry         bool           `json:"needs_retry"`
+	CreatedAt          time.Time      `json:"created_at"`
+}
+
 type workWire struct {
-	WorkID            string         `json:"work_id"`
-	SpaceID           string         `json:"space_id"`
-	Goal              string         `json:"goal"`
-	Lifecycle         work.Lifecycle `json:"lifecycle"`
-	OwnerUserID       string         `json:"owner_user_id"`
-	CreatorUserID     string         `json:"creator_user_id"`
-	Understanding     string         `json:"understanding"`
-	NextStep          string         `json:"next_step"`
-	HasUnappliedInput bool           `json:"has_unapplied_input"`
-	NeedsRetry        bool           `json:"needs_retry"`
-	CreatedAt         time.Time      `json:"created_at"`
+	WorkID             string         `json:"work_id"`
+	SpaceID            string         `json:"space_id"`
+	Goal               string         `json:"goal"`
+	Lifecycle          work.Lifecycle `json:"lifecycle"`
+	OwnerUserID        string         `json:"owner_user_id"`
+	OwnerDisplayName   string         `json:"owner_display_name"`
+	CreatorUserID      string         `json:"creator_user_id"`
+	CreatorDisplayName string         `json:"creator_display_name"`
+	Understanding      string         `json:"understanding"`
+	NextStep           string         `json:"next_step"`
+	HasUnappliedInput  bool           `json:"has_unapplied_input"`
+	NeedsRetry         bool           `json:"needs_retry"`
+	CreatedAt          time.Time      `json:"created_at"`
 }
 
 type workMessageWire struct {
-	MessageID    string    `json:"message_id"`
-	WorkID       string    `json:"work_id"`
-	AuthorUserID string    `json:"author_user_id"`
-	Text         string    `json:"text"`
-	CreatedAt    time.Time `json:"created_at"`
+	MessageID         string    `json:"message_id"`
+	WorkID            string    `json:"work_id"`
+	AuthorUserID      string    `json:"author_user_id"`
+	AuthorDisplayName string    `json:"author_display_name"`
+	Text              string    `json:"text"`
+	CreatedAt         time.Time `json:"created_at"`
 }
 
 func (api workAPI) mount(router chi.Router) {
@@ -104,18 +121,25 @@ func (api workAPI) list(response http.ResponseWriter, request *http.Request) {
 	if !ok {
 		return
 	}
-	listed, err := api.queries.ListWorks(request.Context(), user.UserID, spaceID)
+	before, ok := queryUUID(response, request, "before")
+	if !ok {
+		return
+	}
+	page, err := api.queries.ListWorks(request.Context(), work.ListCommand{
+		UserID: user.UserID, SpaceID: spaceID, Before: before,
+	})
 	if err != nil {
 		writeStoreError(response, err)
 		return
 	}
-	works := make([]workWire, 0, len(listed))
-	for _, item := range listed {
-		works = append(works, workToWire(item))
+	works := make([]workSummaryWire, 0, len(page.Works))
+	for _, item := range page.Works {
+		works = append(works, summaryToWire(item))
 	}
 	writeJSON(response, http.StatusOK, struct {
-		Works []workWire `json:"works"`
-	}{Works: works})
+		Works      []workSummaryWire `json:"works"`
+		HasEarlier bool              `json:"has_earlier_works"`
+	}{Works: works, HasEarlier: page.HasEarlier})
 }
 
 func (api workAPI) load(response http.ResponseWriter, request *http.Request) {
@@ -131,7 +155,13 @@ func (api workAPI) load(response http.ResponseWriter, request *http.Request) {
 	if !ok {
 		return
 	}
-	details, err := api.queries.LoadWork(request.Context(), user.UserID, spaceID, workID)
+	before, ok := queryUUID(response, request, "before")
+	if !ok {
+		return
+	}
+	details, err := api.queries.LoadWork(request.Context(), work.LoadCommand{
+		UserID: user.UserID, SpaceID: spaceID, WorkID: workID, BeforeMessage: before,
+	})
 	if err != nil {
 		writeStoreError(response, err)
 		return
@@ -141,9 +171,10 @@ func (api workAPI) load(response http.ResponseWriter, request *http.Request) {
 		messages = append(messages, messageToWire(message))
 	}
 	writeJSON(response, http.StatusOK, struct {
-		Work     workWire          `json:"work"`
-		Messages []workMessageWire `json:"messages"`
-	}{Work: workToWire(details.Work), Messages: messages})
+		Work               workWire          `json:"work"`
+		Messages           []workMessageWire `json:"messages"`
+		HasEarlierMessages bool              `json:"has_earlier_messages"`
+	}{Work: workToWire(details.Work), Messages: messages, HasEarlierMessages: details.HasEarlierMessages})
 }
 
 func (api workAPI) appendMessage(response http.ResponseWriter, request *http.Request) {
@@ -222,19 +253,29 @@ func requireIdempotencyKey(response http.ResponseWriter, request *http.Request) 
 	return key, true
 }
 
+func summaryToWire(value work.Summary) workSummaryWire {
+	return workSummaryWire{
+		WorkID: value.WorkID, SpaceID: value.SpaceID, Goal: value.Goal, Lifecycle: value.Lifecycle,
+		OwnerUserID: value.OwnerUserID, OwnerDisplayName: value.OwnerDisplayName,
+		CreatorUserID: value.CreatorUserID, CreatorDisplayName: value.CreatorDisplayName,
+		HasUnappliedInput: value.HasUnappliedInput, NeedsRetry: value.NeedsRetry, CreatedAt: value.CreatedAt,
+	}
+}
+
 func workToWire(value work.Work) workWire {
 	return workWire{
-		WorkID: value.WorkID, SpaceID: value.SpaceID, Goal: value.Goal,
-		Lifecycle: value.Lifecycle, OwnerUserID: value.OwnerUserID,
-		CreatorUserID: value.CreatorUserID, Understanding: value.Understanding,
-		NextStep: value.NextStep, HasUnappliedInput: value.HasUnappliedInput,
-		NeedsRetry: value.NeedsRetry, CreatedAt: value.CreatedAt,
+		WorkID: value.WorkID, SpaceID: value.SpaceID, Goal: value.Goal, Lifecycle: value.Lifecycle,
+		OwnerUserID: value.OwnerUserID, OwnerDisplayName: value.OwnerDisplayName,
+		CreatorUserID: value.CreatorUserID, CreatorDisplayName: value.CreatorDisplayName,
+		Understanding: value.Understanding, NextStep: value.NextStep,
+		HasUnappliedInput: value.HasUnappliedInput, NeedsRetry: value.NeedsRetry, CreatedAt: value.CreatedAt,
 	}
 }
 
 func messageToWire(value work.Message) workMessageWire {
 	return workMessageWire{
-		MessageID: value.MessageID, WorkID: value.WorkID, AuthorUserID: value.AuthorUserID,
+		MessageID: value.MessageID, WorkID: value.WorkID,
+		AuthorUserID: value.AuthorUserID, AuthorDisplayName: value.AuthorDisplayName,
 		Text: value.Text, CreatedAt: value.CreatedAt,
 	}
 }

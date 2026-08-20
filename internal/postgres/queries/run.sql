@@ -59,6 +59,28 @@ ORDER BY work.created_at, work.work_id
 LIMIT 1
 FOR UPDATE OF work SKIP LOCKED;
 
+-- name: SelectRunInputEnd :one
+WITH upcoming AS (
+    SELECT input_seq, text
+    FROM work_messages
+    WHERE
+        work_id = sqlc.arg(work_id)
+        AND input_seq >= sqlc.arg(input_start_seq)
+        AND input_seq <= sqlc.arg(input_head_seq)
+    ORDER BY input_seq
+    LIMIT 32
+), candidates AS (
+    SELECT
+        input_seq,
+        sum(octet_length(text)) OVER (
+            ORDER BY input_seq ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        ) AS text_bytes
+    FROM upcoming
+)
+SELECT coalesce(max(input_seq), sqlc.arg(input_start_seq))::bigint
+FROM candidates
+WHERE text_bytes <= 262144;
+
 -- name: CreateRun :one
 INSERT INTO runs (
     run_id,

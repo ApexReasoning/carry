@@ -5,12 +5,14 @@ package postgres
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/ApexReasoning/carry/internal/host"
+	"github.com/ApexReasoning/carry/internal/machine"
 	"github.com/ApexReasoning/carry/internal/run"
 	"github.com/ApexReasoning/carry/internal/space"
 	"github.com/ApexReasoning/carry/internal/work"
@@ -42,7 +44,7 @@ func newRunFixture(t *testing.T, ctx context.Context) runFixture {
 		t.Fatalf("create Run fixture Work: %v", err)
 	}
 	machineID := uuid.NewString()
-	_, err = store.EnrollMachine(ctx, host.EnrollMachineCommand{
+	_, err = store.EnrollMachine(ctx, machine.EnrollMachineCommand{
 		MachineID: machineID, SpaceID: bootstrap.SpaceID, DisplayName: "Run Host",
 		PublicKeyDER: []byte("run-public-key"), CertificatePEM: []byte("run-certificate"),
 		CertificateSerial: uuid.NewString(), EnrolledByUserID: bootstrap.UserID,
@@ -100,6 +102,81 @@ func TestConcurrentClaimCreatesOneRunAttemptWithFixedMessages(t *testing.T) {
 	if len(claim.Messages) != 1 || claim.Messages[0].Text != "Finance approved a twelve month term" {
 		t.Fatalf("claim messages = %#v", claim.Messages)
 	}
+}
+
+func TestBoundedRunInputsContinueWithoutOmission(t *testing.T) {
+	t.Run("message count", func(t *testing.T) {
+		ctx := context.Background()
+		fixture := newRunFixture(t, ctx)
+		for index := range run.MaxInputMessages + 3 {
+			if _, err := fixture.store.AppendWorkMessage(ctx, work.AppendMessageCommand{
+				WorkID: fixture.work.WorkID, SpaceID: fixture.bootstrap.SpaceID,
+				AuthorUserID: fixture.bootstrap.UserID, Text: fmt.Sprintf("constraint %02d", index),
+				IdempotencyKey: fmt.Sprintf("constraint-%02d", index),
+			}); err != nil {
+				t.Fatalf("append message %d: %v", index, err)
+			}
+		}
+		first, err := fixture.store.ClaimRun(ctx, fixture.machineID)
+		if err != nil {
+			t.Fatalf("claim first bounded Run: %v", err)
+		}
+		if len(first.Messages) != run.MaxInputMessages {
+			t.Fatalf("first message count = %d, want %d", len(first.Messages), run.MaxInputMessages)
+		}
+		if err := fixture.store.CommitWorkUnderstanding(ctx, run.CommitCommand{
+			MachineID: fixture.machineID, RunID: first.RunID, AttemptID: first.AttemptID,
+			Fence: first.Fence, BaseUnderstandingVersion: first.BaseUnderstandingVersion,
+			InputEndSeq: first.InputEndSeq, Understanding: "The first bounded input is applied.",
+			NextStep: "Apply the remaining constraints.",
+		}); err != nil {
+			t.Fatalf("commit first bounded Run: %v", err)
+		}
+		second, err := fixture.store.ClaimRun(ctx, fixture.machineID)
+		if err != nil {
+			t.Fatalf("claim second bounded Run: %v", err)
+		}
+		if len(second.Messages) != 3 || second.Messages[0].Text != "constraint 32" {
+			t.Fatalf("second messages = %#v", second.Messages)
+		}
+	})
+
+	t.Run("text bytes", func(t *testing.T) {
+		ctx := context.Background()
+		fixture := newRunFixture(t, ctx)
+		text := strings.Repeat("x", work.MaxMessageBytes)
+		for index := range 5 {
+			if _, err := fixture.store.AppendWorkMessage(ctx, work.AppendMessageCommand{
+				WorkID: fixture.work.WorkID, SpaceID: fixture.bootstrap.SpaceID,
+				AuthorUserID: fixture.bootstrap.UserID, Text: text,
+				IdempotencyKey: fmt.Sprintf("large-input-%d", index),
+			}); err != nil {
+				t.Fatalf("append large message %d: %v", index, err)
+			}
+		}
+		first, err := fixture.store.ClaimRun(ctx, fixture.machineID)
+		if err != nil {
+			t.Fatalf("claim byte-bounded Run: %v", err)
+		}
+		if len(first.Messages) != 4 {
+			t.Fatalf("byte-bounded message count = %d, want 4", len(first.Messages))
+		}
+		if err := fixture.store.CommitWorkUnderstanding(ctx, run.CommitCommand{
+			MachineID: fixture.machineID, RunID: first.RunID, AttemptID: first.AttemptID,
+			Fence: first.Fence, BaseUnderstandingVersion: first.BaseUnderstandingVersion,
+			InputEndSeq: first.InputEndSeq, Understanding: "Four large inputs are applied.",
+			NextStep: "Apply the final input.",
+		}); err != nil {
+			t.Fatalf("commit byte-bounded Run: %v", err)
+		}
+		second, err := fixture.store.ClaimRun(ctx, fixture.machineID)
+		if err != nil {
+			t.Fatalf("claim remaining byte-bounded Run: %v", err)
+		}
+		if len(second.Messages) != 1 || second.InputEndSeq != first.InputEndSeq+1 {
+			t.Fatalf("remaining claim = %#v", second)
+		}
+	})
 }
 
 func TestIdempotentWorkCreateReplayReturnsCurrentFacts(t *testing.T) {
@@ -177,7 +254,7 @@ func TestCommitUpdatesWorkDirectlyAndLeavesLateMessageForNextRun(t *testing.T) {
 		t.Fatalf("second commit error = %v", err)
 	}
 
-	details, err := fixture.store.LoadWork(ctx, fixture.bootstrap.UserID, fixture.bootstrap.SpaceID, fixture.work.WorkID)
+	details, err := fixture.store.LoadWork(ctx, work.LoadCommand{UserID: fixture.bootstrap.UserID, SpaceID: fixture.bootstrap.SpaceID, WorkID: fixture.work.WorkID})
 	if err != nil {
 		t.Fatalf("load committed Work: %v", err)
 	}
@@ -223,7 +300,7 @@ func TestFailedAndUnknownRunsRequireExplicitRetry(t *testing.T) {
 			if _, err := fixture.store.ClaimRun(ctx, fixture.machineID); !errors.Is(err, run.ErrNoRunAvailable) {
 				t.Fatalf("new input bypassed explicit retry: %v", err)
 			}
-			details, err := fixture.store.LoadWork(ctx, fixture.bootstrap.UserID, fixture.bootstrap.SpaceID, fixture.work.WorkID)
+			details, err := fixture.store.LoadWork(ctx, work.LoadCommand{UserID: fixture.bootstrap.UserID, SpaceID: fixture.bootstrap.SpaceID, WorkID: fixture.work.WorkID})
 			if err != nil || !details.Work.NeedsRetry {
 				t.Fatalf("Work retry fact = %#v, error = %v", details.Work, err)
 			}
@@ -352,7 +429,7 @@ func TestRetryIdempotencyCannotAuthorizeALaterTerminalRun(t *testing.T) {
 	if _, err := fixture.store.ClaimRun(ctx, fixture.machineID); !errors.Is(err, run.ErrNoRunAvailable) {
 		t.Fatalf("old retry identity authorized later terminal Run: %v", err)
 	}
-	details, err := fixture.store.LoadWork(ctx, fixture.bootstrap.UserID, fixture.bootstrap.SpaceID, fixture.work.WorkID)
+	details, err := fixture.store.LoadWork(ctx, work.LoadCommand{UserID: fixture.bootstrap.UserID, SpaceID: fixture.bootstrap.SpaceID, WorkID: fixture.work.WorkID})
 	if err != nil || !details.Work.NeedsRetry {
 		t.Fatalf("later terminal retry fact = %#v, error = %v", details.Work, err)
 	}
@@ -454,6 +531,16 @@ func TestExpiredAttemptRecoversOnceAndRejectsOldAuthority(t *testing.T) {
 		t.Fatalf("expired renew error = %v", err)
 	}
 
+	recoveryMachineID := uuid.NewString()
+	if _, err := fixture.store.EnrollMachine(ctx, machine.EnrollMachineCommand{
+		MachineID: recoveryMachineID, SpaceID: fixture.bootstrap.SpaceID, DisplayName: "Replacement Run Host",
+		PublicKeyDER: []byte("replacement-public-key"), CertificatePEM: []byte("replacement-certificate"),
+		CertificateSerial: uuid.NewString(), EnrolledByUserID: fixture.bootstrap.UserID,
+		IdempotencyKey: "enroll-replacement-run-host",
+	}); err != nil {
+		t.Fatalf("enroll replacement Machine: %v", err)
+	}
+
 	const callers = 6
 	claims := make(chan run.Claim, callers)
 	errorsSeen := make(chan error, callers)
@@ -462,7 +549,7 @@ func TestExpiredAttemptRecoversOnceAndRejectsOldAuthority(t *testing.T) {
 		wait.Add(1)
 		go func() {
 			defer wait.Done()
-			claim, claimErr := fixture.store.ClaimRun(ctx, fixture.machineID)
+			claim, claimErr := fixture.store.ClaimRun(ctx, recoveryMachineID)
 			if claimErr == nil {
 				claims <- claim
 				return
@@ -482,6 +569,13 @@ func TestExpiredAttemptRecoversOnceAndRejectsOldAuthority(t *testing.T) {
 		}
 	}
 	recovered := <-claims
+	var recoveredBy string
+	if err := fixture.store.pool.QueryRow(ctx, `select machine_id from run_attempts where attempt_id = $1`, recovered.AttemptID).Scan(&recoveredBy); err != nil {
+		t.Fatalf("load recovery Machine: %v", err)
+	}
+	if recoveredBy != recoveryMachineID {
+		t.Fatalf("recovery Machine = %s, want %s", recoveredBy, recoveryMachineID)
+	}
 	if recovered.RunID != old.RunID || recovered.AttemptID == old.AttemptID || recovered.Fence != old.Fence+1 {
 		t.Fatalf("recovered claim = %#v; old = %#v", recovered, old)
 	}
@@ -599,7 +693,7 @@ func TestMachineRevocationRejectsClaimAndCommit(t *testing.T) {
 		if err := fixture.store.RevokeMachine(ctx, fixture.bootstrap.UserID, fixture.bootstrap.SpaceID, fixture.machineID); err != nil {
 			t.Fatalf("revoke Machine: %v", err)
 		}
-		if _, err := fixture.store.ClaimRun(ctx, fixture.machineID); !errors.Is(err, host.ErrMachineRevoked) {
+		if _, err := fixture.store.ClaimRun(ctx, fixture.machineID); !errors.Is(err, machine.ErrMachineRevoked) {
 			t.Fatalf("revoked claim error = %v", err)
 		}
 	})

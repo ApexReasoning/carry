@@ -6,20 +6,20 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/ApexReasoning/carry/internal/host"
+	"github.com/ApexReasoning/carry/internal/machine"
 	"github.com/google/uuid"
 )
 
 // MachineEnrollmentStore handles only member-authorized Machine enrollment
 // and revocation; it cannot report Host runtime state.
 type MachineEnrollmentStore interface {
-	EnrollMachine(context.Context, host.EnrollMachineCommand) (host.MachineEnrollment, error)
+	EnrollMachine(context.Context, machine.EnrollMachineCommand) (machine.MachineEnrollment, error)
 	RevokeMachine(context.Context, string, string, string) error
 }
 
 type memberMachineAPI struct {
 	store     MachineEnrollmentStore
-	authority *host.CertificateAuthority
+	authority *machine.CertificateAuthority
 }
 
 type enrollMachineRequest struct {
@@ -46,6 +46,10 @@ func (api memberMachineAPI) enroll(response http.ResponseWriter, request *http.R
 	if !decodeJSON(response, request, &body) {
 		return
 	}
+	if uuid.Validate(body.SpaceID) != nil {
+		writeAPIError(response, http.StatusBadRequest, "space_id is invalid")
+		return
+	}
 	publicKeyDER, err := base64.StdEncoding.DecodeString(body.PublicKey)
 	if err != nil || len(publicKeyDER) == 0 {
 		writeAPIError(response, http.StatusBadRequest, "public_key is invalid")
@@ -57,7 +61,7 @@ func (api memberMachineAPI) enroll(response http.ResponseWriter, request *http.R
 		writeAPIError(response, http.StatusBadRequest, "public_key is invalid")
 		return
 	}
-	enrollment, err := api.store.EnrollMachine(request.Context(), host.EnrollMachineCommand{
+	enrollment, err := api.store.EnrollMachine(request.Context(), machine.EnrollMachineCommand{
 		MachineID: machineID, SpaceID: body.SpaceID, DisplayName: body.DisplayName,
 		PublicKeyDER: publicKeyDER, CertificatePEM: issued.CertificatePEM,
 		CertificateSerial: issued.Serial, EnrolledByUserID: user.UserID,
@@ -84,6 +88,10 @@ func (api memberMachineAPI) revoke(response http.ResponseWriter, request *http.R
 	}
 	var body revokeMachineRequest
 	if !decodeJSON(response, request, &body) {
+		return
+	}
+	if uuid.Validate(body.SpaceID) != nil || uuid.Validate(body.MachineID) != nil {
+		writeAPIError(response, http.StatusBadRequest, "Machine revocation identity is invalid")
 		return
 	}
 	if err := api.store.RevokeMachine(request.Context(), user.UserID, body.SpaceID, body.MachineID); err != nil {

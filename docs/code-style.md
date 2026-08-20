@@ -28,31 +28,9 @@ Carry 的代码必须让读者快速看清：
 
 格式交给工具。Review 时间用于判断 ownership、authority、failure 和 unnecessary code。
 
-### 四条执行原则
+### 执行原则
 
-#### 不确定性先显式化
-
-先读取当前 owner、协议和测试，再写代码。把假设和会实质改变用户旅程、owner、authority、external consequence 或批准范围的不同解释说清楚；无法从现有事实裁决时才询问用户。普通实现选择由工程判断负责，不能把每个细节都推回用户。
-
-目标不是问更多问题，而是不隐藏会改变设计的困惑。已经由 canonical 文档、代码或测试明确的答案应直接遵守；无关紧要的多种写法不需要制造决策。
-
-#### 只建立被当前旅程赚得的结构
-
-实现当前旅程所需的最小完整结构。没有当前消费者、独立 lifecycle、invalid state 或受保护不变量的 abstraction、option、interface、registry 和 compatibility path 不建立。
-
-“最小”按概念和承诺判断，不按行数判断。保护 identity、authority、privacy、causality、并发、Unknown outcome 和 failure recovery 所需的类型、事务、constraint、错误路径与测试必须完整保留。
-
-#### 范围克制，纵向完整
-
-不做与当前合同无关的美化、重命名、格式改写或顺手重构。但一条批准的行为必须纵向完成：必要的 owner、migration、query、protocol、generated code、adapter、UI、测试和 canonical 文档都属于同一改动。
-
-新路径替代旧路径时，同一改动删除旧 package、route、query、字段、测试、脚本和文档。留下两条事实来源或失效 scaffolding 的小 diff，不是精准修改。
-
-#### 用证据定义完成
-
-实现前明确：成功时什么可观察、失败时留下什么、谁仍有 authority、并发下谁是唯一 winner，以及成员如何完成真实旅程。先建立能失败的行为或合同证据，再实现并循环验证。
-
-工具退出码只是证据的一部分。必须确认修改过的路径实际执行，数据库测试没有 skip，生成结果可重建，公开旅程从真实入口闭合，并且 Unknown、隐私和 late writer 没有被绿色测试掩盖。
+`AGENTS.md` 唯一定义“不确定性先显式化、只建立 earned structure、范围克制且纵向完整、以直接证据完成”四条执行原则。本文件只补充代码表达：规则应让 owner、authority、failure 与 deletion path 可读；必要事务和测试不因缩短代码被删除；没有当前消费者的 abstraction 不因形式整齐被保留。
 
 ## 2. 代码首先服从架构
 

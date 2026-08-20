@@ -18,6 +18,9 @@ import type {
   CreateWorkData,
   CreateWorkErrors,
   CreateWorkResponses,
+  EnrollMachineData,
+  EnrollMachineErrors,
+  EnrollMachineResponses,
   ListConversationMessagesData,
   ListConversationMessagesErrors,
   ListConversationMessagesResponses,
@@ -36,6 +39,9 @@ import type {
   RevokeCurrentBrowserSessionData,
   RevokeCurrentBrowserSessionErrors,
   RevokeCurrentBrowserSessionResponses,
+  RevokeMachineData,
+  RevokeMachineErrors,
+  RevokeMachineResponses,
   SendConversationMessageData,
   SendConversationMessageErrors,
   SendConversationMessageResponses,
@@ -44,12 +50,14 @@ import {
   zAppendWorkMessageResponse,
   zCreateBrowserSessionResponse,
   zCreateWorkResponse,
+  zEnrollMachineResponse,
   zListConversationMessagesResponse,
   zListWorksResponse,
   zLoadCurrentMemberResponse,
   zLoadWorkResponse,
   zRetryWorkResponse,
   zRevokeCurrentBrowserSessionResponse,
+  zRevokeMachineResponse,
   zSendConversationMessageResponse,
 } from "./zod.gen";
 
@@ -141,6 +149,58 @@ export const loadCurrentMember = <ThrowOnError extends boolean = false>(
     ],
     url: "/v1/me",
     ...options,
+  });
+
+export const enrollMachine = <ThrowOnError extends boolean = false>(
+  options: Options<EnrollMachineData, ThrowOnError>,
+): RequestResult<EnrollMachineResponses, EnrollMachineErrors, ThrowOnError> =>
+  (options.client ?? client).post<
+    EnrollMachineResponses,
+    EnrollMachineErrors,
+    ThrowOnError
+  >({
+    responseValidator: async (data) =>
+      await zEnrollMachineResponse.parseAsync(data),
+    security: [
+      { scheme: "bearer", type: "http" },
+      {
+        in: "cookie",
+        name: "__Host-carry_session",
+        type: "apiKey",
+      },
+    ],
+    url: "/v1/machines/enroll",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+
+export const revokeMachine = <ThrowOnError extends boolean = false>(
+  options: Options<RevokeMachineData, ThrowOnError>,
+): RequestResult<RevokeMachineResponses, RevokeMachineErrors, ThrowOnError> =>
+  (options.client ?? client).post<
+    RevokeMachineResponses,
+    RevokeMachineErrors,
+    ThrowOnError
+  >({
+    responseValidator: async (data) =>
+      await zRevokeMachineResponse.parseAsync(data),
+    security: [
+      { scheme: "bearer", type: "http" },
+      {
+        in: "cookie",
+        name: "__Host-carry_session",
+        type: "apiKey",
+      },
+    ],
+    url: "/v1/machines/revoke",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
   });
 
 export const listConversationMessages = <ThrowOnError extends boolean = false>(

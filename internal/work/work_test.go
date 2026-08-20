@@ -16,7 +16,7 @@ func TestNormalizeGoalKeepsOneMeaningfulSentence(t *testing.T) {
 	if goal != "Compare three pricing changes" {
 		t.Fatalf("goal = %q", goal)
 	}
-	for _, invalid := range []string{"", "   ", strings.Repeat("x", MaxGoalBytes+1)} {
+	for _, invalid := range []string{"", "   ", "goal\x00hidden", string([]byte{0xff}), strings.Repeat("x", MaxGoalBytes+1)} {
 		if _, err := NormalizeGoal(invalid); !errors.Is(err, ErrInvalidGoal) {
 			t.Errorf("invalid goal error = %v", err)
 		}
@@ -30,7 +30,7 @@ func TestValidateMessagePreservesAuthoredText(t *testing.T) {
 	if err := ValidateMessage(text); err != nil {
 		t.Fatalf("validate message: %v", err)
 	}
-	for _, invalid := range []string{"", "\n\t", strings.Repeat("x", MaxMessageBytes+1)} {
+	for _, invalid := range []string{"", "\n\t", "message\x00hidden", string([]byte{0xff}), strings.Repeat("x", MaxMessageBytes+1)} {
 		if err := ValidateMessage(invalid); !errors.Is(err, ErrInvalidMessage) {
 			t.Errorf("invalid message error = %v", err)
 		}
@@ -43,7 +43,7 @@ func TestValidateIdempotencyKey(t *testing.T) {
 	if err := ValidateIdempotencyKey("request-1"); err != nil {
 		t.Fatalf("validate idempotency key: %v", err)
 	}
-	for _, invalid := range []string{"", "   ", strings.Repeat("x", MaxIdempotencyKeyBytes+1)} {
+	for _, invalid := range []string{"", "   ", "key\x00hidden", string([]byte{0xff}), strings.Repeat("x", MaxIdempotencyKeyBytes+1)} {
 		if err := ValidateIdempotencyKey(invalid); !errors.Is(err, ErrInvalidIdempotency) {
 			t.Errorf("invalid idempotency key error = %v", err)
 		}

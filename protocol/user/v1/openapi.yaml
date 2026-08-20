@@ -16,6 +16,9 @@ paths:
       responses:
         "204":
           description: Browser session created
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
         "401":
           $ref: "#/components/responses/Error"
   /v1/browser/sessions/current:
@@ -26,6 +29,9 @@ paths:
       responses:
         "204":
           description: Browser session revoked
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
         "401":
           $ref: "#/components/responses/Error"
   /v1/me:
@@ -34,11 +40,97 @@ paths:
       responses:
         "200":
           description: Current member and Spaces
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Member"
         "401":
+          $ref: "#/components/responses/Error"
+  /v1/machines/enroll:
+    post:
+      operationId: enrollMachine
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [space_id, display_name, public_key]
+              properties:
+                space_id:
+                  type: string
+                  format: uuid
+                display_name:
+                  type: string
+                  minLength: 1
+                public_key:
+                  type: string
+                  format: byte
+      responses:
+        "201":
+          description: Machine enrolled or idempotently replayed
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MachineEnrollment"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+  /v1/machines/revoke:
+    post:
+      operationId: revokeMachine
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [space_id, machine_id]
+              properties:
+                space_id:
+                  type: string
+                  format: uuid
+                machine_id:
+                  type: string
+                  format: uuid
+      responses:
+        "200":
+          description: Machine revoked
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    const: revoked
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
           $ref: "#/components/responses/Error"
   /v1/spaces/{spaceID}/conversation/messages:
     parameters:
@@ -51,6 +143,9 @@ paths:
       responses:
         "200":
           description: Newest or cursor-relative private Conversation page
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
           content:
             application/json:
               schema:
@@ -89,6 +184,9 @@ paths:
       responses:
         "200":
           description: Accepted or idempotently replayed private member message
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
           content:
             application/json:
               schema:
@@ -106,19 +204,31 @@ paths:
       - $ref: "#/components/parameters/SpaceID"
     get:
       operationId: listWorks
+      parameters:
+        - $ref: "#/components/parameters/BeforeWork"
       responses:
         "200":
-          description: Work visible in the Space
+          description: >-
+            Newest or cursor-relative Work summaries visible in the Space
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
           content:
             application/json:
               schema:
                 type: object
-                required: [works]
+                additionalProperties: false
+                required: [works, has_earlier_works]
                 properties:
                   works:
                     type: array
+                    maxItems: 50
                     items:
-                      $ref: "#/components/schemas/Work"
+                      $ref: "#/components/schemas/WorkSummary"
+                  has_earlier_works:
+                    type: boolean
+        "400":
+          $ref: "#/components/responses/Error"
         "401":
           $ref: "#/components/responses/Error"
         "403":
@@ -143,6 +253,9 @@ paths:
       responses:
         "200":
           description: Created or idempotently replayed Work
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
           content:
             application/json:
               schema:
@@ -159,22 +272,36 @@ paths:
       - $ref: "#/components/parameters/WorkID"
     get:
       operationId: loadWork
+      parameters:
+        - $ref: "#/components/parameters/BeforeWorkMessage"
       responses:
         "200":
-          description: Work and its ordered member messages
+          description: >-
+            Work and its newest or cursor-relative ordered member message page
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
           content:
             application/json:
               schema:
                 type: object
                 additionalProperties: false
-                required: [work, messages]
+                required: [work, messages, has_earlier_messages]
                 properties:
                   work:
                     $ref: "#/components/schemas/Work"
                   messages:
                     type: array
+                    maxItems: 50
+                    description: >-
+                      Ordered complete messages with at most 262144 total
+                      UTF-8 text bytes
                     items:
                       $ref: "#/components/schemas/WorkMessage"
+                  has_earlier_messages:
+                    type: boolean
+        "400":
+          $ref: "#/components/responses/Error"
         "401":
           $ref: "#/components/responses/Error"
         "404":
@@ -203,6 +330,9 @@ paths:
       responses:
         "200":
           description: Appended or idempotently replayed Work Message
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
           content:
             application/json:
               schema:
@@ -224,6 +354,9 @@ paths:
       responses:
         "204":
           description: Work retry requested or idempotently replayed
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
         "401":
           $ref: "#/components/responses/Error"
         "403":
@@ -233,6 +366,12 @@ paths:
         "409":
           $ref: "#/components/responses/Error"
 components:
+  headers:
+    NoStore:
+      description: Authenticated responses must not be stored by any cache
+      schema:
+        type: string
+        const: no-store
   securitySchemes:
     memberToken:
       type: http
@@ -278,9 +417,26 @@ components:
       schema:
         type: string
         format: uuid
+    BeforeWork:
+      name: before
+      in: query
+      required: false
+      schema:
+        type: string
+        format: uuid
+    BeforeWorkMessage:
+      name: before
+      in: query
+      required: false
+      schema:
+        type: string
+        format: uuid
   responses:
     Error:
       description: Request rejected
+      headers:
+        Cache-Control:
+          $ref: "#/components/headers/NoStore"
       content:
         application/json:
           schema:
@@ -308,14 +464,30 @@ components:
     Member:
       type: object
       additionalProperties: false
-      required: [user_id, spaces]
+      required: [user_id, display_name, spaces]
       properties:
         user_id:
+          type: string
+          format: uuid
+        display_name:
           type: string
         spaces:
           type: array
           items:
             $ref: "#/components/schemas/Membership"
+    MachineEnrollment:
+      type: object
+      additionalProperties: false
+      required: [machine_id, space_id, certificate_pem]
+      properties:
+        machine_id:
+          type: string
+          format: uuid
+        space_id:
+          type: string
+          format: uuid
+        certificate_pem:
+          type: string
     ConversationMessage:
       type: object
       additionalProperties: false
@@ -348,7 +520,9 @@ components:
         - goal
         - lifecycle
         - owner_user_id
+        - owner_display_name
         - creator_user_id
+        - creator_display_name
         - understanding
         - next_step
         - has_unapplied_input
@@ -368,11 +542,62 @@ components:
           enum: [open]
         owner_user_id:
           type: string
+          format: uuid
+        owner_display_name:
+          type: string
         creator_user_id:
+          type: string
+          format: uuid
+        creator_display_name:
           type: string
         understanding:
           type: string
         next_step:
+          type: string
+        has_unapplied_input:
+          type: boolean
+        needs_retry:
+          type: boolean
+          description: An active member must explicitly request a fresh attempt
+        created_at:
+          type: string
+          format: date-time
+    WorkSummary:
+      type: object
+      additionalProperties: false
+      required:
+        - work_id
+        - space_id
+        - goal
+        - lifecycle
+        - owner_user_id
+        - owner_display_name
+        - creator_user_id
+        - creator_display_name
+        - has_unapplied_input
+        - needs_retry
+        - created_at
+      properties:
+        work_id:
+          type: string
+          format: uuid
+        space_id:
+          type: string
+          format: uuid
+        goal:
+          type: string
+        lifecycle:
+          type: string
+          enum: [open]
+        owner_user_id:
+          type: string
+          format: uuid
+        owner_display_name:
+          type: string
+        creator_user_id:
+          type: string
+          format: uuid
+        creator_display_name:
           type: string
         has_unapplied_input:
           type: boolean
@@ -389,6 +614,7 @@ components:
         - message_id
         - work_id
         - author_user_id
+        - author_display_name
         - text
         - created_at
       properties:
@@ -399,6 +625,9 @@ components:
           type: string
           format: uuid
         author_user_id:
+          type: string
+          format: uuid
+        author_display_name:
           type: string
         text:
           type: string

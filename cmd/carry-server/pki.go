@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ApexReasoning/carry/internal/host"
+	"github.com/ApexReasoning/carry/internal/machine"
 )
 
 type pkiInitConfig struct {
@@ -47,7 +47,7 @@ func initializePKI(parsed pkiInitConfig) error {
 			serverNames = append(serverNames, name)
 		}
 	}
-	bundle, err := host.CreatePKI(serverNames, time.Now().UTC())
+	bundle, err := machine.CreatePKI(serverNames, time.Now().UTC())
 	if err != nil {
 		return err
 	}
@@ -109,7 +109,7 @@ func loadServerPKI(
 	caPrivateKeyPath string,
 	serverCertificatePath string,
 	serverPrivateKeyPath string,
-) (*tls.Config, *host.CertificateAuthority, error) {
+) (*tls.Config, *machine.CertificateAuthority, error) {
 	caCertificatePEM, err := os.ReadFile(caCertificatePath)
 	if err != nil {
 		return nil, nil, fmt.Errorf("read CA certificate: %w", err)
@@ -118,7 +118,7 @@ func loadServerPKI(
 	if err != nil {
 		return nil, nil, fmt.Errorf("read CA private key: %w", err)
 	}
-	authority, err := host.LoadCertificateAuthority(caCertificatePEM, caPrivateKeyPEM)
+	authority, err := machine.LoadCertificateAuthority(caCertificatePEM, caPrivateKeyPEM)
 	if err != nil {
 		return nil, nil, err
 	}

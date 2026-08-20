@@ -241,7 +241,7 @@ Needs You 不显示 Agent 重试、Runtime 状态、lease、fence 或技术恢�
 
 私人内容默认只对该成员可见。同一 Space 的其他成员不能读取；Space-enrolled Machine 只能在 exact reply claim、current fence 和 unexpired lease 下读取生成当前回复所需的有界上下文，不能通用查询私人历史。
 
-明确的自然语言委托可以直接形成共享 Work，不增加 Work Offer 或强制确认步骤。Agent 只解释成员表达，不能提供 actor、owner、Space 或 authority；PostgreSQL 从已认证成员、当前 Membership 和准确 source message 建立这些事实。共享 Work 只能保存新形成、成员已授权的目标和新消息，不能保存私人原文、可反向读取的 source relation 或私人 transcript digest。
+成员清楚、直接地要求 Carry 承担一个新结果或持续关注事项时，可以形成共享 Work；责任可以有限也可以长期，不增加 Work Offer 或强制确认步骤。Agent 只解释成员表达，不能提供 actor、owner、Space 或 authority；PostgreSQL 从已认证成员、当前 Membership 和准确 source message 建立这些事实。共享 Work 只能保存新形成、成员已授权的目标和新消息，不能保存私人原文、可反向读取的 source relation 或私人 transcript digest。
 
 普通问题只形成私人回复。清晰委托形成私人回复和至多一份共享 Work；同一 source message 的执行或网络重放必须返回同一回复和 Work。
 
@@ -347,11 +347,12 @@ Carry 第一阶段明确不做：
 
 ## 产品语言
 
-推荐：
+推荐（只有独立活动事实存在时才说“正在推进”）：
 
 ```text
-Carry 正在推进
+Carry 已收到这份责任
 你补充的信息尚未应用
+等待 Carry 回复
 Carry 正在等待 Alice 回复
 Carry 将在下周一继续
 这是当前结果

@@ -42,7 +42,6 @@ func (api browserSessionAPI) create(response http.ResponseWriter, request *http.
 		writeAPIError(response, http.StatusInternalServerError, "create browser session")
 		return
 	}
-	response.Header().Set("Cache-Control", "no-store")
 	http.SetCookie(response, &http.Cookie{
 		Name: browserSessionCookie, Value: session.Secret, Path: "/",
 		Expires: session.ExpiresAt, MaxAge: maxAgeUntil(session.ExpiresAt),
@@ -58,7 +57,6 @@ func (api browserSessionAPI) revokeCurrent(response http.ResponseWriter, request
 	}
 	// Expire the browser credential before database I/O so even a server-side
 	// revocation failure stops this browser from presenting the old secret.
-	response.Header().Set("Cache-Control", "no-store")
 	http.SetCookie(response, &http.Cookie{
 		Name: browserSessionCookie, Value: "", Path: "/",
 		Expires: time.Unix(1, 0), MaxAge: -1,

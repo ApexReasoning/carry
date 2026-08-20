@@ -134,6 +134,7 @@ internal/
 ├── space/
 ├── conversation/
 ├── work/
+├── machine/
 ├── run/
 ├── host/
 ├── agent/
@@ -142,6 +143,7 @@ internal/
 ├── postgres/
 ├── server/
 └── cli/
+    └── userapi/
 ```
 
 `internal/cli/` 是具体 Carry CLI adapter，不是通用 ownership bucket。结构由 `docs/architecture.md` 决定，不由数据库表、HTTP route 或 UI 页面决定。
@@ -160,7 +162,7 @@ internal/registry
 
 Web 使用自己的 Node 24、pnpm、TypeScript 和 React 工具链。`package.json`、`pnpm-lock.yaml` 和 Node 版本文件都留在 `apps/web/`，不在仓库根目录再维护一份 JavaScript workspace。
 
-Web 不复制 Go domain，也不把后端 package tree 映射成 feature tree。User API 的 OpenAPI source 位于 `protocol/user/v1/openapi.yaml`，由服务端协议拥有；Web 只在 `apps/web/app/generated/` 保存可重建的生成客户端和 Zod schema。只有新的真实协议受众出现后才增加另一棵 version 目录，不预建 Host 或 Agent 协议。
+Web 不复制 Go domain，也不把后端 package tree 映射成 feature tree。User API 的 OpenAPI source 位于 `protocol/user/v1/openapi.yaml`，覆盖 Web 与成员 CLI 已消费的成员行为，包括 Machine enrollment/revocation；Web 只在 `apps/web/app/generated/` 保存可重建的生成客户端和 Zod schema。成员 CLI 的 `internal/cli/userapi/` 是同一 User API 的 concrete transport，不得吸收 Machine mTLS。只有新的真实协议受众出现后才增加另一棵 version 目录，不预建 Host 或 Agent 协议。
 
 ### `e2e/`
 

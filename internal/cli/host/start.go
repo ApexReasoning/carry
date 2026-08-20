@@ -8,7 +8,7 @@ import (
 	"time"
 
 	hostdomain "github.com/ApexReasoning/carry/internal/host"
-	"github.com/ApexReasoning/carry/internal/host/machinefile"
+	"github.com/ApexReasoning/carry/internal/machine/machinefile"
 	"github.com/spf13/cobra"
 )
 

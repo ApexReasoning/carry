@@ -137,9 +137,7 @@ export function useMemberSession() {
 function hasPendingSignOut(): boolean {
   try {
     if (
-      new URL(window.location.href).searchParams.get(
-        pendingSignOutParameter,
-      ) === "1"
+      new URL(window.location.href).searchParams.has(pendingSignOutParameter)
     ) {
       return true;
     }
@@ -148,7 +146,7 @@ function hasPendingSignOut(): boolean {
     return true;
   }
   try {
-    return window.sessionStorage.getItem(pendingSignOutStorageKey) === "1";
+    return window.sessionStorage.getItem(pendingSignOutStorageKey) !== null;
   } catch {
     // An unreadable fallback latch is also fail-closed.
     return true;

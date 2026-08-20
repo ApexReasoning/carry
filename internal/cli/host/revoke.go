@@ -5,8 +5,9 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/ApexReasoning/carry/internal/host/machinefile"
+	"github.com/ApexReasoning/carry/internal/cli/userapi"
 	"github.com/ApexReasoning/carry/internal/identity/memberfile"
+	"github.com/ApexReasoning/carry/internal/machine/machinefile"
 	"github.com/spf13/cobra"
 )
 
@@ -30,11 +31,11 @@ func runRevoke(ctx context.Context, configDirectory string, output io.Writer) er
 	if err != nil {
 		return err
 	}
-	connection, err := connectMember(member)
+	connection, err := userapi.FromCredential(member)
 	if err != nil {
 		return err
 	}
-	if err := connection.revokeMachine(ctx, machine.SpaceID, machine.MachineID); err != nil {
+	if err := connection.RevokeMachine(ctx, machine.SpaceID, machine.MachineID); err != nil {
 		return err
 	}
 	_, _ = fmt.Fprintf(output, "Revoked Machine %s\n", machine.MachineID)

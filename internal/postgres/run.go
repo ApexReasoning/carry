@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ApexReasoning/carry/internal/host"
+	machinedomain "github.com/ApexReasoning/carry/internal/machine"
 	"github.com/ApexReasoning/carry/internal/postgres/dbsqlc"
 	"github.com/ApexReasoning/carry/internal/run"
 	"github.com/ApexReasoning/carry/internal/work"
@@ -24,20 +24,20 @@ func (s *Store) ClaimRun(ctx context.Context, machineID string) (run.Claim, erro
 	defer func() { _ = transaction.Rollback(context.Background()) }()
 	queries := s.queries.WithTx(transaction)
 
-	machine, err := queries.LockClaimingMachine(ctx, machineID)
+	claimingMachine, err := queries.LockClaimingMachine(ctx, machineID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return run.Claim{}, host.ErrMachineNotFound
+		return run.Claim{}, machinedomain.ErrMachineNotFound
 	}
 	if err != nil {
 		return run.Claim{}, fmt.Errorf("lock claiming Machine: %w", err)
 	}
-	if machine.RevokedAt.Valid {
-		return run.Claim{}, host.ErrMachineRevoked
+	if claimingMachine.RevokedAt.Valid {
+		return run.Claim{}, machinedomain.ErrMachineRevoked
 	}
 
 	var claim run.Claim
 	var inputStartSeq int64
-	expired, recoveryErr := queries.LockExpiredRunForClaim(ctx, machine.SpaceID)
+	expired, recoveryErr := queries.LockExpiredRunForClaim(ctx, claimingMachine.SpaceID)
 	switch {
 	case recoveryErr == nil:
 		rows, expireErr := queries.ExpireRunAttempt(ctx, dbsqlc.ExpireRunAttemptParams{
@@ -65,7 +65,7 @@ func (s *Store) ClaimRun(ctx context.Context, machineID string) (run.Claim, erro
 		}
 		inputStartSeq = expired.InputStartSeq
 	case errors.Is(recoveryErr, pgx.ErrNoRows):
-		work, workErr := queries.LockWorkForRunClaim(ctx, machine.SpaceID)
+		work, workErr := queries.LockWorkForRunClaim(ctx, claimingMachine.SpaceID)
 		if errors.Is(workErr, pgx.ErrNoRows) {
 			return run.Claim{}, run.ErrNoRunAvailable
 		}
@@ -73,16 +73,22 @@ func (s *Store) ClaimRun(ctx context.Context, machineID string) (run.Claim, erro
 			return run.Claim{}, fmt.Errorf("lock Work for Run claim: %w", workErr)
 		}
 		inputStartSeq = work.AppliedInputSeq + 1
+		inputEndSeq, selectErr := queries.SelectRunInputEnd(ctx, dbsqlc.SelectRunInputEndParams{
+			InputStartSeq: inputStartSeq, WorkID: work.WorkID, InputHeadSeq: work.InputHeadSeq,
+		})
+		if selectErr != nil {
+			return run.Claim{}, fmt.Errorf("select bounded Run input: %w", selectErr)
+		}
 		claim = run.Claim{
 			RunID: uuid.NewString(), WorkID: work.WorkID, Fence: 1,
 			Goal: work.Goal, CurrentUnderstanding: textValue(work.Understanding),
 			CurrentNextStep:          textValue(work.NextStep),
 			BaseUnderstandingVersion: work.UnderstandingVersion,
-			InputEndSeq:              work.InputHeadSeq,
+			InputEndSeq:              inputEndSeq,
 		}
 		if _, createErr := queries.CreateRun(ctx, dbsqlc.CreateRunParams{
 			RunID: claim.RunID, WorkID: claim.WorkID,
-			InputStartSeq: inputStartSeq, InputEndSeq: work.InputHeadSeq,
+			InputStartSeq: inputStartSeq, InputEndSeq: inputEndSeq,
 			BaseUnderstandingVersion: work.UnderstandingVersion,
 		}); createErr != nil {
 			return run.Claim{}, fmt.Errorf("create Run: %w", createErr)

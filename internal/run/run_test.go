@@ -20,6 +20,11 @@ func TestValidateUnderstandingUpdateTrimsAndRejectsInvalidFields(t *testing.T) {
 	if _, _, err := ValidateUnderstandingUpdate("Known", strings.Repeat("n", MaxNextStepBytes+1)); !errors.Is(err, ErrInvalidUpdate) {
 		t.Fatalf("oversized next step error = %v", err)
 	}
+	for _, invalid := range []string{"Known\x00hidden", string([]byte{0xff})} {
+		if _, _, err := ValidateUnderstandingUpdate(invalid, "Continue"); !errors.Is(err, ErrInvalidUpdate) {
+			t.Fatalf("invalid text error = %v", err)
+		}
+	}
 }
 
 func TestValidateUnresolvedOutcomeAcceptsOnlyFailedAndUnknown(t *testing.T) {

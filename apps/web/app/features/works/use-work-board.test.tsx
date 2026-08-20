@@ -1,0 +1,146 @@
+import { act, renderHook, waitFor } from "@testing-library/react";
+import { expect, test, vi } from "vitest";
+
+import type {
+  Member,
+  Work,
+  WorkMessage,
+  WorkSummary,
+} from "../../generated/types.gen";
+import { useWorkBoard } from "./use-work-board";
+
+const memberID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const spaceID = "11111111-1111-4111-8111-111111111111";
+const newestWorkID = "22222222-2222-4222-8222-222222222222";
+const olderWorkID = "33333333-3333-4333-8333-333333333333";
+const oldestMessageID = "44444444-4444-4444-8444-444444444444";
+const middleMessageID = "55555555-5555-4555-8555-555555555555";
+const newestMessageID = "66666666-6666-4666-8666-666666666666";
+
+const member: Member = {
+  user_id: memberID,
+  display_name: "Alex Morgan",
+  spaces: [{ space_id: spaceID, name: "Research", can_enroll_machines: true }],
+};
+
+test("loads bounded earlier Work and message pages without duplicates", async () => {
+  const requestedURLs: Array<string> = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request =
+        input instanceof Request ? input : new Request(input, init);
+      const url = new URL(request.url);
+      requestedURLs.push(url.pathname + url.search);
+
+      if (url.pathname === `/v1/spaces/${spaceID}/works`) {
+        if (url.searchParams.get("before") === newestWorkID) {
+          return json({
+            works: [summary(olderWorkID, "Review older renewals")],
+            has_earlier_works: false,
+          });
+        }
+        return json({
+          works: [summary(newestWorkID, "Review current renewals")],
+          has_earlier_works: true,
+        });
+      }
+      if (url.pathname === `/v1/spaces/${spaceID}/works/${newestWorkID}`) {
+        if (url.searchParams.get("before") === middleMessageID) {
+          return json({
+            work: fullWork(),
+            messages: [workMessage(oldestMessageID, "Oldest fact")],
+            has_earlier_messages: false,
+          });
+        }
+        return json({
+          work: fullWork(),
+          messages: [
+            workMessage(middleMessageID, "Middle fact"),
+            workMessage(newestMessageID, "Newest fact"),
+          ],
+          has_earlier_messages: true,
+        });
+      }
+      throw new Error(`unexpected request ${request.method} ${url}`);
+    }),
+  );
+
+  const { result } = renderHook(() => useWorkBoard(member));
+  await waitFor(() => expect(result.current.works).toHaveLength(1));
+  expect(result.current.hasEarlierWorks).toBe(true);
+
+  await act(() => result.current.loadEarlierWorks());
+  expect(result.current.works.map((item) => item.work_id)).toEqual([
+    newestWorkID,
+    olderWorkID,
+  ]);
+  expect(result.current.hasEarlierWorks).toBe(false);
+
+  await act(() => result.current.selectWork(newestWorkID));
+  expect(result.current.details?.messages.map((item) => item.text)).toEqual([
+    "Middle fact",
+    "Newest fact",
+  ]);
+  expect(result.current.details?.has_earlier_messages).toBe(true);
+
+  await act(() => result.current.loadEarlierMessages());
+  expect(result.current.details?.messages.map((item) => item.text)).toEqual([
+    "Oldest fact",
+    "Middle fact",
+    "Newest fact",
+  ]);
+  expect(result.current.details?.has_earlier_messages).toBe(false);
+  expect(
+    new Set(result.current.details?.messages.map((item) => item.message_id))
+      .size,
+  ).toBe(3);
+  expect(requestedURLs).toContain(
+    `/v1/spaces/${spaceID}/works?before=${newestWorkID}`,
+  );
+  expect(requestedURLs).toContain(
+    `/v1/spaces/${spaceID}/works/${newestWorkID}?before=${middleMessageID}`,
+  );
+});
+
+function summary(workID: string, goal: string): WorkSummary {
+  return {
+    work_id: workID,
+    space_id: spaceID,
+    goal,
+    lifecycle: "open",
+    owner_user_id: memberID,
+    owner_display_name: "Alex Morgan",
+    creator_user_id: memberID,
+    creator_display_name: "Alex Morgan",
+    has_unapplied_input: false,
+    needs_retry: false,
+    created_at: "2026-08-20T12:00:00Z",
+  };
+}
+
+function fullWork(): Work {
+  return {
+    ...summary(newestWorkID, "Review current renewals"),
+    understanding: "The current renewal facts are confirmed.",
+    next_step: "Prepare the recommendation.",
+  };
+}
+
+function workMessage(messageID: string, text: string): WorkMessage {
+  return {
+    message_id: messageID,
+    work_id: newestWorkID,
+    author_user_id: memberID,
+    author_display_name: "Alex Morgan",
+    text,
+    created_at: "2026-08-20T12:00:00Z",
+  };
+}
+
+function json(body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
+}

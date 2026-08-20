@@ -33,7 +33,7 @@ func newMessageCommand(configDirectory string, output io.Writer) *cobra.Command 
 			if err != nil {
 				return err
 			}
-			err = client.appendMessage(
+			err = client.AppendWorkMessage(
 				command.Context(), selectedSpaceID, workID, text, idempotencyKey,
 			)
 			if err != nil {

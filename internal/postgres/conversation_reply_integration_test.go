@@ -13,7 +13,8 @@ import (
 	"time"
 
 	"github.com/ApexReasoning/carry/internal/conversation"
-	"github.com/ApexReasoning/carry/internal/host"
+	"github.com/ApexReasoning/carry/internal/machine"
+	"github.com/ApexReasoning/carry/internal/work"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -197,7 +198,7 @@ func TestConversationReplyRenewAndFirstCommitRejectLostAuthority(t *testing.T) {
 				}
 				return conversation.RenewReplyCommand{MachineID: fixture.machineID, SourceMessageID: fixture.claim.SourceMessageID, Fence: fixture.claim.Fence}
 			},
-			want: host.ErrMachineRevoked,
+			want: machine.ErrMachineRevoked,
 		},
 		{
 			name: "inactive member",
@@ -307,7 +308,7 @@ func TestConversationReplyConcurrentCommitAndCompletedReplayAreReplyOnce(t *test
 	if _, err := pool.Exec(ctx, `update machines set revoked_at = clock_timestamp() where machine_id = $1`, fixture.machineID); err != nil {
 		t.Fatalf("revoke Machine: %v", err)
 	}
-	if _, err := store.CommitConversationReply(ctx, command); !errors.Is(err, host.ErrMachineRevoked) {
+	if _, err := store.CommitConversationReply(ctx, command); !errors.Is(err, machine.ErrMachineRevoked) {
 		t.Fatalf("revoked completed replay error = %v", err)
 	}
 }
@@ -329,7 +330,7 @@ func TestConversationDelegationCreatesOneSharedWorkWithoutPrivateSource(t *testi
 	if result.ReplyMessageID == "" || result.CreatedWorkID == "" {
 		t.Fatalf("delegation result = %#v", result)
 	}
-	details, err := store.LoadWork(ctx, fixture.memberID, fixture.spaceID, result.CreatedWorkID)
+	details, err := store.LoadWork(ctx, work.LoadCommand{UserID: fixture.memberID, SpaceID: fixture.spaceID, WorkID: result.CreatedWorkID})
 	if err != nil {
 		t.Fatalf("load delegated Work: %v", err)
 	}
@@ -337,8 +338,8 @@ func TestConversationDelegationCreatesOneSharedWorkWithoutPrivateSource(t *testi
 		details.Work.OwnerUserID != fixture.memberID || len(details.Messages) != 0 {
 		t.Fatalf("delegated Work = %#v", details)
 	}
-	listed, err := store.ListWorks(ctx, fixture.memberID, fixture.spaceID)
-	if err != nil || len(listed) != 1 || listed[0].WorkID != result.CreatedWorkID {
+	listed, err := store.ListWorks(ctx, work.ListCommand{UserID: fixture.memberID, SpaceID: fixture.spaceID})
+	if err != nil || len(listed.Works) != 1 || listed.Works[0].WorkID != result.CreatedWorkID {
 		t.Fatalf("listed delegated Work = %#v, %v", listed, err)
 	}
 	for _, privateValue := range []string{fixture.claim.SourceMessageID, "private source text"} {

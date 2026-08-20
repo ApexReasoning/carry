@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/ApexReasoning/carry/internal/cli/userapi"
 	"github.com/spf13/cobra"
 )
 
@@ -27,15 +28,15 @@ func newRetryCommand(configDirectory string, output io.Writer) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			mutationErr := client.retry(command.Context(), selectedSpaceID, workID, idempotencyKey)
+			mutationErr := client.RetryWork(command.Context(), selectedSpaceID, workID, idempotencyKey)
 			if mutationErr != nil {
-				var unknown *outcomeUnknownError
+				var unknown *userapi.OutcomeUnknownError
 				if !errors.As(mutationErr, &unknown) {
 					return mutationErr
 				}
 			}
 
-			details, loadErr := client.load(command.Context(), selectedSpaceID, workID)
+			details, loadErr := client.LoadWork(command.Context(), selectedSpaceID, workID, "")
 			if loadErr != nil {
 				if mutationErr != nil {
 					return fmt.Errorf("retry Work outcome is unknown; inspect the Work before trying again: %w", mutationErr)
