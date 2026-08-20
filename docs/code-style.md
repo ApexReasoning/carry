@@ -628,31 +628,36 @@ Generated code 必须可识别、可重建、不可手改。
 
 生成目录不承载手写业务逻辑。生成 API 很难使用时，修正 source contract 或在明确消费边界建立小 adapter，不修改生成结果。
 
-## 20. Review 的三个独立问题
+## 20. Node 关闭的三门独立 Review
 
-每个重要改动分别回答：
+每个 Node 关闭前由三名 fresh-context reviewer 接收同一 frozen contract，分别回答一门。三门都以“责任确定，路径自由”和四条执行原则为共同标准；工具通过不能代替任何一门。
 
-### 逻辑
+### 逻辑与直接证据
 
-- 行为是否正确？
-- 并发、失败和恢复是否有可执行证据？
-- 是否会丢失事实、重复外部后果或猜测 Unknown？
+- 冻结的用户 journey 是否真的执行并产生正确结果？
+- 成功、失败、并发、幂等和恢复是否有可执行证据？
+- 是否会丢失事实、重复外部后果、错误重试或猜测 Unknown？
+- 绿色命令是否覆盖 changed path，而不是只证明相邻代码可编译？
 
-### 架构
+### 架构、产品哲学与 AI-native
 
-- owner 是否唯一？
-- dependency 是否指向 authority owner？
-- 是否增加了没有消费者的边界？
-- 删除这个抽象是否反而更清楚？
+- responsibility 是否由唯一 owner 持有，dependency 是否指向 authority owner？
+- identity、authority、causality、time、privacy 和 outcome 是否保持窄而可机械证明？
+- 是否让内容、模型输出、tool annotation 或 provider state 产生权限？
+- 是否增加了当前 journey 没有赚得的 owner、状态、协议、registry、兼容层或第二份事实？
+- 在可信边界内，是否仍保留自然语言、concrete adapter 和合法执行路径的自由？
+- 删除一个抽象是否让责任更确定、合法路径更多且产品承诺仍完整？
 
-### 美学
+### 实现美学与纵向完整
 
-- package、文件、类型、函数和变量名字是否准确？
-- 主路径是否线性？
-- 是否存在转发层、重复模型、无意义 wrapper 或机械拆文件？
-- 注释是否解释约束而不是复述代码？
+- package、文件、类型、函数和变量名字是否准确表达 owner 与 failure？
+- 主路径是否线性，authority 与 consequence 是否在调用签名中可见？
+- 是否存在转发层、重复模型、无意义 wrapper、未来 flag 或机械拆文件？
+- 注释是否解释真实约束而不是复述代码？
+- 是否删除 replaced code，同时保留当前 journey 必需的 migration、protocol、generated artifact、test 与文档？
+- 是否把少行数误当简单，因而削弱事务、失败处理或直接证据？
 
-工具通过不能代替这三个问题。
+三门只报告本 gate 的 blocker 与高价值删除项；不以未来便利扩大 frozen scope。父进程必须 disposition finding，blocker 修复后由原 reviewer 窄确认。
 
 ## 21. 合并前必须删除的代码噪声
 

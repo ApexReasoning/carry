@@ -76,11 +76,17 @@ Within a Node:
 
 Implementation steps receive author self-review, formatter, LSP, and focused tests only. Do not launch a reviewer for every step.
 
-At Node close, use one relevant reviewer for one focused review. A blocker may receive one narrow confirmation by the same reviewer.
+Every Node close requires three independent fresh-context reviews:
 
-Only at a Milestone boundary, or for a user-requested full-repository architecture simplification cut, run the three independent reviews: logic/evidence, architecture/product/AI-native, and implementation aesthetics. After blocker fixes, allow one narrow follow-up, not another full review cycle.
+1. **Logic/evidence:** verify the frozen user journey, success and failure behavior, PostgreSQL concurrency/authority evidence, and direct proof that the changed path executed. Keep uncertainty explicit; never infer success, failure, retry safety, or completion from a green command alone.
+2. **Architecture/product/AI-native:** apply **responsibility fixed, path free**. Verify one authoritative owner for identity, authority, causality, time, privacy, and external outcome; reject content-derived authority and unearned structure; preserve natural-language, concrete-adapter, and execution freedom inside those boundaries.
+3. **Implementation aesthetics:** verify accurate names and file ownership, a linear main path, restrained dependencies, deletion of replaced/scaffold code, and vertical completeness. Fewer lines are not simpler when they weaken truth, authority, failure handling, or evidence.
 
-Review must not expand the closing evidence after implementation unless it finds a correctness blocker, data risk, or authority vulnerability.
+All three gates apply the four operating principles: surface uncertainty before code; build only earned structure; keep scope constrained while completing the vertical journey; and define completion with direct evidence. Reviewers receive the same frozen Node contract and inspect only their assigned gate. They report blockers and high-value deletion opportunities, not speculative future scope.
+
+After blocker fixes, the reviewer who found the blocker may perform one narrow confirmation. Do not rerun the full three-review fleet unless fixes materially cross multiple gates. A Milestone boundary runs the same three gates over the complete cumulative Milestone diff and journeys, rather than substituting for Node-close review.
+
+Review must not expand the frozen closing evidence unless it finds a correctness blocker, data risk, authority/privacy vulnerability, or a direct violation of the current journey or architecture philosophy.
 
 ## Delegated Agents
 

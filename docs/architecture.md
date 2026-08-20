@@ -310,7 +310,7 @@ Pi adapter 直接使用 Pi documented RPC；Codex adapter 直接使用 Codex app
 两种产品行为各有一个严格、互不混合的共同输出合同：
 
 ```text
-Work Execute:        understanding + next_step
+Work Execute:        understanding + next_step + review_required
 Conversation Reply:  reply + nullable delegation_goal
 ```
 
@@ -327,6 +327,7 @@ User API 只表达成员旅程：
 - 分页读取并幂等追加当前成员在一个 Space 中的私人 Conversation；
 - 创建 Work，分页列出轻量 Work summaries，并分页读取一份 Work 的有界消息历史；
 - 追加 Work Message；
+- 查询当前成员的 Needs You Work，并接受准确当前阶段结果；
 - 对需要成员选择的 Work 显式请求重新推进；
 - enrollment/revocation Machine。
 
@@ -339,9 +340,11 @@ User Work response 包含：
 - current understanding 与 next step；
 - 是否仍有新信息待 Carry 应用；
 - 是否需要成员显式选择重新推进；
+- 当前阶段结果是否需要 owner 检查；
+- 只在准确当前内容可检查时返回 opaque review identity；
 - created time。
 
-它不公开 input head、applied input、revision number、Run、Attempt 或 Runtime。
+它不公开 input head、applied input、understanding version、Run、Attempt 或 Runtime。
 
 Web 使用 `protocol/user/v1/openapi.yaml` 生成 client。CLI 与 Web 不复制权限规则。
 
@@ -357,7 +360,8 @@ Web 使用 `protocol/user/v1/openapi.yaml` 生成 client。CLI 与 Web 不复制
 | Claim 新 Work | Machine、eligible Work、唯一 unresolved Run、fixed range、Attempt/fence/lease |
 | Recover Run | expired Attempt、旧 Attempt 终结、fence rotation、新 Attempt/lease |
 | Renew | Machine、exact active Attempt、current fence、unexpired old lease |
-| Commit understanding | Machine、Attempt/fence/lease、Work base version/range、Work update、terminal states |
+| Commit understanding | Machine、Attempt/fence/lease、Work base version/range、Work update、current-head result check、terminal states |
+| Accept Work result check | active Membership、Work owner/lifecycle、exact current version/digest、无未应用输入、成员与幂等 identity |
 | Finish unresolved | Machine、Attempt/fence/lease、terminal Run/Attempt outcome |
 | Request Work retry | Membership、Open Work、唯一未请求 retry 的 terminal Run、成员与幂等 identity |
 | Revoke Machine | 成员权限、Machine revocation；后续 Host mutation 由条件更新拒绝 |
@@ -380,6 +384,7 @@ conversation_messages
 conversation_reply_claims
 works
 work_messages
+work_result_checks
 runs
 run_attempts
 ```
@@ -460,10 +465,13 @@ protocol/
 - 预存的大量 Work Messages 被切成有界连续 Run ranges，后续 Run 无遗漏、无重复地继续；
 - Work 运行期间到达的新消息不会被旧 range 错误标记已应用；
 - Failed/Unknown 不自动 replay，active member 的幂等 `Try again` 才允许一个 fresh Run；
-- Commit 直接更新 Work 当前理解，不创建 revision row；
+- Commit 直接更新 Work 当前理解，不创建 revision row；只有覆盖 current input head 的准确结果才能创建 result check；
+- result check 绑定准确 version/digest，新消息或新理解后旧接受失败，并发接受一个 winner；
+- 接受只记录 Work-owned 检查事实，不关闭 Work、不创建输入、Run 或外部 authority；
+- Needs You 只返回当前 owner 的 current result check 或 explicit retry，不从普通进度、active/recovered Attempt 推断；
 - revoked Machine 不能领取或修改执行；
 - Pi 与 Codex 分别通过同一 execution conformance；
-- User API 的 Work summaries 与消息历史有界分页，不暴露内部 sequence/version/Run/Attempt；
+- User API 的 Work summaries 与消息历史有界分页，只公开派生 `needs_review` 与同一 current detail 中的 opaque review identity，不暴露内部 sequence/version/Run/Attempt；
 - credential-bearing response 都是 `no-store`；
 - PostgreSQL focused tests 使用真实隔离数据库，缺失数据库不是 pass。
 

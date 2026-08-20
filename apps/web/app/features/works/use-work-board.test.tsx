@@ -103,6 +103,76 @@ test("loads bounded earlier Work and message pages without duplicates", async ()
   );
 });
 
+test("reuses the exact acceptance identity when a lost request did not commit", async () => {
+  let accepted = false;
+  let acceptanceAttempts = 0;
+  const idempotencyKeys: Array<string | null> = [];
+  const reviewID = "77777777-7777-4777-8777-777777777777";
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request =
+        input instanceof Request ? input : new Request(input, init);
+      const url = new URL(request.url);
+      if (
+        request.method === "GET" &&
+        url.pathname === `/v1/spaces/${spaceID}/works`
+      ) {
+        return json({
+          works: accepted
+            ? []
+            : [
+                {
+                  ...summary(newestWorkID, "Review recommendation"),
+                  needs_review: true,
+                },
+              ],
+          has_earlier_works: false,
+        });
+      }
+      if (
+        request.method === "GET" &&
+        url.pathname === `/v1/spaces/${spaceID}/works/${newestWorkID}`
+      ) {
+        return json({
+          work: accepted
+            ? fullWork()
+            : { ...fullWork(), needs_review: true, review_id: reviewID },
+          messages: [],
+          has_earlier_messages: false,
+        });
+      }
+      if (
+        request.method === "POST" &&
+        url.pathname ===
+          `/v1/spaces/${spaceID}/works/${newestWorkID}/reviews/${reviewID}/accept`
+      ) {
+        acceptanceAttempts += 1;
+        idempotencyKeys.push(request.headers.get("Idempotency-Key"));
+        if (acceptanceAttempts === 1) {
+          throw new TypeError("request outcome unknown");
+        }
+        accepted = true;
+        return new Response(null, { status: 204 });
+      }
+      throw new Error(`unexpected request ${request.method} ${url}`);
+    }),
+  );
+
+  const { result } = renderHook(() => useWorkBoard(member));
+  await waitFor(() => expect(result.current.works).toHaveLength(1));
+  await act(() => result.current.selectWork(newestWorkID));
+
+  await act(() => result.current.acceptCurrentReview());
+  expect(result.current.details?.work.needs_review).toBe(true);
+
+  await act(() => result.current.acceptCurrentReview());
+  expect(result.current.details?.work.needs_review).toBe(false);
+  expect(idempotencyKeys).toHaveLength(2);
+  expect(idempotencyKeys[0]).toMatch(/^[0-9a-f-]{36}$/);
+  expect(idempotencyKeys[1]).toBe(idempotencyKeys[0]);
+});
+
 test("accepts the exact Needs You result and reconciles a lost response", async () => {
   let accepted = false;
   const acceptanceRequests: Array<Request> = [];

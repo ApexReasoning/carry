@@ -108,19 +108,21 @@ Milestone:
 
 作者自检、formatter、LSP 和 focused tests，不启动 reviewer。
 
-### 普通 Node 关闭
+### 每个 Node 关闭的三门独立审查
 
-一名最相关的 fresh-context reviewer 只检查当前 journey、主要失败路径和明显冗余。修 blocker 后最多一次窄确认。
+每个 Node 在关闭前都并行运行三名 fresh-context reviewer；Milestone 不能替代 Node review：
+
+1. **逻辑与证据：**检查冻结的用户旅程、成功/失败、并发、幂等、恢复与 authority 证据；不确定性必须显式，不能从绿色命令推断未执行路径或未知结果。
+2. **架构、产品哲学与 AI-native：**以“责任确定，路径自由”为 gate。Identity、authority、causality、time、privacy 和 external outcome 必须有唯一 owner 与窄入口；内容不能产生权限；没有被当前旅程赚得的 owner、状态、抽象、registry 或兼容层必须删除；准确边界内保留自然语言、concrete adapter 与执行方法的自由。
+3. **实现美学：**检查命名、文件 ownership、类型与函数边界、主路径线性、依赖克制和删除质量；范围必须克制但纵向完整，不能用减少行数换取第二份事实、弱 authority、silent fallback 或缺失证据。
+
+三门共同应用四条执行原则：不确定性先显式化；只建立当前旅程赚得的结构；范围克制且纵向完整；以直接证据定义完成。三门接收同一份 frozen Node contract，只报告本 gate 的 blocker 与高价值删除项，不为未来便利扩大范围。
+
+父进程 disposition 全部 finding。修 blocker 后由原 reviewer 最多做一次窄确认；只有修复实质跨越多个 gate 时才重跑完整三门。
 
 ### Milestone 或用户明确要求的全仓架构切割
 
-并行进行三门独立审查：
-
-1. 逻辑、并发和可执行证据；
-2. 架构、产品哲学和 AI-native；
-3. 命名、文件、类型、函数和删除质量。
-
-三门只报告 blocker 和高价值删除项。父进程综合后修改；每个 blocker 最多一次窄确认，不开启第四轮全面 review。
+对完整累计 Milestone diff、已发布 journey 和删除机会再次运行同样三门审查。它扩大审查范围，不降低或替代每个 Node 的关闭门。
 
 检查与规定 review 无 blocker后，检查完整 diff、排除无关文件，创建一个 Node-scoped commit 并 push。等待 CI 通过后停止，不自动进入下一 Node。
 
@@ -166,7 +168,7 @@ Needs You 当前只包含两类 Work：准确当前结果等待 owner 检查；�
 - 接受后 Work 仍是 Open，没有自动 Run 或外部后果；
 - Needs You 只返回当前 owner 的 pending review 或 `needs_retry`，不返回普通 progress/recovery；
 - Web 完成 Needs You → 打开 Work → 接受当前阶段结果的公开旅程，并对 response loss 使用同一 identity + reload 收敛；
-- focused checks、`make check`、race、一次聚焦 review、普通 commit、push 与 CI 成功。
+- focused checks、`make check`、race、三门独立 Node-close review、普通 commit、push 与 CI 成功。
 
 ### 明确不做
 

@@ -81,6 +81,15 @@ func TestWorkReviewAcceptanceIsExactIdempotentAndLeavesWorkOpen(t *testing.T) {
 	ctx := context.Background()
 	fixture := newRunFixture(t, ctx)
 	reviewID := commitReviewableWork(t, ctx, fixture)
+	var inputHeadBefore, appliedInputBefore int64
+	var runCountBefore int
+	if err := fixture.store.pool.QueryRow(ctx, `
+		select input_head_seq, applied_input_seq,
+		       (select count(*)::integer from runs where work_id = $1)
+		from works where work_id = $1
+	`, fixture.work.WorkID).Scan(&inputHeadBefore, &appliedInputBefore, &runCountBefore); err != nil {
+		t.Fatalf("load pre-acceptance Work consequences: %v", err)
+	}
 	command := work.AcceptReviewCommand{
 		WorkID: fixture.work.WorkID, SpaceID: fixture.bootstrap.SpaceID,
 		ReviewID: reviewID, AcceptedBy: fixture.bootstrap.UserID,
@@ -101,6 +110,21 @@ func TestWorkReviewAcceptanceIsExactIdempotentAndLeavesWorkOpen(t *testing.T) {
 	}
 	if details.Work.NeedsReview || details.Work.ReviewID != "" || details.Work.Lifecycle != work.LifecycleOpen {
 		t.Fatalf("accepted Work = %#v", details.Work)
+	}
+	var inputHeadAfter, appliedInputAfter int64
+	var runCountAfter int
+	if err := fixture.store.pool.QueryRow(ctx, `
+		select input_head_seq, applied_input_seq,
+		       (select count(*)::integer from runs where work_id = $1)
+		from works where work_id = $1
+	`, fixture.work.WorkID).Scan(&inputHeadAfter, &appliedInputAfter, &runCountAfter); err != nil {
+		t.Fatalf("load post-acceptance Work consequences: %v", err)
+	}
+	if inputHeadAfter != inputHeadBefore || appliedInputAfter != appliedInputBefore || runCountAfter != runCountBefore {
+		t.Fatalf(
+			"acceptance changed Work execution facts: head %d->%d applied %d->%d runs %d->%d",
+			inputHeadBefore, inputHeadAfter, appliedInputBefore, appliedInputAfter, runCountBefore, runCountAfter,
+		)
 	}
 
 	conflict := command
@@ -178,6 +202,60 @@ func TestWorkReviewAcceptanceRejectsStaleAndUnauthorizedMembers(t *testing.T) {
 	}); !errors.Is(err, work.ErrReviewNotCurrent) {
 		t.Fatalf("stale acceptance error = %v", err)
 	}
+}
+
+func TestWorkReviewAcceptanceRejectsVersionAndDigestMismatch(t *testing.T) {
+	t.Run("newer understanding version", func(t *testing.T) {
+		ctx := context.Background()
+		fixture := newRunFixture(t, ctx)
+		reviewID := commitReviewableWork(t, ctx, fixture)
+		if _, err := fixture.store.AppendWorkMessage(ctx, work.AppendMessageCommand{
+			WorkID: fixture.work.WorkID, SpaceID: fixture.bootstrap.SpaceID,
+			AuthorUserID: fixture.bootstrap.UserID, Text: "Apply the final pricing correction.",
+			IdempotencyKey: "version-staling-correction",
+		}); err != nil {
+			t.Fatalf("append version-staling input: %v", err)
+		}
+		claim, err := fixture.store.ClaimRun(ctx, fixture.machineID)
+		if err != nil {
+			t.Fatalf("claim newer understanding Run: %v", err)
+		}
+		if err := fixture.store.CommitWorkUnderstanding(ctx, run.CommitCommand{
+			MachineID: fixture.machineID, RunID: claim.RunID, AttemptID: claim.AttemptID,
+			Fence: claim.Fence, BaseUnderstandingVersion: claim.BaseUnderstandingVersion,
+			InputEndSeq: claim.InputEndSeq, Understanding: "The corrected recommendation is current.",
+			NextStep: "Continue the responsibility without another result check.", ReviewRequired: false,
+		}); err != nil {
+			t.Fatalf("commit newer understanding: %v", err)
+		}
+		if err := fixture.store.AcceptWorkReview(ctx, work.AcceptReviewCommand{
+			WorkID: fixture.work.WorkID, SpaceID: fixture.bootstrap.SpaceID,
+			ReviewID: reviewID, AcceptedBy: fixture.bootstrap.UserID,
+			IdempotencyKey: "accept-old-version",
+		}); !errors.Is(err, work.ErrReviewNotCurrent) {
+			t.Fatalf("old-version acceptance error = %v", err)
+		}
+	})
+
+	t.Run("content digest mismatch", func(t *testing.T) {
+		ctx := context.Background()
+		fixture := newRunFixture(t, ctx)
+		reviewID := commitReviewableWork(t, ctx, fixture)
+		if _, err := fixture.store.pool.Exec(ctx, `
+			update works
+			set understanding = 'Content changed without the bound digest.'
+			where work_id = $1
+		`, fixture.work.WorkID); err != nil {
+			t.Fatalf("change Work content without digest: %v", err)
+		}
+		if err := fixture.store.AcceptWorkReview(ctx, work.AcceptReviewCommand{
+			WorkID: fixture.work.WorkID, SpaceID: fixture.bootstrap.SpaceID,
+			ReviewID: reviewID, AcceptedBy: fixture.bootstrap.UserID,
+			IdempotencyKey: "accept-mismatched-digest",
+		}); !errors.Is(err, work.ErrReviewNotCurrent) {
+			t.Fatalf("digest-mismatch acceptance error = %v", err)
+		}
+	})
 }
 
 func TestConcurrentWorkReviewAcceptanceHasOneWinner(t *testing.T) {
@@ -292,6 +370,67 @@ func TestNeedsYouListsOnlyCurrentOwnerReviewOrRetry(t *testing.T) {
 	}
 	if len(otherPage.Works) != 0 {
 		t.Fatalf("other member Needs You = %#v", otherPage)
+	}
+}
+
+func TestNeedsYouIncludesUnknownAndExcludesActiveRecoveredRuns(t *testing.T) {
+	ctx := context.Background()
+	fixture := newRunFixture(t, ctx)
+	unknownClaim, err := fixture.store.ClaimRun(ctx, fixture.machineID)
+	if err != nil {
+		t.Fatalf("claim Unknown Work: %v", err)
+	}
+	if err := fixture.store.FinishUnresolvedAttempt(ctx, run.FinishCommand{
+		MachineID: fixture.machineID, RunID: unknownClaim.RunID,
+		AttemptID: unknownClaim.AttemptID, Fence: unknownClaim.Fence, Outcome: run.StateUnknown,
+	}); err != nil {
+		t.Fatalf("finish Unknown Work: %v", err)
+	}
+
+	activeWork, err := fixture.store.CreateWork(ctx, work.CreateCommand{
+		SpaceID: fixture.bootstrap.SpaceID, CreatorUserID: fixture.bootstrap.UserID,
+		Goal: "Keep an active supplier check out of Needs You", IdempotencyKey: "active-needs-you-exclusion",
+	})
+	if err != nil {
+		t.Fatalf("create active Work: %v", err)
+	}
+	activeClaim, err := fixture.store.ClaimRun(ctx, fixture.machineID)
+	if err != nil {
+		t.Fatalf("claim active Work: %v", err)
+	}
+	if activeClaim.WorkID != activeWork.WorkID {
+		t.Fatalf("active claim Work = %q, want %q", activeClaim.WorkID, activeWork.WorkID)
+	}
+	assertNeedsYouOnlyIncludes(t, ctx, fixture, fixture.work.WorkID)
+
+	if _, err := fixture.store.pool.Exec(ctx, `
+		update run_attempts
+		set claimed_at = transaction_timestamp() - interval '2 minutes',
+		    lease_expires_at = transaction_timestamp() - interval '1 minute'
+		where attempt_id = $1
+	`, activeClaim.AttemptID); err != nil {
+		t.Fatalf("expire active Attempt: %v", err)
+	}
+	recovered, err := fixture.store.ClaimRun(ctx, fixture.machineID)
+	if err != nil {
+		t.Fatalf("recover active Work: %v", err)
+	}
+	if recovered.RunID != activeClaim.RunID || recovered.AttemptID == activeClaim.AttemptID || recovered.Fence != activeClaim.Fence+1 {
+		t.Fatalf("recovered claim = %#v; active = %#v", recovered, activeClaim)
+	}
+	assertNeedsYouOnlyIncludes(t, ctx, fixture, fixture.work.WorkID)
+}
+
+func assertNeedsYouOnlyIncludes(t *testing.T, ctx context.Context, fixture runFixture, workID string) {
+	t.Helper()
+	page, err := fixture.store.ListWorks(ctx, work.ListCommand{
+		UserID: fixture.bootstrap.UserID, SpaceID: fixture.bootstrap.SpaceID, NeedsYou: true,
+	})
+	if err != nil {
+		t.Fatalf("list Needs You: %v", err)
+	}
+	if len(page.Works) != 1 || page.Works[0].WorkID != workID || !page.Works[0].NeedsRetry {
+		t.Fatalf("Needs You during active/recovered Run = %#v", page)
 	}
 }
 
