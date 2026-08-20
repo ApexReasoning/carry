@@ -27,7 +27,7 @@ func run(ctx context.Context, arguments []string, input io.Reader, output io.Wri
 		version,
 		cli.ConfigDirectory(),
 		cli.Streams{Input: input, Output: output, ErrorOutput: errorOutput},
-		pi.New(),
-		codex.New(),
+		pi.NewWithReferenceBaseURL(os.Getenv("CARRY_REFERENCE_BASE_URL")),
+		codex.NewWithReferenceBaseURL(os.Getenv("CARRY_REFERENCE_BASE_URL")),
 	)
 }

@@ -24,14 +24,20 @@ const (
 )
 
 type appServerClient struct {
-	stdin   io.Writer
-	scanner *bufio.Scanner
+	stdin            io.Writer
+	scanner          *bufio.Scanner
+	lookupReference  func(context.Context, string) (string, error)
+	referenceFailure bool
 }
 
-func newAppServerClient(stdin io.Writer, stdout io.Reader) *appServerClient {
+func newAppServerClient(
+	stdin io.Writer,
+	stdout io.Reader,
+	lookupReference func(context.Context, string) (string, error),
+) *appServerClient {
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 64*1024), maxProtocolLineBytes)
-	return &appServerClient{stdin: stdin, scanner: scanner}
+	return &appServerClient{stdin: stdin, scanner: scanner, lookupReference: lookupReference}
 }
 
 type envelope struct {
@@ -53,14 +59,15 @@ type initializeParams struct {
 }
 
 type threadStartParams struct {
-	CWD                        string          `json:"cwd"`
-	Ephemeral                  bool            `json:"ephemeral"`
-	ApprovalPolicy             string          `json:"approvalPolicy"`
-	Sandbox                    string          `json:"sandbox"`
-	AllowProviderModelFallback bool            `json:"allowProviderModelFallback"`
-	BaseInstructions           string          `json:"baseInstructions"`
-	DeveloperInstructions      string          `json:"developerInstructions"`
-	Config                     appServerConfig `json:"config"`
+	CWD                        string            `json:"cwd"`
+	Ephemeral                  bool              `json:"ephemeral"`
+	ApprovalPolicy             string            `json:"approvalPolicy"`
+	Sandbox                    string            `json:"sandbox"`
+	AllowProviderModelFallback bool              `json:"allowProviderModelFallback"`
+	BaseInstructions           string            `json:"baseInstructions"`
+	DeveloperInstructions      string            `json:"developerInstructions"`
+	DynamicTools               []dynamicToolSpec `json:"dynamicTools,omitempty"`
+	Config                     appServerConfig   `json:"config"`
 }
 
 type appServerConfig struct {
@@ -109,6 +116,7 @@ func (client *appServerClient) initialize(ctx context.Context) error {
 	var params initializeParams
 	params.ClientInfo.Name = "carry"
 	params.ClientInfo.Version = "1"
+	params.Capabilities.ExperimentalAPI = client.lookupReference != nil
 	if err := client.sendRequest(initializeRequestID, "initialize", params); err != nil {
 		return err
 	}
@@ -127,6 +135,9 @@ func (client *appServerClient) startThread(ctx context.Context, cwd string) (str
 		AllowProviderModelFallback: false,
 		BaseInstructions:           baseInstructions,
 		DeveloperInstructions:      developerInstructions,
+	}
+	if client.lookupReference != nil {
+		params.DynamicTools = []dynamicToolSpec{lookupReferenceToolSpec}
 	}
 	if err := client.sendRequest(startThreadRequestID, "thread/start", params); err != nil {
 		return "", err

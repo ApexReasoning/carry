@@ -84,15 +84,25 @@ func awaitTurnTextProtocol(client *appServerClient, ctx context.Context, threadI
 			return nil, err
 		}
 		if responseID, ok := numericID(message.ID); ok && responseID == reconcileThreadRequestID {
+			if client.referenceFailure {
+				return nil, fmt.Errorf("%w: lookup_reference failed", host.ErrAgentFailed)
+			}
 			return observation.reconcile(message)
 		}
 		switch message.Method {
+		case "item/tool/call":
+			if err := client.answerReferenceTool(ctx, message, threadID, turnID); err != nil {
+				return nil, err
+			}
 		case "item/agentMessage/delta":
 			observation.recordDelta(message.Params)
 		case "item/completed":
 			observation.recordCompletedItem(message.Params)
 		case "turn/completed":
 			if completed, ok := observation.completedTurn(message.Params); ok {
+				if client.referenceFailure {
+					return nil, fmt.Errorf("%w: lookup_reference failed", host.ErrAgentFailed)
+				}
 				return observation.completedText(completed)
 			}
 		case "error":

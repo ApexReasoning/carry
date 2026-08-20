@@ -49,6 +49,55 @@ printf '%s\n' \
 	}
 }
 
+func TestConfiguredAdapterProvidesBoundedReferenceToolExtensionOnlyForWork(t *testing.T) {
+	extensionFile := filepath.Join(t.TempDir(), "reference-extension.ts")
+	t.Setenv("PI_EXTENSION_FILE", extensionFile)
+	binary := writePiFixture(t, `
+while [ "$#" -gt 0 ]; do
+  if [ "${1:-}" = "-e" ]; then
+    shift
+    cat "$1" > "$PI_EXTENSION_FILE"
+  fi
+  shift
+done
+IFS= read -r prompt
+printf '%s\n' \
+  '{"id":"carry-prompt","type":"response","command":"prompt","success":true}' \
+  '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"{\"understanding\":\"Reference was consulted.\",\"next_step\":\"Continue the Work.\"}"}],"stopReason":"stop"}}' \
+  '{"type":"agent_settled"}'
+`)
+	usePiFixture(t, binary)
+	adapter := NewWithReferenceBaseURL("https://references.example")
+	if _, err := adapter.Execute(context.Background(), host.ExecutionRequest{Goal: "Use the catalog"}); err != nil {
+		t.Fatalf("execute configured Pi: %v", err)
+	}
+	source, err := os.ReadFile(extensionFile)
+	if err != nil {
+		t.Fatalf("read Pi Reference extension: %v", err)
+	}
+	for _, expected := range []string{"lookup_reference", "https://references.example", `redirect: "error"`, "64 * 1024", "method: \"GET\""} {
+		if !strings.Contains(string(source), expected) {
+			t.Fatalf("Pi Reference extension does not contain %q", expected)
+		}
+	}
+}
+
+func TestPiReferenceFailureCannotProduceWorkUpdate(t *testing.T) {
+	binary := writePiFixture(t, `
+IFS= read -r prompt
+printf '%s\n' \
+  '{"id":"carry-prompt","type":"response","command":"prompt","success":true}' \
+  '{"type":"tool_execution_end","toolName":"lookup_reference","isError":true}' \
+  '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"{\"understanding\":\"Unverified\",\"next_step\":\"Continue\"}"}],"stopReason":"stop"}}' \
+  '{"type":"agent_settled"}'
+`)
+	usePiFixture(t, binary)
+	_, err := New().Execute(context.Background(), host.ExecutionRequest{Goal: "Use the catalog"})
+	if !errors.Is(err, host.ErrAgentFailed) {
+		t.Fatalf("Pi reference failure = %v, want Agent failure", err)
+	}
+}
+
 func TestAdapterRepliesToPrivateConversationAfterPiSettles(t *testing.T) {
 	binary := writePiFixture(t, `
 IFS= read -r prompt

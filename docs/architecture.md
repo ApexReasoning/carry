@@ -309,6 +309,10 @@ Conversation Reply:  reply + nullable delegation_goal
 
 Codex 缓冲结束但缺少准确 terminal notification 时，只可有界只读核对；不能证明完成则 Finish Unknown。Host 不在 claim 后切换到另一 adapter。
 
+Node 10 的第一条第三方能力是一个不持久化的 Reference Catalog。Operator 通过 `CARRY_REFERENCE_BASE_URL` 为 Host 固定一个 HTTPS base URL；Pi/Codex 在 Work Execute 行为中各自通过 native tool wire 暴露 `lookup_reference(key)`。tool handler 只接受 key，固定执行一次 `GET /v1/references/{url_escaped_key}`，拒绝 redirect、非成功状态、无效 UTF-8、超过 64 KiB 的 response 和 cancellation/timeout 以外的隐式 retry。返回文本只作为当前 Attempt 的不可信上下文，不写入 PostgreSQL、Work、Conversation、browser storage、日志或 provider Session。能力失败使 native execution 失败，不能形成虚假的 Work update；既有 Machine/Run/Attempt/fence/lease/base-version commit 仍是唯一写入 authority。
+
+Reference Catalog 不是 Carry 的产品对象、Plugin、MCP server、provider registry 或持久 owner。Pi 的 concrete extension 与 Codex 的 experimental dynamic tool contract 只在各自 adapter 内实现；两者共享产品语义和 bounded HTTP 行为，不共享 provider wire。
+
 ## 10. User API
 
 User API 只表达成员旅程：

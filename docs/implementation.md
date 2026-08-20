@@ -245,9 +245,30 @@ M1 基线明确不包含 native Session recovery、Agent credential/API、provid
 
 ### 用户结果
 
-Pi 与 Codex 可以安全使用同一份固定只读能力。
+一个 Work 需要 operator 已授权 Reference Catalog 时，Pi 或 Codex 可以在当前 Run/Attempt 内通过 `lookup_reference(key)` 读取一条 bounded reference text，并继续完成 Work。成员不选择 provider、tool server、MCP、Plugin 或 transport。
 
-节点进入时只选择一个真实 fixture 和一种 transport。没有长期 bytes 前不建 Artifact；没有独立安装 lifecycle 前不建 Plugin owner；没有 credential-bearing invocation 前不建 broker 或 tool registry。
+### Node contract
+
+```text
+Node: Node 10 — First third-party capability
+Transport: fixed HTTPS GET /v1/references/{url_escaped_key}
+Input: model-supplied key only
+Bounds: one GET, 64 KiB UTF-8 response, short timeout, cancellation
+Authority: existing Machine mTLS + exact Run/Attempt/fence/lease/base version
+Persistence: none; no database, browser storage, provider Session or logs
+```
+
+Pi 使用 temporary concrete extension；Codex 使用其 native dynamic tool contract。两者只共享 `lookup_reference` 的产品语义和 bounded HTTP 行为，不共享 provider wire。固定 base URL 来自 operator/Host 的 `CARRY_REFERENCE_BASE_URL` 配置；生产只允许 HTTPS，测试可使用 loopback `httptest` HTTP。
+
+失败状态、redirect、oversize、invalid UTF-8、timeout、cancellation 和 unavailable service 都 fail closed；能力失败不能形成虚假 Work update。没有长期 bytes 前不建 Artifact；没有独立安装 lifecycle 前不建 Plugin owner；没有 credential-bearing invocation 前不建 broker 或 tool registry。
+
+### 关闭证据
+
+- Pi adapter contract test 与 Codex native dynamic-tool contract test 通过；
+- Host/reference conformance 证明 key escaping、固定 origin、GET-only、64 KiB、UTF-8、redirect、timeout 和 cancellation；
+- capability response 不进入 PostgreSQL、browser storage、provider Session 或日志；
+- capability failure 不产生 Work commit，stale/expired Attempt 仍被既有 fenced commit 拒绝；
+- `make check`、`git diff --check` 和 focused review 通过。
 
 ## 19. Node 11：First external Action
 

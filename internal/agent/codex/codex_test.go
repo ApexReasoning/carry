@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -60,6 +62,91 @@ printf '%s\n' \
 		if !strings.Contains(string(arguments), required) {
 			t.Fatalf("Codex arguments do not contain %q: %s", required, arguments)
 		}
+	}
+}
+
+func TestConfiguredAdapterUsesBoundedReferenceDynamicTool(t *testing.T) {
+	referenceServer := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodGet || request.URL.EscapedPath() != "/v1/references/renewal" {
+			t.Fatalf("reference request = %s %s", request.Method, request.URL.EscapedPath())
+		}
+		_, _ = response.Write([]byte("Reference says renewals require owner review."))
+	}))
+	defer referenceServer.Close()
+	toolResponseFile := filepath.Join(t.TempDir(), "tool-response")
+	t.Setenv("CODEX_TOOL_RESPONSE_FILE", toolResponseFile)
+	binary := writeCodexFixture(t, `
+IFS= read -r initialize
+printf '%s\n' "$initialize" > "$CODEX_INITIALIZE_FILE"
+printf '%s\n' '{"id":1,"result":{"userAgent":"fixture"}}'
+IFS= read -r initialized
+IFS= read -r thread_start
+printf '%s\n' "$thread_start" > "$CODEX_THREAD_START_FILE"
+printf '{"id":2,"result":{"thread":{"id":"thread-reference","ephemeral":true,"cwd":"%s","gitInfo":null},"runtimeWorkspaceRoots":["%s"],"instructionSources":[],"approvalPolicy":"never","sandbox":{"type":"readOnly","networkAccess":false}}}\n' "$PWD" "$PWD"
+IFS= read -r turn_start
+printf '%s\n' '{"id":3,"result":{"turn":{"id":"turn-reference","status":"inProgress","items":[]}}}'
+printf '%s\n' '{"id":10,"method":"item/tool/call","params":{"threadId":"thread-reference","turnId":"turn-reference","callId":"call-reference","namespace":null,"tool":"lookup_reference","arguments":{"key":"renewal"}}}'
+IFS= read -r tool_response
+printf '%s\n' "$tool_response" > "$CODEX_TOOL_RESPONSE_FILE"
+printf '%s\n' '{"method":"item/completed","params":{"threadId":"thread-reference","turnId":"turn-reference","item":{"id":"message-reference","type":"agentMessage","phase":"final_answer","text":"{\"understanding\":\"Reference was consulted.\",\"next_step\":\"Continue the Work.\"}"}}}'
+printf '%s\n' '{"method":"turn/completed","params":{"threadId":"thread-reference","turn":{"id":"turn-reference","status":"completed","items":[]}}}'
+`)
+	t.Setenv("CODEX_INITIALIZE_FILE", filepath.Join(t.TempDir(), "initialize"))
+	t.Setenv("CODEX_THREAD_START_FILE", filepath.Join(t.TempDir(), "thread-start"))
+	useCodexFixture(t, binary)
+	adapter := NewWithReferenceBaseURL(referenceServer.URL)
+	update, err := adapter.Execute(context.Background(), host.ExecutionRequest{Goal: "Use the catalog"})
+	if err != nil {
+		t.Fatalf("execute configured Codex: %v", err)
+	}
+	if update.Understanding != "Reference was consulted." {
+		t.Fatalf("Codex update = %#v", update)
+	}
+	var initialize struct {
+		Params struct {
+			Capabilities struct {
+				ExperimentalAPI bool `json:"experimentalApi"`
+			} `json:"capabilities"`
+		} `json:"params"`
+	}
+	initializeData, err := os.ReadFile(os.Getenv("CODEX_INITIALIZE_FILE"))
+	if err != nil {
+		t.Fatalf("read initialize: %v", err)
+	}
+	if err := json.Unmarshal(initializeData, &initialize); err != nil {
+		t.Fatalf("decode initialize: %v", err)
+	}
+	if !initialize.Params.Capabilities.ExperimentalAPI {
+		t.Fatal("Codex dynamic tools did not enable experimentalApi")
+	}
+	var threadStart struct {
+		Params struct {
+			DynamicTools []dynamicToolSpec `json:"dynamicTools"`
+		} `json:"params"`
+	}
+	threadData, err := os.ReadFile(os.Getenv("CODEX_THREAD_START_FILE"))
+	if err != nil {
+		t.Fatalf("read thread/start: %v", err)
+	}
+	if err := json.Unmarshal(threadData, &threadStart); err != nil {
+		t.Fatalf("decode thread/start: %v", err)
+	}
+	if len(threadStart.Params.DynamicTools) != 1 || threadStart.Params.DynamicTools[0].Name != "lookup_reference" {
+		t.Fatalf("dynamic tools = %#v", threadStart.Params.DynamicTools)
+	}
+	var response struct {
+		ID     int                 `json:"id"`
+		Result dynamicToolResponse `json:"result"`
+	}
+	responseData, err := os.ReadFile(toolResponseFile)
+	if err != nil {
+		t.Fatalf("read dynamic tool response: %v", err)
+	}
+	if err := json.Unmarshal(responseData, &response); err != nil {
+		t.Fatalf("decode dynamic tool response: %v", err)
+	}
+	if response.ID != 10 || !response.Result.Success || len(response.Result.ContentItems) != 1 || response.Result.ContentItems[0].Text != "Reference says renewals require owner review." {
+		t.Fatalf("dynamic tool response = %#v", response)
 	}
 }
 

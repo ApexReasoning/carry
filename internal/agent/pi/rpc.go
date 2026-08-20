@@ -23,12 +23,14 @@ type promptRequest struct {
 }
 
 type envelope struct {
-	ID      string          `json:"id"`
-	Type    string          `json:"type"`
-	Command string          `json:"command"`
-	Success bool            `json:"success"`
-	Error   string          `json:"error"`
-	Message json.RawMessage `json:"message"`
+	ID       string          `json:"id"`
+	Type     string          `json:"type"`
+	Command  string          `json:"command"`
+	Success  bool            `json:"success"`
+	Error    string          `json:"error"`
+	ToolName string          `json:"toolName"`
+	IsError  bool            `json:"isError"`
+	Message  json.RawMessage `json:"message"`
 }
 
 type assistantMessage struct {
@@ -41,8 +43,9 @@ type assistantMessage struct {
 }
 
 type resultState struct {
-	promptAccepted bool
-	finalMessage   assistantMessage
+	promptAccepted   bool
+	finalMessage     assistantMessage
+	referenceFailure bool
 }
 
 func awaitText(ctx context.Context, stdout io.Reader) ([]byte, error) {
@@ -91,9 +94,16 @@ func (state *resultState) accept(record envelope) ([]byte, bool, error) {
 		if message.Role == "assistant" {
 			state.finalMessage = message
 		}
+	case "tool_execution_end":
+		if record.ToolName == "lookup_reference" && record.IsError {
+			state.referenceFailure = true
+		}
 	case "extension_error":
 		return nil, false, fmt.Errorf("%w: Pi extension error", host.ErrAgentFailed)
 	case "agent_settled":
+		if state.referenceFailure {
+			return nil, false, fmt.Errorf("%w: lookup_reference failed", host.ErrAgentFailed)
+		}
 		text, err := state.text()
 		return text, true, err
 	}
@@ -101,6 +111,9 @@ func (state *resultState) accept(record envelope) ([]byte, bool, error) {
 }
 
 func (state resultState) text() ([]byte, error) {
+	if state.referenceFailure {
+		return nil, fmt.Errorf("%w: lookup_reference failed", host.ErrAgentFailed)
+	}
 	if !state.promptAccepted || state.finalMessage.Role != "assistant" {
 		return nil, fmt.Errorf("%w: Pi settled without an accepted prompt and final message", host.ErrAgentFailed)
 	}
