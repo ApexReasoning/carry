@@ -40,10 +40,16 @@ func New(baseURL string) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	// Go may transparently retry an idempotent GET only after a reused
+	// connection fails. A fresh connection per lookup keeps this transport to
+	// the single catalog attempt promised by the product contract.
+	transport.DisableKeepAlives = true
 	return &Client{
 		baseURL: parsed,
 		http: &http.Client{
-			Timeout: requestTimeout,
+			Transport: transport,
+			Timeout:   requestTimeout,
 			CheckRedirect: func(*http.Request, []*http.Request) error {
 				return http.ErrUseLastResponse
 			},
@@ -85,11 +91,6 @@ func (client *Client) Lookup(ctx context.Context, key string) (string, error) {
 	}
 	endpoint := *client.baseURL
 	escapedKey := url.PathEscape(key)
-	if escapedKey == "." {
-		escapedKey = "%2E"
-	} else if escapedKey == ".." {
-		escapedKey = "%2E%2E"
-	}
 	endpoint.Path = "/v1/references/" + key
 	endpoint.RawPath = "/v1/references/" + escapedKey
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
@@ -121,5 +122,6 @@ func (client *Client) Lookup(ctx context.Context, key string) (string, error) {
 }
 
 func validKey(key string) bool {
-	return len(key) > 0 && len(key) <= MaxKeyBytes && utf8.ValidString(key) && !strings.ContainsRune(key, 0)
+	return len(key) > 0 && len(key) <= MaxKeyBytes && key != "." && key != ".." &&
+		utf8.ValidString(key) && !strings.ContainsRune(key, 0)
 }

@@ -123,20 +123,3 @@ func decodeReferenceArguments(data []byte) (string, error) {
 	}
 	return arguments.Key, nil
 }
-
-// bytesReader keeps the strict JSON helpers local to this concrete adapter.
-func bytesReader(data []byte) *byteReader { return &byteReader{data: data} }
-
-type byteReader struct {
-	data []byte
-	read int
-}
-
-func (reader *byteReader) Read(destination []byte) (int, error) {
-	if reader.read == len(reader.data) {
-		return 0, io.EOF
-	}
-	n := copy(destination, reader.data[reader.read:])
-	reader.read += n
-	return n, nil
-}

@@ -119,7 +119,7 @@ func (adapter *Adapter) generate(ctx context.Context, prompt string, includeStde
 		return nil, fmt.Errorf("write Pi prompt: %w", err)
 	}
 
-	text, resultErr := awaitText(ctx, stdout)
+	text, resultErr := awaitText(ctx, stdout, enableReference)
 	_ = stdin.Close()
 	if resultErr == nil {
 		if err := waitForExit(command, processDone); err != nil {

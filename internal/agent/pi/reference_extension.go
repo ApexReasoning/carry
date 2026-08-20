@@ -12,67 +12,99 @@ import (
 
 const referenceExtensionPath = "carry-reference-extension.ts"
 
-const referenceExtensionSource = `import { Type } from "typebox";
-
-const BASE_URL = __CARRY_REFERENCE_BASE_URL__;
-const MAX_RESPONSE_BYTES = 64 * 1024;
-
+// referenceTransportSource is dependency-free TypeScript so the exact HTTP
+// boundary can be executed by Node contract tests and embedded in the Pi extension.
+const referenceTransportSource = `
 function escapedKey(key: string): string {
-  return encodeURIComponent(key).replace(/[!'()*]/g, (character) =>
-    "%" + character.charCodeAt(0).toString(16).toUpperCase(),
-  );
+  return encodeURIComponent(key)
+    .replace(/[!'()*]/g, (character) =>
+      "%" + character.charCodeAt(0).toString(16).toUpperCase(),
+    )
+    .replace(/%24/g, "$")
+    .replace(/%26/g, "&")
+    .replace(/%2B/g, "+")
+    .replace(/%3A/g, ":")
+    .replace(/%3D/g, "=")
+    .replace(/%40/g, "@");
 }
 
 async function lookupReference(key: string, signal?: AbortSignal): Promise<string> {
-  if (typeof key !== "string" || key.length === 0 ||
+  if (typeof key !== "string" || key.length === 0 || key === "." || key === ".." ||
       new TextEncoder().encode(key).byteLength > 1024 || key.includes("\u0000")) {
-    throw new Error("invalid reference key");
+    throw new Error("lookup_reference key is invalid");
   }
-  const endpoint = new URL("/v1/references/" + escapedKey(key), BASE_URL);
-  let response: Response;
-  try {
-    response = await fetch(endpoint, { method: "GET", redirect: "error", signal });
-  } catch (error) {
-    if (signal?.aborted) throw new Error("lookup_reference cancelled");
-    throw new Error("lookup_reference unavailable");
-  }
-  if (response.status >= 300 && response.status < 400) {
-    throw new Error("lookup_reference redirect rejected");
-  }
-  if (!response.ok) throw new Error("lookup_reference returned a failure status");
-  if (!response.body) throw new Error("lookup_reference returned no body");
 
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
+  const controller = new AbortController();
+  let timedOut = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, REQUEST_TIMEOUT_MS);
+  const cancel = () => controller.abort();
+  if (signal?.aborted) cancel();
+  else signal?.addEventListener("abort", cancel, { once: true });
+
   try {
-    while (true) {
-      const next = await reader.read();
-      if (next.done) break;
-      total += next.value.byteLength;
-      if (total > MAX_RESPONSE_BYTES) {
-        await reader.cancel();
-        throw new Error("lookup_reference response is too large");
-      }
-      chunks.push(next.value);
+    const endpoint = new URL("/v1/references/" + escapedKey(key), BASE_URL);
+    const response = await fetch(endpoint, {
+      method: "GET",
+      redirect: "error",
+      signal: controller.signal,
+    });
+    if (response.status >= 300 && response.status < 400) {
+      throw new Error("lookup_reference redirect rejected");
     }
+    if (!response.ok) throw new Error("lookup_reference returned a failure status");
+    if (!response.body) throw new Error("lookup_reference returned no body");
+
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    try {
+      while (true) {
+        const next = await reader.read();
+        if (next.done) break;
+        total += next.value.byteLength;
+        if (total > MAX_RESPONSE_BYTES) {
+          await reader.cancel();
+          throw new Error("lookup_reference response is too large");
+        }
+        chunks.push(next.value);
+      }
+    } finally {
+      reader.releaseLock();
+    }
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    try {
+      return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    } catch {
+      throw new Error("lookup_reference response is not valid UTF-8");
+    }
+  } catch (error) {
+    if (signal?.aborted) throw new Error("lookup_reference was cancelled");
+    if (timedOut) throw new Error("lookup_reference timed out");
+    if (error instanceof Error && error.message.startsWith("lookup_reference ")) throw error;
+    throw new Error("lookup_reference unavailable");
   } finally {
-    reader.releaseLock();
-  }
-  const bytes = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-  } catch {
-    throw new Error("lookup_reference response is not valid UTF-8");
+    clearTimeout(timeout);
+    signal?.removeEventListener("abort", cancel);
   }
 }
+`
 
-export default function carryReferenceExtension(pi: any) {
+const referenceExtensionSource = `import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
+
+const BASE_URL = __CARRY_REFERENCE_BASE_URL__;
+const MAX_RESPONSE_BYTES = 64 * 1024;
+const REQUEST_TIMEOUT_MS = 5_000;
+` + referenceTransportSource + `
+export default function carryReferenceExtension(pi: ExtensionAPI) {
   pi.registerTool({
     name: "lookup_reference",
     label: "Lookup Reference",
