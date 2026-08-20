@@ -211,7 +211,7 @@ M1 的正式生命周期只有 `Open`。`Paused`、`Closed` 与 `Reopen` 属于�
 
 ## 外部世界与 Artifact
 
-Node 10 只增加一条不持久化的只读 Reference Catalog 能力：operator 固定 `CARRY_REFERENCE_BASE_URL`，Carry 在当前 Work Execute 中可通过 `lookup_reference(key)` 读取一段最多 64 KiB 的 UTF-8 参考文本。模型只能提供 key；它不能提供 URL、origin、method、header、credential 或 authority。transport 只执行固定 HTTPS base URL 下的一次 GET，拒绝 redirect、失败状态、超限、非法 UTF-8、timeout 和 cancellation；返回文本是不可信上下文，不是权限或外部事实证明，也不进入 Work、数据库、日志、browser storage 或 provider Session。
+Node 10 只增加一条不独立持久化原始 response 的只读 Reference Catalog 能力：operator 固定 `CARRY_REFERENCE_BASE_URL`，Carry 在当前 Work Execute 中可通过 `lookup_reference(key)` 读取一段最多 64 KiB 的 UTF-8 参考文本。模型只能提供 key；它不能提供 URL、origin、method、header、credential 或 authority。transport 只执行固定 HTTPS base URL 下的一次 GET，拒绝 redirect、失败状态、超限、非法 UTF-8、timeout 和 cancellation。原始 response 只作为当前 Attempt 的不可信上下文，不成为数据库事实、日志、browser storage 或持久 provider Session；模型可以引用或解释其中内容形成普通 Work understanding，但该内容仍是可纠正的模型输出，不获得 Reference provenance、authority 或已认证外部事实地位。
 
 Pi 与 Codex 保留各自 native tool wire；Node 10 不建立 Plugin、MCP server/client、tool registry、provider routing、Artifact 或新的持久 owner。Skill、MCP server、文件、外部消息和模型输出只能提供内容或方法，不能自行创建 Work、扩大权限或证明外部后果。一个既有事实被用于支持判断时仍属于原 owner，不建立 Evidence 对象或开放 polymorphic 引用仓库。
 

@@ -146,7 +146,7 @@ M1 与 Pre-Node5 correction 已完成。根据当前明确决定，本切割直�
 
 ### 当前范围
 
-- 只增加一个不持久化的 `lookup_reference(key)` 和固定 HTTPS transport；
+- 只增加一个不独立持久化原始 response 的 `lookup_reference(key)` 和固定 HTTPS transport；
 - 只在 Work Execute 中启用，私人 Reply 不获得该能力；
 - 不改变六个持久 owner、User API、schema、migration、Work/Run identity 或 commit authority；
 - Pre-Node5 correction 与 Nodes 0–4 保持已完成基线，Nodes 5–9 仍是未来进入顺序。
@@ -247,7 +247,7 @@ Transport: fixed HTTPS GET /v1/references/{url_escaped_key}
 Input: model-supplied key only
 Bounds: one GET, 64 KiB UTF-8 response, short timeout, cancellation
 Authority: existing Machine mTLS + exact Run/Attempt/fence/lease/base version
-Persistence: none; no database, browser storage, provider Session or logs
+Persistence: no independent raw response/provenance; model-derived Work understanding remains ordinary model output
 ```
 
 Pi 使用 temporary concrete extension；Codex 使用其 native dynamic tool contract。两者只共享 `lookup_reference` 的产品语义和 bounded HTTP 行为，不共享 provider wire。固定 base URL 来自 operator/Host 的 `CARRY_REFERENCE_BASE_URL` 配置；生产只允许 HTTPS，测试可使用 loopback `httptest` HTTP。
@@ -258,9 +258,9 @@ Pi 使用 temporary concrete extension；Codex 使用其 native dynamic tool con
 
 - Pi adapter contract test 与 Codex native dynamic-tool contract test 通过；
 - Host/reference conformance 证明 key escaping、固定 origin、GET-only、64 KiB、UTF-8、redirect、timeout 和 cancellation；
-- capability response 不进入 PostgreSQL、browser storage、provider Session 或日志；
+- 原始 capability response 不成为独立 PostgreSQL、browser storage、持久 provider Session、日志或 provenance 事实；模型引用只形成普通可纠正 Work understanding；
 - capability failure 不产生 Work commit，stale/expired Attempt 仍被既有 fenced commit 拒绝；
-- `make check`、`git diff --check` 和 focused review 通过。
+- `make check`、live Pi extension contract、`git diff --check` 和三门独立 Node-close review 通过。
 
 ## 19. Node 11：First external Action
 

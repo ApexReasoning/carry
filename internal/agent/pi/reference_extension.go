@@ -15,6 +15,9 @@ const referenceExtensionPath = "carry-reference-extension.ts"
 // referenceTransportSource is dependency-free TypeScript so the exact HTTP
 // boundary can be executed by Node contract tests and embedded in the Pi extension.
 const referenceTransportSource = `
+import { request as requestHTTP } from "node:http";
+import { request as requestHTTPS } from "node:https";
+
 function escapedKey(key: string): string {
   return encodeURIComponent(key)
     .replace(/[!'()*]/g, (character) =>
@@ -26,6 +29,13 @@ function escapedKey(key: string): string {
     .replace(/%3A/g, ":")
     .replace(/%3D/g, "=")
     .replace(/%40/g, "@");
+}
+
+function exactReferenceParams(params: unknown): params is { key: string } {
+  if (params === null || typeof params !== "object" || Array.isArray(params)) return false;
+  const keys = Object.keys(params);
+  return keys.length === 1 && keys[0] === "key" &&
+    typeof (params as { key?: unknown }).key === "string";
 }
 
 async function lookupReference(key: string, signal?: AbortSignal): Promise<string> {
@@ -46,45 +56,71 @@ async function lookupReference(key: string, signal?: AbortSignal): Promise<strin
 
   try {
     const endpoint = new URL("/v1/references/" + escapedKey(key), BASE_URL);
-    const response = await fetch(endpoint, {
-      method: "GET",
-      redirect: "error",
-      signal: controller.signal,
-    });
-    if (response.status >= 300 && response.status < 400) {
-      throw new Error("lookup_reference redirect rejected");
-    }
-    if (!response.ok) throw new Error("lookup_reference returned a failure status");
-    if (!response.body) throw new Error("lookup_reference returned no body");
-
-    const reader = response.body.getReader();
-    const chunks: Uint8Array[] = [];
-    let total = 0;
-    try {
-      while (true) {
-        const next = await reader.read();
-        if (next.done) break;
-        total += next.value.byteLength;
-        if (total > MAX_RESPONSE_BYTES) {
-          await reader.cancel();
-          throw new Error("lookup_reference response is too large");
+    const requestReference = endpoint.protocol === "https:" ? requestHTTPS : requestHTTP;
+    return await new Promise<string>((resolve, reject) => {
+      let settled = false;
+      const fail = (error: Error) => {
+        if (settled) return;
+        settled = true;
+        reject(error);
+      };
+      const request = requestReference(endpoint, {
+        method: "GET",
+        agent: false,
+        headers: { Connection: "close" },
+        signal: controller.signal,
+      }, (response) => {
+        if (response.statusCode === undefined) {
+          response.destroy();
+          fail(new Error("lookup_reference returned no status"));
+          return;
         }
-        chunks.push(next.value);
-      }
-    } finally {
-      reader.releaseLock();
-    }
-    const bytes = new Uint8Array(total);
-    let offset = 0;
-    for (const chunk of chunks) {
-      bytes.set(chunk, offset);
-      offset += chunk.byteLength;
-    }
-    try {
-      return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-    } catch {
-      throw new Error("lookup_reference response is not valid UTF-8");
-    }
+        if (response.statusCode >= 300 && response.statusCode < 400) {
+          response.resume();
+          fail(new Error("lookup_reference redirect rejected"));
+          return;
+        }
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+          response.resume();
+          fail(new Error("lookup_reference returned a failure status"));
+          return;
+        }
+
+        const chunks: Uint8Array[] = [];
+        let total = 0;
+        response.on("data", (chunk: Uint8Array) => {
+          if (settled) return;
+          total += chunk.byteLength;
+          if (total > MAX_RESPONSE_BYTES) {
+            response.destroy();
+            fail(new Error("lookup_reference response is too large"));
+            return;
+          }
+          chunks.push(chunk);
+        });
+        response.on("error", () => fail(new Error("lookup_reference unavailable")));
+        response.on("end", () => {
+          if (settled) return;
+          const bytes = new Uint8Array(total);
+          let offset = 0;
+          for (const chunk of chunks) {
+            bytes.set(chunk, offset);
+            offset += chunk.byteLength;
+          }
+          let text: string;
+          try {
+            text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+          } catch {
+            fail(new Error("lookup_reference response is not valid UTF-8"));
+            return;
+          }
+          settled = true;
+          resolve(text);
+        });
+      });
+      request.on("error", () => fail(new Error("lookup_reference unavailable")));
+      request.end();
+    });
   } catch (error) {
     if (signal?.aborted) throw new Error("lookup_reference was cancelled");
     if (timedOut) throw new Error("lookup_reference timed out");
@@ -98,12 +134,15 @@ async function lookupReference(key: string, signal?: AbortSignal): Promise<strin
 
 function createReferenceLookup() {
   const seenCallIDs = new Set<string>();
-  return async (toolCallId: string, key: string, signal?: AbortSignal): Promise<string> => {
+  return async (toolCallId: string, params: unknown, signal?: AbortSignal): Promise<string> => {
     if (toolCallId.length === 0 || seenCallIDs.has(toolCallId)) {
       throw new Error("lookup_reference call ID is invalid or duplicated");
     }
     seenCallIDs.add(toolCallId);
-    return lookupReference(key, signal);
+    if (!exactReferenceParams(params)) {
+      throw new Error("lookup_reference arguments are invalid");
+    }
+    return lookupReference(params.key, signal);
   };
 }
 `
@@ -129,9 +168,9 @@ export default function carryReferenceExtension(pi: ExtensionAPI) {
     ],
     parameters: Type.Object({
       key: Type.String({ minLength: 1, maxLength: 1024 }),
-    }),
+    }, { additionalProperties: false }),
     async execute(toolCallId: string, params: { key: string }, signal?: AbortSignal) {
-      const text = await executeReferenceLookup(toolCallId, params.key, signal);
+      const text = await executeReferenceLookup(toolCallId, params, signal);
       return { content: [{ type: "text", text }], details: {} };
     },
   });

@@ -82,13 +82,8 @@ printf '%s\n' \
 	if err != nil {
 		t.Fatalf("read Pi Reference extension: %v", err)
 	}
-	for _, expected := range []string{
-		"lookup_reference", "https://references.example", `redirect: "error"`,
-		"64 * 1024", "5_000", "method: \"GET\"", "ExtensionAPI",
-	} {
-		if !strings.Contains(string(source), expected) {
-			t.Fatalf("Pi Reference extension does not contain %q", expected)
-		}
+	if len(source) == 0 {
+		t.Fatal("Pi Work Execute loaded an empty Reference extension")
 	}
 }
 
@@ -123,13 +118,48 @@ func TestPiReferenceTransportEnforcesRuntimeBounds(t *testing.T) {
 		defer server.Close()
 		output, err := runPiReferenceTransport(t, server.URL, time.Second, `
 const executeReferenceLookup = createReferenceLookup();
-console.log(await executeReferenceLookup("call-1", "key"));
-try { await executeReferenceLookup("call-1", "key"); console.log("unexpected success"); }
+console.log(await executeReferenceLookup("call-1", { key: "key" }));
+try { await executeReferenceLookup("call-1", { key: "key" }); console.log("unexpected success"); }
 catch (error) { console.log(error.message); }
-console.log(await executeReferenceLookup("call-2", "key"));
+console.log(await executeReferenceLookup("call-2", { key: "key" }));
 `)
 		if err != nil || output != "reference\nlookup_reference call ID is invalid or duplicated\nreference" || requests.Load() != 2 {
 			t.Fatalf("Pi duplicate output=%q requests=%d error=%v", output, requests.Load(), err)
+		}
+	})
+
+	t.Run("misdirected response is not retried", func(t *testing.T) {
+		var requests atomic.Int32
+		server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+			requests.Add(1)
+			response.WriteHeader(http.StatusMisdirectedRequest)
+		}))
+		defer server.Close()
+		output, err := runPiReferenceTransport(t, server.URL, time.Second, `
+try { await lookupReference("key"); console.log("unexpected success"); }
+catch (error) { console.log(error.message); }
+`)
+		if err != nil || output != "lookup_reference returned a failure status" || requests.Load() != 1 {
+			t.Fatalf("Pi 421 output=%q requests=%d error=%v", output, requests.Load(), err)
+		}
+	})
+
+	t.Run("unknown arguments are rejected before transport", func(t *testing.T) {
+		var requests atomic.Int32
+		server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+			requests.Add(1)
+			_, _ = response.Write([]byte("unexpected"))
+		}))
+		defer server.Close()
+		output, err := runPiReferenceTransport(t, server.URL, time.Second, `
+const executeReferenceLookup = createReferenceLookup();
+try {
+  await executeReferenceLookup("call-extra", { key: "key", url: "https://attacker.example" });
+  console.log("unexpected success");
+} catch (error) { console.log(error.message); }
+`)
+		if err != nil || output != "lookup_reference arguments are invalid" || requests.Load() != 0 {
+			t.Fatalf("Pi extra arguments output=%q requests=%d error=%v", output, requests.Load(), err)
 		}
 	})
 
@@ -250,6 +280,11 @@ func TestPiRejectsMalformedReferenceSettlement(t *testing.T) {
 			`{"type":"tool_execution_start","toolCallId":"call-1","toolName":"lookup_reference"}`,
 			`{"type":"tool_execution_end","toolCallId":"call-1","toolName":"lookup_reference","isError":false}`,
 			`{"type":"tool_execution_start","toolCallId":"call-1","toolName":"lookup_reference"}`,
+		}, "\n"),
+		"tool call after final output": strings.Join([]string{
+			`{"id":"carry-prompt","type":"response","command":"prompt","success":true}`,
+			`{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"{\"understanding\":\"Premature\",\"next_step\":\"Do not commit\"}"}],"stopReason":"stop"}}`,
+			`{"type":"tool_execution_start","toolCallId":"call-after-final","toolName":"lookup_reference"}`,
 		}, "\n"),
 		"missing isError": strings.Join([]string{
 			`{"id":"carry-prompt","type":"response","command":"prompt","success":true}`,

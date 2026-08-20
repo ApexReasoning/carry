@@ -254,6 +254,38 @@ printf '%s\n' \
 	}
 }
 
+func TestCodexRejectsReferenceToolCallAfterFinalOutput(t *testing.T) {
+	var catalogRequests atomic.Int32
+	referenceServer := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		catalogRequests.Add(1)
+		_, _ = response.Write([]byte("unexpected"))
+	}))
+	defer referenceServer.Close()
+	binary := writeCodexFixture(t, `
+IFS= read -r initialize
+printf '%s\n' '{"id":1,"result":{"userAgent":"fixture"}}'
+IFS= read -r initialized
+IFS= read -r thread_start
+printf '{"id":2,"result":{"thread":{"id":"thread-order","ephemeral":true,"cwd":"%s","gitInfo":null},"runtimeWorkspaceRoots":["%s"],"instructionSources":[],"approvalPolicy":"never","sandbox":{"type":"readOnly","networkAccess":false}}}\n' "$PWD" "$PWD"
+IFS= read -r turn_start
+printf '%s\n' \
+  '{"id":3,"result":{"turn":{"id":"turn-order","status":"inProgress","items":[]}}}' \
+  '{"method":"item/completed","params":{"threadId":"thread-order","turnId":"turn-order","item":{"id":"message-order","type":"agentMessage","phase":"final_answer","text":"{\"understanding\":\"Premature\",\"next_step\":\"Do not commit\"}"}}}' \
+  '{"id":10,"method":"item/tool/call","params":{"threadId":"thread-order","turnId":"turn-order","callId":"call-after-final","namespace":null,"tool":"lookup_reference","arguments":{"key":"renewal"}}}'
+`)
+	useCodexFixture(t, binary)
+	_, err := NewWithReferenceBaseURL(referenceServer.URL).Execute(
+		context.Background(),
+		host.ExecutionRequest{Goal: "Use the catalog"},
+	)
+	if !errors.Is(err, host.ErrAgentOutcomeLost) {
+		t.Fatalf("post-final Codex tool call = %v, want outcome lost", err)
+	}
+	if got := catalogRequests.Load(); got != 0 {
+		t.Fatalf("post-final Codex tool call reached catalog %d times", got)
+	}
+}
+
 func TestCodexRejectsMalformedReferenceToolCall(t *testing.T) {
 	var output bytes.Buffer
 	client := newAppServerClient(&output, strings.NewReader(""), func(context.Context, string) (string, error) {

@@ -103,7 +103,7 @@ func (state *resultState) accept(record envelope) ([]byte, bool, error) {
 			state.finalMessage = message
 		}
 	case "tool_execution_start":
-		if !state.promptAccepted || !state.referenceEnabled ||
+		if !state.promptAccepted || !state.referenceEnabled || state.finalMessage.StopReason == "stop" ||
 			record.ToolName != "lookup_reference" || record.ToolCallID == "" {
 			return nil, false, fmt.Errorf("%w: invalid Pi tool execution start", host.ErrAgentOutcomeLost)
 		}
