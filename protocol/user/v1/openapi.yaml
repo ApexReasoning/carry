@@ -171,6 +171,300 @@ paths:
                 format: uri
         "400":
           $ref: "#/components/responses/Error"
+  /v1/identity/methods:
+    get:
+      operationId: loadIdentityMethods
+      security:
+        - browserSession: []
+      responses:
+        "200":
+          description: Fixed linked-method labels and recent-proof requirement
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IdentityMethods"
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/identity/reauthentication/email/challenges:
+    post:
+      operationId: requestEmailReauthenticationCode
+      security:
+        - browserSession: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [challenge_id]
+              properties:
+                challenge_id:
+                  type: string
+                  format: uuid
+      responses:
+        "202":
+          description: Confirmation code submitted to the linked email method
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailChallenge"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "429":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+  /v1/identity/reauthentication/email/challenges/{challengeID}/verify:
+    parameters:
+      - name: challengeID
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      operationId: verifyEmailReauthenticationCode
+      security:
+        - browserSession: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [code]
+              properties:
+                code:
+                  type: string
+                  pattern: "^[0-9]{6}$"
+      responses:
+        "204":
+          description: >-
+            Exact current method confirmed and Browser Session rotated
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
+        "401":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+  /v1/identity/reauthentication/google/start:
+    post:
+      operationId: startGoogleReauthentication
+      security:
+        - browserSession: []
+      responses:
+        "303":
+          description: Redirect to Google for exact current-method confirmation
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
+            Location:
+              schema:
+                type: string
+                format: uri
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "428":
+          $ref: "#/components/responses/Error"
+  /v1/identity/reauthentication/github/start:
+    post:
+      operationId: startGitHubReauthentication
+      security:
+        - browserSession: []
+      responses:
+        "303":
+          description: Redirect to GitHub for exact current-method confirmation
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
+            Location:
+              schema:
+                type: string
+                format: uri
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+  /v1/identity/methods/email/challenges:
+    post:
+      operationId: requestEmailLinkCode
+      security:
+        - browserSession: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [challenge_id, email]
+              properties:
+                challenge_id:
+                  type: string
+                  format: uuid
+                email:
+                  type: string
+                  format: email
+                  maxLength: 254
+      responses:
+        "202":
+          description: Candidate email proof submitted
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailChallenge"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "428":
+          $ref: "#/components/responses/Error"
+        "429":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+  /v1/identity/methods/email/challenges/{challengeID}/verify:
+    parameters:
+      - name: challengeID
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      operationId: verifyEmailLinkCode
+      security:
+        - browserSession: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [code]
+              properties:
+                code:
+                  type: string
+                  pattern: "^[0-9]{6}$"
+      responses:
+        "204":
+          description: Email linked and all pre-change Sessions rotated
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
+        "401":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "428":
+          $ref: "#/components/responses/Error"
+  /v1/identity/methods/google/start:
+    post:
+      operationId: startGoogleLink
+      security:
+        - browserSession: []
+      responses:
+        "303":
+          description: Redirect to Google to prove the candidate method
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
+            Location:
+              schema:
+                type: string
+                format: uri
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "428":
+          $ref: "#/components/responses/Error"
+  /v1/identity/methods/github/start:
+    post:
+      operationId: startGitHubLink
+      security:
+        - browserSession: []
+      responses:
+        "303":
+          description: Redirect to GitHub to prove the candidate method
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
+            Location:
+              schema:
+                type: string
+                format: uri
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "428":
+          $ref: "#/components/responses/Error"
+  /v1/identity/methods/{method}:
+    parameters:
+      - name: method
+        in: path
+        required: true
+        schema:
+          type: string
+          enum: [email, google, github]
+    delete:
+      operationId: unlinkIdentityMethod
+      security:
+        - browserSession: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "204":
+          description: Method unlinked and all pre-change Sessions rotated
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "428":
+          $ref: "#/components/responses/Error"
   /v1/browser/sessions/current:
     delete:
       operationId: revokeCurrentBrowserSession
@@ -718,6 +1012,20 @@ components:
         expires_at:
           type: string
           format: date-time
+    IdentityMethods:
+      type: object
+      additionalProperties: false
+      required: [methods, reauthentication_required]
+      properties:
+        methods:
+          type: array
+          uniqueItems: true
+          maxItems: 3
+          items:
+            type: string
+            enum: [email, google, github]
+        reauthentication_required:
+          type: boolean
     Membership:
       type: object
       additionalProperties: false

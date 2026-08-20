@@ -132,6 +132,7 @@ type EmailLoginPersistence interface {
 	PrepareEmailChallenge(context.Context, PrepareEmailChallengeCommand) (EmailChallenge, error)
 	RecordEmailSubmission(context.Context, string, [sha256.Size]byte, EmailSubmission) (EmailChallenge, error)
 	VerifyEmailChallenge(context.Context, VerifyEmailChallengeCommand) (BrowserSession, error)
+	EmailForReauthentication(context.Context, string, string) (string, error)
 }
 
 // EmailCodeSubmitter is the one external consequence consumed by Identity.
@@ -171,25 +172,77 @@ func (login *EmailLogin) RequestCode(ctx context.Context, command RequestEmailCo
 	if err != nil {
 		return EmailChallenge{}, err
 	}
-	code, err := login.credentials.EmailCode(command.ChallengeID, canonicalEmail)
+	return login.requestCode(ctx, requestEmailProofCommand{
+		ChallengeID: command.ChallengeID, CanonicalEmail: canonicalEmail,
+		Source: command.Source, IdempotencyKey: command.IdempotencyKey, Purpose: LoginPurpose,
+	})
+}
+
+type RequestEmailMethodCodeCommand struct {
+	ChallengeID    string
+	Email          string
+	Source         string
+	IdempotencyKey string
+	UserID         string
+	SessionID      string
+}
+
+func (login *EmailLogin) RequestLinkCode(ctx context.Context, command RequestEmailMethodCodeCommand) (EmailChallenge, error) {
+	canonicalEmail, err := CanonicalEmail(command.Email)
+	if err != nil {
+		return EmailChallenge{}, err
+	}
+	return login.requestCode(ctx, requestEmailProofCommand{
+		ChallengeID: command.ChallengeID, CanonicalEmail: canonicalEmail,
+		Source: command.Source, IdempotencyKey: command.IdempotencyKey,
+		Purpose: LinkPurpose, UserID: command.UserID, SessionID: command.SessionID,
+	})
+}
+
+func (login *EmailLogin) RequestReauthenticationCode(ctx context.Context, command RequestEmailMethodCodeCommand) (EmailChallenge, error) {
+	canonicalEmail, err := login.persistence.EmailForReauthentication(ctx, command.UserID, command.SessionID)
+	if err != nil {
+		return EmailChallenge{}, err
+	}
+	return login.requestCode(ctx, requestEmailProofCommand{
+		ChallengeID: command.ChallengeID, CanonicalEmail: canonicalEmail,
+		Source: command.Source, IdempotencyKey: command.IdempotencyKey,
+		Purpose: ReauthenticatePurpose, UserID: command.UserID, SessionID: command.SessionID,
+	})
+}
+
+type requestEmailProofCommand struct {
+	ChallengeID    string
+	CanonicalEmail string
+	Source         string
+	IdempotencyKey string
+	Purpose        ProofPurpose
+	UserID         string
+	SessionID      string
+}
+
+func (login *EmailLogin) requestCode(ctx context.Context, command requestEmailProofCommand) (EmailChallenge, error) {
+	code, err := login.credentials.EmailCode(command.ChallengeID, command.CanonicalEmail)
 	if err != nil {
 		return EmailChallenge{}, err
 	}
 	message := EmailCodeMessage{
-		Recipient: canonicalEmail, Code: code, IdempotencyKey: "carry-email-" + command.ChallengeID,
+		Recipient: command.CanonicalEmail, Code: code, IdempotencyKey: "carry-email-" + command.ChallengeID,
 	}
 	payloadDigest, err := login.submitter.PayloadDigest(message)
 	if err != nil {
 		return EmailChallenge{}, fmt.Errorf("prepare email submission payload: %w", err)
 	}
 	challenge, err := login.persistence.PrepareEmailChallenge(ctx, PrepareEmailChallengeCommand{
-		ChallengeID: command.ChallengeID, CanonicalEmail: canonicalEmail,
+		ChallengeID: command.ChallengeID, CanonicalEmail: command.CanonicalEmail,
 		CodeDigest:     login.credentials.CodeDigest(command.ChallengeID, code),
 		SourceDigest:   login.credentials.SourceDigest(command.Source),
 		PayloadDigest:  payloadDigest,
 		IdempotencyKey: command.IdempotencyKey,
+		Purpose:        command.Purpose, TargetUserID: command.UserID, InitiatingSessionID: command.SessionID,
 		RequestDigest: login.credentials.RequestDigest(
-			"request-email-code", command.ChallengeID, canonicalEmail,
+			"request-email-code", string(command.Purpose), command.ChallengeID,
+			command.CanonicalEmail, command.UserID, command.SessionID,
 		),
 	})
 	if err != nil {
@@ -222,12 +275,29 @@ func (login *EmailLogin) RequestCode(ctx context.Context, command RequestEmailCo
 }
 
 type VerifyEmailCodeCommand struct {
-	ChallengeID    string
-	Code           string
-	IdempotencyKey string
+	ChallengeID         string
+	Code                string
+	IdempotencyKey      string
+	InitiatingSessionID string
+	Purpose             ProofPurpose
 }
 
 func (login *EmailLogin) VerifyCode(ctx context.Context, command VerifyEmailCodeCommand) (BrowserSession, error) {
+	command.Purpose = LoginPurpose
+	return login.verifyCode(ctx, command)
+}
+
+func (login *EmailLogin) VerifyReauthenticationCode(ctx context.Context, command VerifyEmailCodeCommand) (BrowserSession, error) {
+	command.Purpose = ReauthenticatePurpose
+	return login.verifyCode(ctx, command)
+}
+
+func (login *EmailLogin) VerifyLinkCode(ctx context.Context, command VerifyEmailCodeCommand) (BrowserSession, error) {
+	command.Purpose = LinkPurpose
+	return login.verifyCode(ctx, command)
+}
+
+func (login *EmailLogin) verifyCode(ctx context.Context, command VerifyEmailCodeCommand) (BrowserSession, error) {
 	if len(command.Code) != EmailCodeDigits {
 		return BrowserSession{}, ErrInvalidCode
 	}
@@ -240,19 +310,26 @@ func (login *EmailLogin) VerifyCode(ctx context.Context, command VerifyEmailCode
 		ChallengeID:    command.ChallengeID,
 		CodeDigest:     login.credentials.CodeDigest(command.ChallengeID, command.Code),
 		IdempotencyKey: command.IdempotencyKey,
-		RequestDigest:  login.credentials.RequestDigest("verify-email-code", command.ChallengeID, command.Code),
-		SessionID:      uuid.NewString(),
+		RequestDigest: login.credentials.RequestDigest(
+			"verify-email-code", string(command.Purpose), command.ChallengeID,
+			command.Code, command.InitiatingSessionID,
+		),
+		Purpose: command.Purpose, InitiatingSessionID: command.InitiatingSessionID,
+		SessionID: uuid.NewString(),
 	})
 }
 
 type PrepareEmailChallengeCommand struct {
-	ChallengeID    string
-	CanonicalEmail string
-	CodeDigest     [sha256.Size]byte
-	SourceDigest   [sha256.Size]byte
-	PayloadDigest  [sha256.Size]byte
-	IdempotencyKey string
-	RequestDigest  [sha256.Size]byte
+	ChallengeID         string
+	CanonicalEmail      string
+	CodeDigest          [sha256.Size]byte
+	SourceDigest        [sha256.Size]byte
+	PayloadDigest       [sha256.Size]byte
+	IdempotencyKey      string
+	RequestDigest       [sha256.Size]byte
+	Purpose             ProofPurpose
+	TargetUserID        string
+	InitiatingSessionID string
 }
 
 type EmailChallenge struct {
@@ -266,11 +343,13 @@ type EmailChallenge struct {
 }
 
 type VerifyEmailChallengeCommand struct {
-	ChallengeID    string
-	CodeDigest     [sha256.Size]byte
-	IdempotencyKey string
-	RequestDigest  [sha256.Size]byte
-	SessionID      string
+	ChallengeID         string
+	CodeDigest          [sha256.Size]byte
+	IdempotencyKey      string
+	RequestDigest       [sha256.Size]byte
+	SessionID           string
+	Purpose             ProofPurpose
+	InitiatingSessionID string
 }
 
 type EmailSubmissionState string

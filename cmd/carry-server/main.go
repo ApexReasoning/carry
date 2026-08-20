@@ -248,6 +248,10 @@ func run(ctx context.Context, arguments []string, stdout io.Writer, stderr io.Wr
 	if err != nil {
 		return fmt.Errorf("compose external login: %w", err)
 	}
+	identityMethods, err := identity.NewMethods(store, credentials)
+	if err != nil {
+		return fmt.Errorf("compose Identity methods: %w", err)
+	}
 	firstSpace, err := space.NewFirstSpace(store)
 	if err != nil {
 		return fmt.Errorf("compose first Space: %w", err)
@@ -263,6 +267,7 @@ func run(ctx context.Context, arguments []string, stdout io.Writer, stderr io.Wr
 	userIdentityRoutes, err := carryserver.NewUserIdentityRoutes(
 		emailLogin,
 		externalLogin,
+		identityMethods,
 		store,
 		credentials,
 		parsed.externalOrigin,

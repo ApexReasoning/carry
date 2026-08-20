@@ -255,6 +255,39 @@ test("a concurrent other first Space routes only from actual User state", async 
   expect(attemptedCommands[1]).toEqual(attemptedCommands[0]);
 });
 
+test("Settings presents only fixed sign-in method labels and protects the final method", async ({
+  page,
+}) => {
+  const email = derivedEmail(loginEmail, "identity-settings");
+  await page.goto("/");
+  await signInWithEmail(page, emailCaptureFile, email);
+  await page.getByLabel("Your name").fill("Identity User");
+  await page.getByLabel("Space name").fill("Identity Settings");
+  await page.getByRole("button", { name: "Create Space" }).click();
+  await page.getByRole("button", { name: "Settings" }).click();
+
+  await expect(
+    page.getByRole("heading", { name: "Sign-in methods" }),
+  ).toBeVisible();
+  await expect(page.getByText("Email", { exact: true })).toBeVisible();
+  await expect(page.getByText("Google", { exact: true })).toBeVisible();
+  await expect(page.getByText("GitHub", { exact: true })).toBeVisible();
+  await expect(page.getByText(email)).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Remove" })).toBeDisabled();
+  const providerForms = await page
+    .locator(".identity-method-list form")
+    .evaluateAll((forms) =>
+      forms.map((form) => ({
+        action: form.getAttribute("action"),
+        method: form.getAttribute("method"),
+      })),
+    );
+  expect(providerForms).toEqual([
+    { action: "/v1/identity/methods/google/start", method: "post" },
+    { action: "/v1/identity/methods/github/start", method: "post" },
+  ]);
+});
+
 type RecordedMutation = {
   body: string | null;
   idempotencyKey: string | undefined;

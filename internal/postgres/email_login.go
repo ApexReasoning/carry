@@ -25,8 +25,12 @@ func (s *Store) PrepareEmailChallenge(
 	ctx context.Context,
 	command identity.PrepareEmailChallengeCommand,
 ) (identity.EmailChallenge, error) {
+	if command.Purpose == "" {
+		command.Purpose = identity.LoginPurpose
+	}
 	if uuid.Validate(command.ChallengeID) != nil || command.CanonicalEmail == "" ||
-		strings.TrimSpace(command.IdempotencyKey) == "" || len(command.IdempotencyKey) > 255 {
+		strings.TrimSpace(command.IdempotencyKey) == "" || len(command.IdempotencyKey) > 255 ||
+		!validIdentityProofTarget(command.Purpose, command.TargetUserID, command.InitiatingSessionID) {
 		return identity.EmailChallenge{}, errors.New("email challenge command is invalid")
 	}
 	transaction, err := s.pool.Begin(ctx)
@@ -35,6 +39,28 @@ func (s *Store) PrepareEmailChallenge(
 	}
 	defer func() { _ = transaction.Rollback(context.Background()) }()
 	queries := s.queries.WithTx(transaction)
+	if command.Purpose != identity.LoginPurpose {
+		if _, err := queries.LockUserForIdentityChange(ctx, command.TargetUserID); errors.Is(err, pgx.ErrNoRows) {
+			return identity.EmailChallenge{}, identity.ErrUnauthenticated
+		} else if err != nil {
+			return identity.EmailChallenge{}, fmt.Errorf("lock email proof User: %w", err)
+		}
+		if _, _, err := loadIdentitySession(
+			ctx, queries, command.TargetUserID, command.InitiatingSessionID,
+			command.Purpose == identity.LinkPurpose,
+		); err != nil {
+			return identity.EmailChallenge{}, err
+		}
+		if command.Purpose == identity.ReauthenticatePurpose {
+			linkedEmail, err := queries.LoadEmailMethodForUser(ctx, command.TargetUserID)
+			if errors.Is(err, pgx.ErrNoRows) || linkedEmail != command.CanonicalEmail {
+				return identity.EmailChallenge{}, identity.ErrIdentityMethodNotLinked
+			}
+			if err != nil {
+				return identity.EmailChallenge{}, fmt.Errorf("load reauthentication email: %w", err)
+			}
+		}
+	}
 	// Every request takes advisory locks in request-key, email, then source order.
 	// The global request-key lock makes a conflicting insert observable as a
 	// semantic replay instead of leaking the unique constraint as a database error.
@@ -97,10 +123,19 @@ func (s *Store) PrepareEmailChallenge(
 	if err := queries.InvalidateCurrentEmailChallenges(ctx, command.CanonicalEmail); err != nil {
 		return identity.EmailChallenge{}, fmt.Errorf("invalidate previous email challenge: %w", err)
 	}
+	targetUserID, err := nullablePostgresUUID(command.TargetUserID)
+	if err != nil {
+		return identity.EmailChallenge{}, errors.New("email proof target User is invalid")
+	}
+	initiatingSessionID, err := nullablePostgresUUID(command.InitiatingSessionID)
+	if err != nil {
+		return identity.EmailChallenge{}, errors.New("email proof initiating session is invalid")
+	}
 	created, err := queries.CreateEmailChallenge(ctx, dbsqlc.CreateEmailChallengeParams{
 		ChallengeID: command.ChallengeID, CanonicalEmail: command.CanonicalEmail,
 		CodeDigest: command.CodeDigest[:], SourceDigest: command.SourceDigest[:], PayloadDigest: command.PayloadDigest[:],
 		RequestIdempotencyKey: command.IdempotencyKey, RequestDigest: command.RequestDigest[:],
+		Purpose: string(command.Purpose), TargetUserID: targetUserID, InitiatingSessionID: initiatingSessionID,
 	})
 	if err != nil {
 		return identity.EmailChallenge{}, fmt.Errorf("create email challenge: %w", err)
@@ -163,8 +198,12 @@ func (s *Store) VerifyEmailChallenge(
 	ctx context.Context,
 	command identity.VerifyEmailChallengeCommand,
 ) (identity.BrowserSession, error) {
+	if command.Purpose == "" {
+		command.Purpose = identity.LoginPurpose
+	}
 	if uuid.Validate(command.ChallengeID) != nil || uuid.Validate(command.SessionID) != nil ||
-		strings.TrimSpace(command.IdempotencyKey) == "" || len(command.IdempotencyKey) > 255 {
+		strings.TrimSpace(command.IdempotencyKey) == "" || len(command.IdempotencyKey) > 255 ||
+		!validVerifyEmailTarget(command.Purpose, command.InitiatingSessionID) {
 		return identity.BrowserSession{}, identity.ErrInvalidCode
 	}
 	transaction, err := s.pool.Begin(ctx)
@@ -179,6 +218,10 @@ func (s *Store) VerifyEmailChallenge(
 	}
 	if err != nil {
 		return identity.BrowserSession{}, fmt.Errorf("lock email challenge: %w", err)
+	}
+	if challenge.Purpose != string(command.Purpose) ||
+		uuidValue(challenge.InitiatingSessionID) != command.InitiatingSessionID {
+		return identity.BrowserSession{}, identity.ErrInvalidCode
 	}
 	attempt, attemptErr := queries.LoadEmailAttempt(ctx, dbsqlc.LoadEmailAttemptParams{
 		ChallengeID: command.ChallengeID, IdempotencyKey: command.IdempotencyKey,
@@ -203,11 +246,11 @@ func (s *Store) VerifyEmailChallenge(
 		return identity.BrowserSession{}, fmt.Errorf("load email verification attempt: %w", attemptErr)
 	}
 	databaseTime, err := queries.EmailLoginDatabaseTime(ctx)
-	if err != nil {
+	if err != nil || !databaseTime.Valid {
 		return identity.BrowserSession{}, fmt.Errorf("load email verification time: %w", err)
 	}
 	usable := !challenge.InvalidatedAt.Valid && !challenge.ConsumedAt.Valid &&
-		challenge.ExpiresAt.Valid && databaseTime.Valid && challenge.ExpiresAt.Time.After(databaseTime.Time) &&
+		challenge.ExpiresAt.Valid && challenge.ExpiresAt.Time.After(databaseTime.Time) &&
 		challenge.AttemptsUsed < identity.EmailCodeAttemptLimit &&
 		challenge.SubmissionState != string(identity.EmailSubmissionRejected)
 	if !usable {
@@ -232,31 +275,25 @@ func (s *Store) VerifyEmailChallenge(
 		return identity.BrowserSession{}, identity.ErrInvalidCode
 	}
 
-	userID, err := queries.LoadEmailIdentity(ctx, challenge.CanonicalEmail)
-	if errors.Is(err, pgx.ErrNoRows) {
-		userID = uuid.NewString()
-		if err := queries.CreateEmailUser(ctx, userID); err != nil {
-			return identity.BrowserSession{}, fmt.Errorf("create email User: %w", err)
-		}
-		if err := queries.CreateEmailIdentity(ctx, dbsqlc.CreateEmailIdentityParams{
-			CanonicalEmail: challenge.CanonicalEmail, UserID: userID,
-		}); err != nil {
-			return identity.BrowserSession{}, fmt.Errorf("create email identity: %w", err)
-		}
-	} else if err != nil {
-		return identity.BrowserSession{}, fmt.Errorf("load email identity: %w", err)
+	var created dbsqlc.BrowserSession
+	switch command.Purpose {
+	case identity.LoginPurpose:
+		created, err = completeEmailLogin(ctx, queries, challenge, command.SessionID)
+	case identity.ReauthenticatePurpose:
+		created, err = completeEmailReauthentication(ctx, queries, challenge, command.SessionID)
+	case identity.LinkPurpose:
+		created, err = completeEmailLink(ctx, queries, challenge, command.SessionID)
+	default:
+		err = identity.ErrInvalidCode
 	}
-	created, err := queries.CreateBrowserSession(ctx, dbsqlc.CreateBrowserSessionParams{
-		SessionID: command.SessionID, UserID: userID,
-	})
 	if err != nil {
-		return identity.BrowserSession{}, fmt.Errorf("create email browser session: %w", err)
+		return identity.BrowserSession{}, err
 	}
-	userUUID, err := postgresUUID(userID)
+	userUUID, err := postgresUUID(created.UserID)
 	if err != nil {
 		return identity.BrowserSession{}, fmt.Errorf("parse email User identity: %w", err)
 	}
-	sessionUUID, err := postgresUUID(command.SessionID)
+	sessionUUID, err := postgresUUID(created.SessionID)
 	if err != nil {
 		return identity.BrowserSession{}, fmt.Errorf("parse browser session identity: %w", err)
 	}
@@ -277,7 +314,149 @@ func (s *Store) VerifyEmailChallenge(
 	if err := transaction.Commit(ctx); err != nil {
 		return identity.BrowserSession{}, fmt.Errorf("commit email verification: %w", err)
 	}
-	return identity.BrowserSession{SessionID: created.SessionID, UserID: created.UserID, ExpiresAt: created.ExpiresAt.Time}, nil
+	return browserSession(created, command.Purpose, identity.EmailMethod), nil
+}
+
+func completeEmailLogin(
+	ctx context.Context,
+	queries *dbsqlc.Queries,
+	challenge dbsqlc.EmailLoginChallenge,
+	sessionID string,
+) (dbsqlc.BrowserSession, error) {
+	if err := queries.LockEmailLogin(ctx, challenge.CanonicalEmail); err != nil {
+		return dbsqlc.BrowserSession{}, fmt.Errorf("lock email identity: %w", err)
+	}
+	userID, err := queries.LoadEmailIdentity(ctx, challenge.CanonicalEmail)
+	if errors.Is(err, pgx.ErrNoRows) {
+		userID = uuid.NewString()
+		if err := queries.CreateEmailUser(ctx, userID); err != nil {
+			return dbsqlc.BrowserSession{}, fmt.Errorf("create email User: %w", err)
+		}
+		if err := queries.CreateEmailIdentity(ctx, dbsqlc.CreateEmailIdentityParams{
+			CanonicalEmail: challenge.CanonicalEmail, UserID: userID,
+		}); err != nil {
+			return dbsqlc.BrowserSession{}, fmt.Errorf("create email identity: %w", err)
+		}
+	} else if err != nil {
+		return dbsqlc.BrowserSession{}, fmt.Errorf("load email identity: %w", err)
+	} else {
+		if _, err := queries.LockUserForIdentityChange(ctx, userID); err != nil {
+			return dbsqlc.BrowserSession{}, identity.ErrUnauthenticated
+		}
+		currentOwner, err := queries.LoadEmailIdentity(ctx, challenge.CanonicalEmail)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return dbsqlc.BrowserSession{}, identity.ErrIdentityMethodNotLinked
+		}
+		if err != nil {
+			return dbsqlc.BrowserSession{}, fmt.Errorf("revalidate email identity: %w", err)
+		}
+		if currentOwner != userID {
+			return dbsqlc.BrowserSession{}, identity.ErrIdentityMethodNotLinked
+		}
+	}
+	created, err := queries.CreateBrowserSession(ctx, dbsqlc.CreateBrowserSessionParams{
+		SessionID: sessionID, UserID: userID, IdentityProofMethod: string(identity.EmailMethod),
+	})
+	if err != nil {
+		return dbsqlc.BrowserSession{}, fmt.Errorf("create email Browser Session: %w", err)
+	}
+	return created, nil
+}
+
+func completeEmailReauthentication(
+	ctx context.Context,
+	queries *dbsqlc.Queries,
+	challenge dbsqlc.EmailLoginChallenge,
+	sessionID string,
+) (dbsqlc.BrowserSession, error) {
+	if err := queries.LockEmailLogin(ctx, challenge.CanonicalEmail); err != nil {
+		return dbsqlc.BrowserSession{}, fmt.Errorf("lock reauthenticated email identity: %w", err)
+	}
+	owner, err := queries.LoadEmailIdentity(ctx, challenge.CanonicalEmail)
+	userID := uuidValue(challenge.TargetUserID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return dbsqlc.BrowserSession{}, identity.ErrIdentityMethodNotLinked
+	}
+	if err != nil {
+		return dbsqlc.BrowserSession{}, fmt.Errorf("load reauthenticated email identity: %w", err)
+	}
+	if owner != userID {
+		return dbsqlc.BrowserSession{}, identity.ErrIdentityMethodNotLinked
+	}
+	if _, err := queries.LockUserForIdentityChange(ctx, userID); err != nil {
+		return dbsqlc.BrowserSession{}, identity.ErrUnauthenticated
+	}
+	if _, _, err := loadIdentitySession(ctx, queries, userID, uuidValue(challenge.InitiatingSessionID), false); err != nil {
+		return dbsqlc.BrowserSession{}, err
+	}
+	currentOwner, err := queries.LoadEmailIdentity(ctx, challenge.CanonicalEmail)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return dbsqlc.BrowserSession{}, identity.ErrIdentityMethodNotLinked
+	}
+	if err != nil {
+		return dbsqlc.BrowserSession{}, fmt.Errorf("revalidate reauthenticated email identity: %w", err)
+	}
+	if currentOwner != userID {
+		return dbsqlc.BrowserSession{}, identity.ErrIdentityMethodNotLinked
+	}
+	if rows, err := queries.RevokeExactBrowserSession(ctx, uuidValue(challenge.InitiatingSessionID)); err != nil || rows != 1 {
+		return dbsqlc.BrowserSession{}, identity.ErrUnauthenticated
+	}
+	created, err := queries.CreateBrowserSession(ctx, dbsqlc.CreateBrowserSessionParams{
+		SessionID: sessionID, UserID: userID, IdentityProofMethod: string(identity.EmailMethod),
+	})
+	if err != nil {
+		return dbsqlc.BrowserSession{}, fmt.Errorf("create reauthenticated Browser Session: %w", err)
+	}
+	return created, nil
+}
+
+func completeEmailLink(
+	ctx context.Context,
+	queries *dbsqlc.Queries,
+	challenge dbsqlc.EmailLoginChallenge,
+	sessionID string,
+) (dbsqlc.BrowserSession, error) {
+	if err := queries.LockEmailLogin(ctx, challenge.CanonicalEmail); err != nil {
+		return dbsqlc.BrowserSession{}, fmt.Errorf("lock linked email identity: %w", err)
+	}
+	candidateOwner, candidateErr := queries.LoadEmailIdentity(ctx, challenge.CanonicalEmail)
+	if candidateErr != nil && !errors.Is(candidateErr, pgx.ErrNoRows) {
+		return dbsqlc.BrowserSession{}, fmt.Errorf("load candidate email identity: %w", candidateErr)
+	}
+	userID := uuidValue(challenge.TargetUserID)
+	if _, err := queries.LockUserForIdentityChange(ctx, userID); err != nil {
+		return dbsqlc.BrowserSession{}, identity.ErrUnauthenticated
+	}
+	if _, _, err := loadIdentitySession(ctx, queries, userID, uuidValue(challenge.InitiatingSessionID), true); err != nil {
+		return dbsqlc.BrowserSession{}, err
+	}
+	if _, err := queries.LoadEmailMethodForUser(ctx, userID); err == nil {
+		return dbsqlc.BrowserSession{}, identity.ErrIdentityMethodAlreadyLinked
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return dbsqlc.BrowserSession{}, fmt.Errorf("load existing email method: %w", err)
+	}
+	if candidateErr == nil {
+		if candidateOwner == userID {
+			return dbsqlc.BrowserSession{}, identity.ErrIdentityMethodAlreadyLinked
+		}
+		return dbsqlc.BrowserSession{}, identity.ErrIdentityMethodOccupied
+	}
+	if err := queries.CreateEmailIdentity(ctx, dbsqlc.CreateEmailIdentityParams{
+		CanonicalEmail: challenge.CanonicalEmail, UserID: userID,
+	}); err != nil {
+		return dbsqlc.BrowserSession{}, fmt.Errorf("link email identity: %w", err)
+	}
+	if _, err := queries.RevokeUserBrowserSessions(ctx, userID); err != nil {
+		return dbsqlc.BrowserSession{}, fmt.Errorf("revoke Browser Sessions after email link: %w", err)
+	}
+	created, err := queries.CreateBrowserSession(ctx, dbsqlc.CreateBrowserSessionParams{
+		SessionID: sessionID, UserID: userID, IdentityProofMethod: string(identity.EmailMethod),
+	})
+	if err != nil {
+		return dbsqlc.BrowserSession{}, fmt.Errorf("create email link replacement Session: %w", err)
+	}
+	return created, nil
 }
 
 func loadEmailBrowserSession(
@@ -286,16 +465,29 @@ func loadEmailBrowserSession(
 	challenge dbsqlc.EmailLoginChallenge,
 ) (identity.BrowserSession, error) {
 	if !challenge.BrowserSessionID.Valid {
-		return identity.BrowserSession{}, errors.New("consumed email challenge has no browser session")
+		return identity.BrowserSession{}, errors.New("consumed email challenge has no Browser Session")
 	}
-	session, err := queries.LoadBrowserSessionByID(ctx, uuidValue(challenge.BrowserSessionID))
-	if err != nil {
-		return identity.BrowserSession{}, fmt.Errorf("load replayed browser session: %w", err)
-	}
-	if session.RevokedAt.Valid {
+	session, err := queries.LoadActiveBrowserSessionByID(ctx, uuidValue(challenge.BrowserSessionID))
+	if errors.Is(err, pgx.ErrNoRows) {
 		return identity.BrowserSession{}, identity.ErrUnauthenticated
 	}
-	return identity.BrowserSession{SessionID: session.SessionID, UserID: session.UserID, ExpiresAt: session.ExpiresAt.Time}, nil
+	if err != nil {
+		return identity.BrowserSession{}, fmt.Errorf("load replayed active Browser Session: %w", err)
+	}
+	return identity.BrowserSession{
+		SessionID: session.SessionID, UserID: session.UserID,
+		ExpiresAt: session.ExpiresAt.Time, IdentityProvedAt: session.IdentityProvedAt.Time,
+		IdentityProofMethod: identity.EmailMethod,
+		Purpose:             identity.ProofPurpose(challenge.Purpose),
+	}, nil
+}
+
+func validVerifyEmailTarget(purpose identity.ProofPurpose, initiatingSessionID string) bool {
+	if purpose == identity.LoginPurpose {
+		return initiatingSessionID == ""
+	}
+	return (purpose == identity.ReauthenticatePurpose || purpose == identity.LinkPurpose) &&
+		uuid.Validate(initiatingSessionID) == nil
 }
 
 func restoreEmailChallenge(row dbsqlc.EmailLoginChallenge, databaseTime time.Time) identity.EmailChallenge {

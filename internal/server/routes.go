@@ -29,6 +29,7 @@ func NewUserAuthentication(
 type UserIdentityRoutes struct {
 	email    emailLoginAPI
 	external externalLoginAPI
+	methods  identityMethodsAPI
 	sessions browserSessionAPI
 	user     userAPI
 }
@@ -36,22 +37,24 @@ type UserIdentityRoutes struct {
 func NewUserIdentityRoutes(
 	emailLogin EmailLogin,
 	externalLogin ExternalLogin,
+	methods IdentityMethods,
 	sessions BrowserSessions,
 	credentials identity.Credentials,
 	externalOrigin ExternalOrigin,
 	requestSources RequestSource,
 	memberships MembershipReader,
 ) (*UserIdentityRoutes, error) {
-	if emailLogin == nil || externalLogin == nil || sessions == nil || memberships == nil || externalOrigin.value == "" {
+	if emailLogin == nil || externalLogin == nil || methods == nil || sessions == nil || memberships == nil || externalOrigin.value == "" {
 		return nil, errors.New("User identity route dependencies are required")
 	}
 	return &UserIdentityRoutes{
 		email: emailLoginAPI{
-			login: emailLogin, credentials: credentials, requestSources: requestSources,
+			login: emailLogin, credentials: credentials, requestSources: requestSources, origin: externalOrigin,
 		},
 		external: externalLoginAPI{
 			login: externalLogin, sessions: sessions, credentials: credentials, origin: externalOrigin,
 		},
+		methods:  identityMethodsAPI{methods: methods, credentials: credentials, origin: externalOrigin},
 		sessions: browserSessionAPI{sessions: sessions, credentials: credentials},
 		user:     userAPI{memberships: memberships},
 	}, nil
@@ -64,7 +67,20 @@ func (routes *UserIdentityRoutes) mountPublic(router chi.Router) {
 	router.Get("/auth/google/callback", routes.external.callbackGoogle)
 	router.Post("/auth/github/start", routes.external.startGitHub)
 	router.Get("/auth/github/callback", routes.external.callbackGitHub)
+	router.Post("/identity/reauthentication/email/challenges/{challenge_id}/verify", routes.email.verifyReauthenticationCode)
+	router.Post("/identity/methods/email/challenges/{challenge_id}/verify", routes.email.verifyLinkCode)
+	router.Delete("/identity/methods/{method}", routes.methods.unlink)
 	router.Delete("/browser/sessions/current", routes.sessions.revokeCurrent)
+}
+
+func (routes *UserIdentityRoutes) mountBrowser(router chi.Router) {
+	router.Get("/identity/methods", routes.methods.list)
+	router.Post("/identity/reauthentication/email/challenges", routes.email.requestReauthenticationCode)
+	router.Post("/identity/reauthentication/google/start", routes.external.startGoogleReauthentication)
+	router.Post("/identity/reauthentication/github/start", routes.external.startGitHubReauthentication)
+	router.Post("/identity/methods/email/challenges", routes.email.requestLinkCode)
+	router.Post("/identity/methods/google/start", routes.external.startGoogleLink)
+	router.Post("/identity/methods/github/start", routes.external.startGitHubLink)
 }
 
 func (routes *UserIdentityRoutes) mountUser(router chi.Router) {
@@ -182,6 +198,7 @@ func (routes *UserRoutes) mount(router chi.Router) {
 		routes.identity.mountPublic(userSurface)
 		userSurface.Group(func(browser chi.Router) {
 			browser.Use(routes.authentication.authenticator.requireBrowserUser)
+			routes.identity.mountBrowser(browser)
 			routes.spaces.mount(browser)
 		})
 		userSurface.Group(func(user chi.Router) {

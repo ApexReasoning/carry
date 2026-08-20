@@ -13,6 +13,11 @@ export type EmailChallenge = {
   expires_at: string;
 };
 
+export type IdentityMethods = {
+  methods: Array<"email" | "google" | "github">;
+  reauthentication_required: boolean;
+};
+
 export type Membership = {
   space_id: string;
   name: string;
@@ -314,6 +319,370 @@ export type CompleteGitHubLoginErrors = {
 
 export type CompleteGitHubLoginError =
   CompleteGitHubLoginErrors[keyof CompleteGitHubLoginErrors];
+
+export type LoadIdentityMethodsData = {
+  body?: never;
+  path?: never;
+  query?: never;
+  url: "/v1/identity/methods";
+};
+
+export type LoadIdentityMethodsErrors = {
+  /**
+   * Request rejected
+   */
+  401: ApiError;
+};
+
+export type LoadIdentityMethodsError =
+  LoadIdentityMethodsErrors[keyof LoadIdentityMethodsErrors];
+
+export type LoadIdentityMethodsResponses = {
+  /**
+   * Fixed linked-method labels and recent-proof requirement
+   */
+  200: IdentityMethods;
+};
+
+export type LoadIdentityMethodsResponse =
+  LoadIdentityMethodsResponses[keyof LoadIdentityMethodsResponses];
+
+export type RequestEmailReauthenticationCodeData = {
+  body: {
+    challenge_id: string;
+  };
+  headers: {
+    "Idempotency-Key": string;
+  };
+  path?: never;
+  query?: never;
+  url: "/v1/identity/reauthentication/email/challenges";
+};
+
+export type RequestEmailReauthenticationCodeErrors = {
+  /**
+   * Request rejected
+   */
+  400: ApiError;
+  /**
+   * Request rejected
+   */
+  401: ApiError;
+  /**
+   * Request rejected
+   */
+  409: ApiError;
+  /**
+   * Request rejected
+   */
+  429: ApiError;
+  /**
+   * Request rejected
+   */
+  503: ApiError;
+};
+
+export type RequestEmailReauthenticationCodeError =
+  RequestEmailReauthenticationCodeErrors[keyof RequestEmailReauthenticationCodeErrors];
+
+export type RequestEmailReauthenticationCodeResponses = {
+  /**
+   * Confirmation code submitted to the linked email method
+   */
+  202: EmailChallenge;
+};
+
+export type RequestEmailReauthenticationCodeResponse =
+  RequestEmailReauthenticationCodeResponses[keyof RequestEmailReauthenticationCodeResponses];
+
+export type VerifyEmailReauthenticationCodeData = {
+  body: {
+    code: string;
+  };
+  headers: {
+    "Idempotency-Key": string;
+  };
+  path: {
+    challengeID: string;
+  };
+  query?: never;
+  url: "/v1/identity/reauthentication/email/challenges/{challengeID}/verify";
+};
+
+export type VerifyEmailReauthenticationCodeErrors = {
+  /**
+   * Request rejected
+   */
+  401: ApiError;
+  /**
+   * Request rejected
+   */
+  409: ApiError;
+};
+
+export type VerifyEmailReauthenticationCodeError =
+  VerifyEmailReauthenticationCodeErrors[keyof VerifyEmailReauthenticationCodeErrors];
+
+export type VerifyEmailReauthenticationCodeResponses = {
+  /**
+   * Exact current method confirmed and Browser Session rotated
+   */
+  204: void;
+};
+
+export type VerifyEmailReauthenticationCodeResponse =
+  VerifyEmailReauthenticationCodeResponses[keyof VerifyEmailReauthenticationCodeResponses];
+
+export type StartGoogleReauthenticationData = {
+  body?: never;
+  path?: never;
+  query?: never;
+  url: "/v1/identity/reauthentication/google/start";
+};
+
+export type StartGoogleReauthenticationErrors = {
+  /**
+   * Request rejected
+   */
+  400: ApiError;
+  /**
+   * Request rejected
+   */
+  401: ApiError;
+  /**
+   * Request rejected
+   */
+  409: ApiError;
+  /**
+   * Request rejected
+   */
+  428: ApiError;
+};
+
+export type StartGoogleReauthenticationError =
+  StartGoogleReauthenticationErrors[keyof StartGoogleReauthenticationErrors];
+
+export type StartGitHubReauthenticationData = {
+  body?: never;
+  path?: never;
+  query?: never;
+  url: "/v1/identity/reauthentication/github/start";
+};
+
+export type StartGitHubReauthenticationErrors = {
+  /**
+   * Request rejected
+   */
+  400: ApiError;
+  /**
+   * Request rejected
+   */
+  401: ApiError;
+  /**
+   * Request rejected
+   */
+  409: ApiError;
+};
+
+export type StartGitHubReauthenticationError =
+  StartGitHubReauthenticationErrors[keyof StartGitHubReauthenticationErrors];
+
+export type RequestEmailLinkCodeData = {
+  body: {
+    challenge_id: string;
+    email: string;
+  };
+  headers: {
+    "Idempotency-Key": string;
+  };
+  path?: never;
+  query?: never;
+  url: "/v1/identity/methods/email/challenges";
+};
+
+export type RequestEmailLinkCodeErrors = {
+  /**
+   * Request rejected
+   */
+  400: ApiError;
+  /**
+   * Request rejected
+   */
+  401: ApiError;
+  /**
+   * Request rejected
+   */
+  409: ApiError;
+  /**
+   * Request rejected
+   */
+  428: ApiError;
+  /**
+   * Request rejected
+   */
+  429: ApiError;
+  /**
+   * Request rejected
+   */
+  503: ApiError;
+};
+
+export type RequestEmailLinkCodeError =
+  RequestEmailLinkCodeErrors[keyof RequestEmailLinkCodeErrors];
+
+export type RequestEmailLinkCodeResponses = {
+  /**
+   * Candidate email proof submitted
+   */
+  202: EmailChallenge;
+};
+
+export type RequestEmailLinkCodeResponse =
+  RequestEmailLinkCodeResponses[keyof RequestEmailLinkCodeResponses];
+
+export type VerifyEmailLinkCodeData = {
+  body: {
+    code: string;
+  };
+  headers: {
+    "Idempotency-Key": string;
+  };
+  path: {
+    challengeID: string;
+  };
+  query?: never;
+  url: "/v1/identity/methods/email/challenges/{challengeID}/verify";
+};
+
+export type VerifyEmailLinkCodeErrors = {
+  /**
+   * Request rejected
+   */
+  401: ApiError;
+  /**
+   * Request rejected
+   */
+  409: ApiError;
+  /**
+   * Request rejected
+   */
+  428: ApiError;
+};
+
+export type VerifyEmailLinkCodeError =
+  VerifyEmailLinkCodeErrors[keyof VerifyEmailLinkCodeErrors];
+
+export type VerifyEmailLinkCodeResponses = {
+  /**
+   * Email linked and all pre-change Sessions rotated
+   */
+  204: void;
+};
+
+export type VerifyEmailLinkCodeResponse =
+  VerifyEmailLinkCodeResponses[keyof VerifyEmailLinkCodeResponses];
+
+export type StartGoogleLinkData = {
+  body?: never;
+  path?: never;
+  query?: never;
+  url: "/v1/identity/methods/google/start";
+};
+
+export type StartGoogleLinkErrors = {
+  /**
+   * Request rejected
+   */
+  400: ApiError;
+  /**
+   * Request rejected
+   */
+  401: ApiError;
+  /**
+   * Request rejected
+   */
+  409: ApiError;
+  /**
+   * Request rejected
+   */
+  428: ApiError;
+};
+
+export type StartGoogleLinkError =
+  StartGoogleLinkErrors[keyof StartGoogleLinkErrors];
+
+export type StartGitHubLinkData = {
+  body?: never;
+  path?: never;
+  query?: never;
+  url: "/v1/identity/methods/github/start";
+};
+
+export type StartGitHubLinkErrors = {
+  /**
+   * Request rejected
+   */
+  400: ApiError;
+  /**
+   * Request rejected
+   */
+  401: ApiError;
+  /**
+   * Request rejected
+   */
+  409: ApiError;
+  /**
+   * Request rejected
+   */
+  428: ApiError;
+};
+
+export type StartGitHubLinkError =
+  StartGitHubLinkErrors[keyof StartGitHubLinkErrors];
+
+export type UnlinkIdentityMethodData = {
+  body?: never;
+  headers: {
+    "Idempotency-Key": string;
+  };
+  path: {
+    method: "email" | "google" | "github";
+  };
+  query?: never;
+  url: "/v1/identity/methods/{method}";
+};
+
+export type UnlinkIdentityMethodErrors = {
+  /**
+   * Request rejected
+   */
+  400: ApiError;
+  /**
+   * Request rejected
+   */
+  401: ApiError;
+  /**
+   * Request rejected
+   */
+  409: ApiError;
+  /**
+   * Request rejected
+   */
+  428: ApiError;
+};
+
+export type UnlinkIdentityMethodError =
+  UnlinkIdentityMethodErrors[keyof UnlinkIdentityMethodErrors];
+
+export type UnlinkIdentityMethodResponses = {
+  /**
+   * Method unlinked and all pre-change Sessions rotated
+   */
+  204: void;
+};
+
+export type UnlinkIdentityMethodResponse =
+  UnlinkIdentityMethodResponses[keyof UnlinkIdentityMethodResponses];
 
 export type RevokeCurrentBrowserSessionData = {
   body?: never;

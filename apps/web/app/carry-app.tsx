@@ -1,5 +1,8 @@
+import { useState } from "react";
+
 import { ConversationPanel } from "./features/conversation/conversation-panel";
 import { FirstSpace } from "./features/user-session/first-space";
+import { IdentityMethodSettings } from "./features/user-session/identity-methods";
 import { useUserSession } from "./features/user-session/use-user-session";
 import { UserEntry } from "./features/user-session/user-entry";
 import { CreateWorkForm } from "./features/works/create-work-form";
@@ -8,6 +11,7 @@ import { WorkDetail } from "./features/works/work-detail";
 import { WorkList } from "./features/works/work-list";
 
 export function App() {
+  const [settingsOpen, setSettingsOpen] = useState(hasIdentityChangeStatus);
   const session = useUserSession();
   const board = useWorkBoard(session.user);
   const busy = session.busy || board.busy;
@@ -136,6 +140,14 @@ export function App() {
           <button
             className="ghost-button"
             type="button"
+            onClick={() => setSettingsOpen((open) => !open)}
+            disabled={busy}
+          >
+            Settings
+          </button>
+          <button
+            className="ghost-button"
+            type="button"
             onClick={() => void session.signOut()}
             disabled={busy}
           >
@@ -145,6 +157,9 @@ export function App() {
       </header>
 
       <main className="workspace">
+        {settingsOpen ? (
+          <IdentityMethodSettings onClose={() => setSettingsOpen(false)} />
+        ) : null}
         <div className="workspace-intro">
           <div>
             <p className="eyebrow">Shared responsibility</p>
@@ -210,4 +225,8 @@ export function App() {
       </main>
     </div>
   );
+}
+
+function hasIdentityChangeStatus(): boolean {
+  return new URL(window.location.href).searchParams.has("identity_change");
 }

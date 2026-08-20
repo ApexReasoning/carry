@@ -37,12 +37,21 @@ import type {
   LoadCurrentUserData,
   LoadCurrentUserErrors,
   LoadCurrentUserResponses,
+  LoadIdentityMethodsData,
+  LoadIdentityMethodsErrors,
+  LoadIdentityMethodsResponses,
   LoadWorkData,
   LoadWorkErrors,
   LoadWorkResponses,
   RequestEmailCodeData,
   RequestEmailCodeErrors,
   RequestEmailCodeResponses,
+  RequestEmailLinkCodeData,
+  RequestEmailLinkCodeErrors,
+  RequestEmailLinkCodeResponses,
+  RequestEmailReauthenticationCodeData,
+  RequestEmailReauthenticationCodeErrors,
+  RequestEmailReauthenticationCodeResponses,
   RetryWorkData,
   RetryWorkErrors,
   RetryWorkResponses,
@@ -55,13 +64,30 @@ import type {
   SendConversationMessageData,
   SendConversationMessageErrors,
   SendConversationMessageResponses,
+  StartGitHubLinkData,
+  StartGitHubLinkErrors,
   StartGitHubLoginData,
   StartGitHubLoginErrors,
+  StartGitHubReauthenticationData,
+  StartGitHubReauthenticationErrors,
+  StartGoogleLinkData,
+  StartGoogleLinkErrors,
   StartGoogleLoginData,
   StartGoogleLoginErrors,
+  StartGoogleReauthenticationData,
+  StartGoogleReauthenticationErrors,
+  UnlinkIdentityMethodData,
+  UnlinkIdentityMethodErrors,
+  UnlinkIdentityMethodResponses,
   VerifyEmailCodeData,
   VerifyEmailCodeErrors,
   VerifyEmailCodeResponses,
+  VerifyEmailLinkCodeData,
+  VerifyEmailLinkCodeErrors,
+  VerifyEmailLinkCodeResponses,
+  VerifyEmailReauthenticationCodeData,
+  VerifyEmailReauthenticationCodeErrors,
+  VerifyEmailReauthenticationCodeResponses,
 } from "./types.gen";
 import {
   zAcceptWorkReviewResponse,
@@ -72,13 +98,19 @@ import {
   zListConversationMessagesResponse,
   zListWorksResponse,
   zLoadCurrentUserResponse,
+  zLoadIdentityMethodsResponse,
   zLoadWorkResponse,
   zRequestEmailCodeResponse,
+  zRequestEmailLinkCodeResponse,
+  zRequestEmailReauthenticationCodeResponse,
   zRetryWorkResponse,
   zRevokeCurrentBrowserSessionResponse,
   zRevokeMachineResponse,
   zSendConversationMessageResponse,
+  zUnlinkIdentityMethodResponse,
   zVerifyEmailCodeResponse,
+  zVerifyEmailLinkCodeResponse,
+  zVerifyEmailReauthenticationCodeResponse,
 } from "./zod.gen";
 
 export type Options<
@@ -178,6 +210,256 @@ export const completeGitHubLogin = <ThrowOnError extends boolean = false>(
     CompleteGitHubLoginErrors,
     ThrowOnError
   >({ url: "/v1/auth/github/callback", ...options });
+
+export const loadIdentityMethods = <ThrowOnError extends boolean = false>(
+  options?: Options<LoadIdentityMethodsData, ThrowOnError>,
+): RequestResult<
+  LoadIdentityMethodsResponses,
+  LoadIdentityMethodsErrors,
+  ThrowOnError
+> =>
+  (options?.client ?? client).get<
+    LoadIdentityMethodsResponses,
+    LoadIdentityMethodsErrors,
+    ThrowOnError
+  >({
+    responseValidator: async (data) =>
+      await zLoadIdentityMethodsResponse.parseAsync(data),
+    security: [
+      {
+        in: "cookie",
+        name: "__Host-carry_session",
+        type: "apiKey",
+      },
+    ],
+    url: "/v1/identity/methods",
+    ...options,
+  });
+
+export const requestEmailReauthenticationCode = <
+  ThrowOnError extends boolean = false,
+>(
+  options: Options<RequestEmailReauthenticationCodeData, ThrowOnError>,
+): RequestResult<
+  RequestEmailReauthenticationCodeResponses,
+  RequestEmailReauthenticationCodeErrors,
+  ThrowOnError
+> =>
+  (options.client ?? client).post<
+    RequestEmailReauthenticationCodeResponses,
+    RequestEmailReauthenticationCodeErrors,
+    ThrowOnError
+  >({
+    responseValidator: async (data) =>
+      await zRequestEmailReauthenticationCodeResponse.parseAsync(data),
+    security: [
+      {
+        in: "cookie",
+        name: "__Host-carry_session",
+        type: "apiKey",
+      },
+    ],
+    url: "/v1/identity/reauthentication/email/challenges",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+
+export const verifyEmailReauthenticationCode = <
+  ThrowOnError extends boolean = false,
+>(
+  options: Options<VerifyEmailReauthenticationCodeData, ThrowOnError>,
+): RequestResult<
+  VerifyEmailReauthenticationCodeResponses,
+  VerifyEmailReauthenticationCodeErrors,
+  ThrowOnError
+> =>
+  (options.client ?? client).post<
+    VerifyEmailReauthenticationCodeResponses,
+    VerifyEmailReauthenticationCodeErrors,
+    ThrowOnError
+  >({
+    responseValidator: async (data) =>
+      await zVerifyEmailReauthenticationCodeResponse.parseAsync(data),
+    security: [
+      {
+        in: "cookie",
+        name: "__Host-carry_session",
+        type: "apiKey",
+      },
+    ],
+    url: "/v1/identity/reauthentication/email/challenges/{challengeID}/verify",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+
+export const startGoogleReauthentication = <
+  ThrowOnError extends boolean = false,
+>(
+  options?: Options<StartGoogleReauthenticationData, ThrowOnError>,
+): RequestResult<unknown, StartGoogleReauthenticationErrors, ThrowOnError> =>
+  (options?.client ?? client).post<
+    unknown,
+    StartGoogleReauthenticationErrors,
+    ThrowOnError
+  >({
+    security: [
+      {
+        in: "cookie",
+        name: "__Host-carry_session",
+        type: "apiKey",
+      },
+    ],
+    url: "/v1/identity/reauthentication/google/start",
+    ...options,
+  });
+
+export const startGitHubReauthentication = <
+  ThrowOnError extends boolean = false,
+>(
+  options?: Options<StartGitHubReauthenticationData, ThrowOnError>,
+): RequestResult<unknown, StartGitHubReauthenticationErrors, ThrowOnError> =>
+  (options?.client ?? client).post<
+    unknown,
+    StartGitHubReauthenticationErrors,
+    ThrowOnError
+  >({
+    security: [
+      {
+        in: "cookie",
+        name: "__Host-carry_session",
+        type: "apiKey",
+      },
+    ],
+    url: "/v1/identity/reauthentication/github/start",
+    ...options,
+  });
+
+export const requestEmailLinkCode = <ThrowOnError extends boolean = false>(
+  options: Options<RequestEmailLinkCodeData, ThrowOnError>,
+): RequestResult<
+  RequestEmailLinkCodeResponses,
+  RequestEmailLinkCodeErrors,
+  ThrowOnError
+> =>
+  (options.client ?? client).post<
+    RequestEmailLinkCodeResponses,
+    RequestEmailLinkCodeErrors,
+    ThrowOnError
+  >({
+    responseValidator: async (data) =>
+      await zRequestEmailLinkCodeResponse.parseAsync(data),
+    security: [
+      {
+        in: "cookie",
+        name: "__Host-carry_session",
+        type: "apiKey",
+      },
+    ],
+    url: "/v1/identity/methods/email/challenges",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+
+export const verifyEmailLinkCode = <ThrowOnError extends boolean = false>(
+  options: Options<VerifyEmailLinkCodeData, ThrowOnError>,
+): RequestResult<
+  VerifyEmailLinkCodeResponses,
+  VerifyEmailLinkCodeErrors,
+  ThrowOnError
+> =>
+  (options.client ?? client).post<
+    VerifyEmailLinkCodeResponses,
+    VerifyEmailLinkCodeErrors,
+    ThrowOnError
+  >({
+    responseValidator: async (data) =>
+      await zVerifyEmailLinkCodeResponse.parseAsync(data),
+    security: [
+      {
+        in: "cookie",
+        name: "__Host-carry_session",
+        type: "apiKey",
+      },
+    ],
+    url: "/v1/identity/methods/email/challenges/{challengeID}/verify",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+
+export const startGoogleLink = <ThrowOnError extends boolean = false>(
+  options?: Options<StartGoogleLinkData, ThrowOnError>,
+): RequestResult<unknown, StartGoogleLinkErrors, ThrowOnError> =>
+  (options?.client ?? client).post<
+    unknown,
+    StartGoogleLinkErrors,
+    ThrowOnError
+  >({
+    security: [
+      {
+        in: "cookie",
+        name: "__Host-carry_session",
+        type: "apiKey",
+      },
+    ],
+    url: "/v1/identity/methods/google/start",
+    ...options,
+  });
+
+export const startGitHubLink = <ThrowOnError extends boolean = false>(
+  options?: Options<StartGitHubLinkData, ThrowOnError>,
+): RequestResult<unknown, StartGitHubLinkErrors, ThrowOnError> =>
+  (options?.client ?? client).post<
+    unknown,
+    StartGitHubLinkErrors,
+    ThrowOnError
+  >({
+    security: [
+      {
+        in: "cookie",
+        name: "__Host-carry_session",
+        type: "apiKey",
+      },
+    ],
+    url: "/v1/identity/methods/github/start",
+    ...options,
+  });
+
+export const unlinkIdentityMethod = <ThrowOnError extends boolean = false>(
+  options: Options<UnlinkIdentityMethodData, ThrowOnError>,
+): RequestResult<
+  UnlinkIdentityMethodResponses,
+  UnlinkIdentityMethodErrors,
+  ThrowOnError
+> =>
+  (options.client ?? client).delete<
+    UnlinkIdentityMethodResponses,
+    UnlinkIdentityMethodErrors,
+    ThrowOnError
+  >({
+    responseValidator: async (data) =>
+      await zUnlinkIdentityMethodResponse.parseAsync(data),
+    security: [
+      {
+        in: "cookie",
+        name: "__Host-carry_session",
+        type: "apiKey",
+      },
+    ],
+    url: "/v1/identity/methods/{method}",
+    ...options,
+  });
 
 export const revokeCurrentBrowserSession = <
   ThrowOnError extends boolean = false,

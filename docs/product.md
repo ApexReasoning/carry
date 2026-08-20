@@ -8,7 +8,7 @@ Carry 是团队可以长期托付工作的 AI 同事。
 
 Carry 不是聊天机器人、任务清单、工作流编辑器、Agent 管理平台或只面向研发团队的自动化工具。它的价值不是完成一次模型调用，而是让一份责任跨越时间、成员、工具、模型和机器后仍然可理解、可纠正、可继续。
 
-除明确标注为未来方向的段落外，本文件描述当前 M1 基线与 Node 6–7 的公开身份、首个 Space 合同。后续 Node 的顺序和进入条件只由 `docs/implementation.md` 定义；未来方向不是当前 API、状态或用户承诺。
+除明确标注为未来方向的段落外，本文件描述当前 M1 基线与 Node 6–8 的公开身份、首个 Space 和显式登录方式管理合同。后续 Node 的顺序和进入条件只由 `docs/implementation.md` 定义；未来方向不是当前 API、状态或用户承诺。
 
 ## 设计哲学：克制与自由
 
@@ -121,9 +121,13 @@ Work
 
 Google 和 GitHub 与邮箱方法最终只建立或找回 User，并签发同一种 Carry Browser Session。Google 的稳定身份是经过签名、issuer、audience、expiry、issued time 与一次性 nonce 验证后的 `(https://accounts.google.com, sub)`；GitHub 的稳定身份是每次 code exchange 后通过 authenticated `/user` 重新读取的正整数 numeric ID。两种方法都使用 browser-bound one-time state 与 PKCE S256；provider code、token、nonce 和 verifier 不成为 Carry credential，也不长期保存。
 
-三种方法当前彼此独立。相同邮箱、相同字符串 subject 或 provider profile 不能自动关联、合并 User、选择邮箱 identity 或产生 Membership；用户必须使用之前的方法回到原有 Work，Node 8 才提供双方 fresh proof 后的显式 linking。provider login 成功后的无 Membership User 继续现有显式创建首个 Space 旅程，不建立默认 Space。
+三种方法默认彼此独立。相同邮箱、相同字符串 subject 或 provider profile 不能自动关联、合并 User、选择邮箱 identity 或产生 Membership。已登录用户可以在 Settings 只按 Email、Google、GitHub 标签查看和显式管理自己的方式；页面不公开 canonical email、provider subject、numeric ID、profile 或 token。
 
-当前 logout 只撤销准确 Browser Session；旧 cookie fail closed。现有 member bearer 和 operator bootstrap 只为已发布 CLI 过渡保留到 Node 11，不再是 Browser 或官方 Cloud onboarding truth。
+关联新方式要求最近十分钟内证明当前 User 已有关联的一种方式，并单独完成待关联方式的 fresh proof；一个最近创建的 Browser Session 已包含前一种 proof。重新确认只更新当前 User 的 session authority，不创建 User 或登录方式。GitHub 或 Google ceremony 可能使用 provider 已有会话，因此产品只承诺“最近确认了这个登录方式”，不宣称重新输入凭证、MFA、NIST AAL 或抗钓鱼认证。
+
+待关联 identity 已属于另一 User 时明确拒绝，绝不移动或合并 User。移除一种方式只要求最近确认仍可使用的另一种方式，并必须在并发下保留至少一种方式；无法再使用任何已关联方式时没有弱人工绕过。每次成功关联或移除都撤销所有旧 Browser Sessions，为当前浏览器原子签发一个 replacement Session；其他设备退出而当前旅程继续。response loss 的准确重放只恢复同一个仍有效 replacement Session，不制造新 session 或 resurrect 已撤销 credential。
+
+provider login 成功后的无 Membership User 继续现有显式创建首个 Space 旅程，不建立默认 Space。当前 logout 只撤销准确 Browser Session；旧 cookie fail closed。现有 member bearer 和 operator bootstrap 只为已发布 CLI 过渡保留到 Node 11，不再是 Browser、Settings 或官方 Cloud onboarding truth。
 
 ## Space
 
@@ -211,7 +215,7 @@ Review identity 是绑定内部 understanding version 与内容 digest 的不透
 ## 未来产品方向（当前尚未实现）
 
 - 官方云端是主要产品形态，自托管是同一产品的部署选项；两者共享 User、Space、Membership、Browser Session 与隐私语义，不以共享 token 或无用户模式换取部署简单；
-- 显式 method linking/recovery 和成员邀请按 `docs/implementation.md` 后续 Node 进入；相同邮箱不能让 provider identity 自动关联、合并 User 或产生 Membership；
+- 成员邀请按 `docs/implementation.md` 后续 Node 进入；相同邮箱不能让 provider identity 自动关联、合并 User 或产生 Membership；
 - 只有独立结果确实需要历史正文、独立引用及接受、修改或撤回生命周期时，才考虑 Result identity；
 - 第一条未来继续优先是 Work 的一个明确时间条件，不预建 Timer；
 - Pause、Close、Reopen、负责人转交、渠道、第三方能力和外部 Action 按 `docs/implementation.md` 的后续 journey 逐条重新设计。

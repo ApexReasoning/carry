@@ -301,6 +301,10 @@ func (unavailableEmailLogins) VerifyEmailChallenge(context.Context, identity.Ver
 	return identity.BrowserSession{}, errors.New("not implemented")
 }
 
+func (unavailableEmailLogins) EmailForReauthentication(context.Context, string, string) (string, error) {
+	return "", errors.New("not implemented")
+}
+
 type unavailableEmailSender struct{}
 
 func (unavailableEmailSender) PayloadDigest(identity.EmailCodeMessage) ([sha256.Size]byte, error) {
@@ -344,6 +348,7 @@ func testUserRoutes(t *testing.T, authority *machine.CertificateAuthority) *User
 	identityRoutes, err := NewUserIdentityRoutes(
 		emailLogin,
 		unavailableExternalLogin{},
+		unavailableIdentityMethods{},
 		sessions,
 		credentials,
 		testExternalOrigin(t),
@@ -405,11 +410,37 @@ func (unavailableExternalLogin) StartGitHub(context.Context) (identity.ExternalL
 	return identity.ExternalLoginStart{}, errors.New("not implemented")
 }
 
+func (unavailableExternalLogin) StartGoogleReauthentication(context.Context, string, string) (identity.ExternalLoginStart, error) {
+	return identity.ExternalLoginStart{}, errors.New("not implemented")
+}
+
+func (unavailableExternalLogin) StartGitHubReauthentication(context.Context, string, string) (identity.ExternalLoginStart, error) {
+	return identity.ExternalLoginStart{}, errors.New("not implemented")
+}
+
+func (unavailableExternalLogin) StartGoogleLink(context.Context, string, string) (identity.ExternalLoginStart, error) {
+	return identity.ExternalLoginStart{}, errors.New("not implemented")
+}
+
+func (unavailableExternalLogin) StartGitHubLink(context.Context, string, string) (identity.ExternalLoginStart, error) {
+	return identity.ExternalLoginStart{}, errors.New("not implemented")
+}
+
 func (unavailableExternalLogin) CompleteGoogle(context.Context, identity.ExternalLoginCallback) (identity.BrowserSession, error) {
 	return identity.BrowserSession{}, errors.New("not implemented")
 }
 
 func (unavailableExternalLogin) CompleteGitHub(context.Context, identity.ExternalLoginCallback) (identity.BrowserSession, error) {
+	return identity.BrowserSession{}, errors.New("not implemented")
+}
+
+type unavailableIdentityMethods struct{}
+
+func (unavailableIdentityMethods) List(context.Context, string, string) (identity.IdentityMethods, error) {
+	return identity.IdentityMethods{}, errors.New("not implemented")
+}
+
+func (unavailableIdentityMethods) Unlink(context.Context, identity.UnlinkMethodCommand) (identity.BrowserSession, error) {
 	return identity.BrowserSession{}, errors.New("not implemented")
 }
 

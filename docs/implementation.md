@@ -210,19 +210,24 @@ Apple、Microsoft、Passkey、企业 SSO、自动 same-email merge、GitHub repo
 
 ### 用户结果
 
-已登录成员可以在 Settings 中明确关联或移除另一种首发认证方法；丢失一种方法后，可以使用仍已关联的方法回到同一 Carry User，而不是恢复旧 secret 或新建隐式合并账号。
+已登录成员在 Browser-only Settings 只看到 Email、Google、GitHub 三种登录方式标签。最近登录或在十分钟内重新确认任一已关联方式后，可以显式关联一种新方式或移除一种已失去的方式；成功变更撤销所有旧 Browser Sessions，并为当前浏览器原子签发一个 replacement Session，因此其他设备退出而当前旅程继续。丢失一种方法后，可以使用仍已关联的方法回到同一 Carry User；丢失全部方式时不恢复旧 secret，也不提供弱人工绕过。
+
+产品只承诺最近完成了 method ceremony。Google/GitHub 可能使用 provider 既有会话，不能描述为重新输入凭证、MFA、NIST AAL 或抗钓鱼认证。
 
 ### 关闭证据
 
-- 当前已关联方法与待关联方法都经过 fresh proof；
-- 已被另一 User 占用的 provider identity 或 email challenge 拒绝 linking，不 merge 两个 User；
-- 至少一种可用方法保留，unlink/revoke 与并发 linking 一个 winner；
-- 敏感变更可以撤销既有 Browser Sessions，并在 response loss 后准确收敛；
-- lost-all-method 不提供弱人工绕过，产品清楚说明无法恢复的边界。
+- 一个刚创建的 Browser Session 或十分钟内 reauthenticate 的 exact session 才是 recent current proof；reauthenticate 必须解析到 exact current User 的已有方式，且不创建 User 或方法；移除时该内部 proof method 必须是另一种仍关联方式；
+- email reauthenticate 投递到已关联邮箱而不接收地址；email link 的 candidate challenge 与 Google/GitHub stored-purpose callback 都不能落入 login find-or-create path；
+- 当前已关联方法与待关联方法都经过 fresh proof；已被另一 User 占用的 provider identity 或 email challenge 拒绝 linking，不 merge、移动或泄露两个 User；
+- Settings projection 只公开固定 method labels 与是否需要重新确认；bearer、Machine principal、provider metadata、proof 和内部时间均不进入该 surface；
+- link completion 在一个 PostgreSQL transaction 中锁定 target User 与 stable identity、插入至多一个 mapping、撤销全部旧 sessions、创建一个 replacement Session 并记录 exact replay；
+- unlink command 在一个 transaction 中锁定 User 与 concrete methods、保留至少一种方式、记录窄 replay、撤销全部旧 sessions并创建一个 replacement；并发移除最后两种方式只有一个 winner；
+- provider exchange ambiguity 保持 Unknown 且不重放 code；committed response loss 用 exact stale initiating credential 恢复同一个仍有效 replacement，changed replay冲突，已撤销/过期 replacement 不 resurrect；
+- logout 后分别使用所有仍关联方式返回同一 User、Spaces 与 Work；lost-all-method 不提供人工 merge、管理员恢复或 provider email 猜测。
 
 ### 明确不做
 
-管理员重置他人身份、按邮箱合并两个 User、成员密码、Passkey/MFA、secondary email、企业 IdP recovery 或账户合并工具。
+管理员重置他人身份、按邮箱合并两个 User、成员密码、Passkey/MFA、secondary email、企业 IdP recovery、账户合并工具、notification owner、pending-link product/table/list、通用 authenticator/provider table、registry 或 method-change history framework。
 
 ## 11. Node 9：Member admission
 

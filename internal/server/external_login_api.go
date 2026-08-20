@@ -48,10 +48,44 @@ func (origin ExternalOrigin) appURL(status string) string {
 	return origin.value + "/?sign_in=" + url.QueryEscape(status)
 }
 
+func (origin ExternalOrigin) identityURL(purpose identity.ProofPurpose) string {
+	status := "confirmed"
+	if purpose == identity.LinkPurpose {
+		status = "linked"
+	}
+	return origin.identityChangeURL(status)
+}
+
+func (origin ExternalOrigin) identityFailureURL(purpose identity.ProofPurpose, err error) string {
+	action := "confirmation"
+	if purpose == identity.LinkPurpose {
+		action = "link"
+	}
+	outcome := "failed"
+	if errors.Is(err, identity.ErrExternalLoginDenied) {
+		outcome = "cancelled"
+	} else if !errors.Is(err, identity.ErrExternalLoginRejected) {
+		outcome = "unavailable"
+	}
+	return origin.identityChangeURL(action + "_" + outcome)
+}
+
+func (origin ExternalOrigin) identityChangeURL(status string) string {
+	return origin.value + "/?identity_change=" + url.QueryEscape(status)
+}
+
+func (origin ExternalOrigin) acceptsSensitivePOST(request *http.Request) bool {
+	return origin.matches(request) && request.Header.Get("Origin") == origin.value
+}
+
 // ExternalLogin is the Identity provider-login behavior consumed by HTTP.
 type ExternalLogin interface {
 	StartGoogle(context.Context) (identity.ExternalLoginStart, error)
 	StartGitHub(context.Context) (identity.ExternalLoginStart, error)
+	StartGoogleReauthentication(context.Context, string, string) (identity.ExternalLoginStart, error)
+	StartGitHubReauthentication(context.Context, string, string) (identity.ExternalLoginStart, error)
+	StartGoogleLink(context.Context, string, string) (identity.ExternalLoginStart, error)
+	StartGitHubLink(context.Context, string, string) (identity.ExternalLoginStart, error)
 	CompleteGoogle(context.Context, identity.ExternalLoginCallback) (identity.BrowserSession, error)
 	CompleteGitHub(context.Context, identity.ExternalLoginCallback) (identity.BrowserSession, error)
 }
@@ -69,6 +103,22 @@ func (api externalLoginAPI) startGoogle(response http.ResponseWriter, request *h
 
 func (api externalLoginAPI) startGitHub(response http.ResponseWriter, request *http.Request) {
 	api.start(response, request, api.login.StartGitHub)
+}
+
+func (api externalLoginAPI) startGoogleReauthentication(response http.ResponseWriter, request *http.Request) {
+	api.startMethod(response, request, api.login.StartGoogleReauthentication)
+}
+
+func (api externalLoginAPI) startGitHubReauthentication(response http.ResponseWriter, request *http.Request) {
+	api.startMethod(response, request, api.login.StartGitHubReauthentication)
+}
+
+func (api externalLoginAPI) startGoogleLink(response http.ResponseWriter, request *http.Request) {
+	api.startMethod(response, request, api.login.StartGoogleLink)
+}
+
+func (api externalLoginAPI) startGitHubLink(response http.ResponseWriter, request *http.Request) {
+	api.startMethod(response, request, api.login.StartGitHubLink)
 }
 
 func (api externalLoginAPI) start(
@@ -93,6 +143,43 @@ func (api externalLoginAPI) start(
 	result, err := start(request.Context())
 	if err != nil {
 		writeAPIError(response, http.StatusServiceUnavailable, "start external sign-in")
+		return
+	}
+	setExternalLoginCookie(response, result.BrowserCredential, result.ExpiresAt)
+	http.Redirect(response, request, result.AuthorizationURL, http.StatusSeeOther)
+}
+
+func (api externalLoginAPI) startMethod(
+	response http.ResponseWriter,
+	request *http.Request,
+	start func(context.Context, string, string) (identity.ExternalLoginStart, error),
+) {
+	response.Header().Set("Referrer-Policy", "no-referrer")
+	if !api.origin.acceptsSensitivePOST(request) {
+		writeAPIError(response, http.StatusBadRequest, "request origin is invalid")
+		return
+	}
+	if strings.TrimSpace(request.Header.Get("Authorization")) != "" {
+		writeAPIError(response, http.StatusUnauthorized, "Browser Session authentication is required")
+		return
+	}
+	user, ok := currentUser(response, request)
+	if !ok {
+		return
+	}
+	cookie, err := request.Cookie(browserSessionCookie)
+	if err != nil {
+		writeAPIError(response, http.StatusUnauthorized, "Browser Session authentication is required")
+		return
+	}
+	sessionID, ok := api.credentials.ParseBrowserSessionCredential(cookie.Value)
+	if !ok {
+		writeAPIError(response, http.StatusUnauthorized, "Browser Session authentication is invalid")
+		return
+	}
+	result, err := start(request.Context(), user.UserID, sessionID)
+	if err != nil {
+		writeIdentityMethodError(response, err)
 		return
 	}
 	setExternalLoginCookie(response, result.BrowserCredential, result.ExpiresAt)
@@ -139,7 +226,15 @@ func (api externalLoginAPI) callback(
 			return
 		}
 		setBrowserSessionCookie(response, credential, session.ExpiresAt)
+		if session.Purpose == identity.LinkPurpose || session.Purpose == identity.ReauthenticatePurpose {
+			http.Redirect(response, request, api.origin.identityURL(session.Purpose), http.StatusSeeOther)
+			return
+		}
 		http.Redirect(response, request, api.origin.appURL(""), http.StatusSeeOther)
+		return
+	}
+	if purpose, ok := identity.ExternalProofFailurePurpose(err); ok && purpose != identity.LoginPurpose {
+		http.Redirect(response, request, api.origin.identityFailureURL(purpose, err), http.StatusSeeOther)
 		return
 	}
 	status := "invalid"

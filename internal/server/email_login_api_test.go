@@ -230,6 +230,7 @@ func emailTestAPIWithSources(
 	identityRoutes, err := NewUserIdentityRoutes(
 		emailLogin,
 		unavailableExternalLogin{},
+		unavailableIdentityMethods{},
 		sessions,
 		credentials,
 		testExternalOrigin(t),
@@ -296,6 +297,10 @@ func (store *recordingEmailLoginStore) VerifyEmailChallenge(
 ) (identity.BrowserSession, error) {
 	store.verified = command
 	return store.session, nil
+}
+
+func (*recordingEmailLoginStore) EmailForReauthentication(context.Context, string, string) (string, error) {
+	return "person@example.com", nil
 }
 
 type recordingEmailSender struct {

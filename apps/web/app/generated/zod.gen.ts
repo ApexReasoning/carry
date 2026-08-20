@@ -11,6 +11,11 @@ export const zEmailChallenge = z.object({
   expires_at: z.iso.datetime({ offset: true }),
 });
 
+export const zIdentityMethods = z.object({
+  methods: z.array(z.enum(["email", "google", "github"])).max(3),
+  reauthentication_required: z.boolean(),
+});
+
 export const zMembership = z.object({
   space_id: z.uuid(),
   name: z.string(),
@@ -147,6 +152,85 @@ export const zCompleteGitHubLoginQuery = z.object({
   code: z.string().min(1).max(4096).optional(),
   error: z.string().min(1).max(255).optional(),
 });
+
+/**
+ * Fixed linked-method labels and recent-proof requirement
+ */
+export const zLoadIdentityMethodsResponse = zIdentityMethods;
+
+export const zRequestEmailReauthenticationCodeBody = z.object({
+  challenge_id: z.uuid(),
+});
+
+export const zRequestEmailReauthenticationCodeHeaders = z.object({
+  "Idempotency-Key": z.string().min(1).max(255),
+});
+
+/**
+ * Confirmation code submitted to the linked email method
+ */
+export const zRequestEmailReauthenticationCodeResponse = zEmailChallenge;
+
+export const zVerifyEmailReauthenticationCodeBody = z.object({
+  code: z.string().regex(/^[0-9]{6}$/),
+});
+
+export const zVerifyEmailReauthenticationCodeHeaders = z.object({
+  "Idempotency-Key": z.string().min(1).max(255),
+});
+
+export const zVerifyEmailReauthenticationCodePath = z.object({
+  challengeID: z.uuid(),
+});
+
+/**
+ * Exact current method confirmed and Browser Session rotated
+ */
+export const zVerifyEmailReauthenticationCodeResponse = z.void();
+
+export const zRequestEmailLinkCodeBody = z.object({
+  challenge_id: z.uuid(),
+  email: z.email().max(254),
+});
+
+export const zRequestEmailLinkCodeHeaders = z.object({
+  "Idempotency-Key": z.string().min(1).max(255),
+});
+
+/**
+ * Candidate email proof submitted
+ */
+export const zRequestEmailLinkCodeResponse = zEmailChallenge;
+
+export const zVerifyEmailLinkCodeBody = z.object({
+  code: z.string().regex(/^[0-9]{6}$/),
+});
+
+export const zVerifyEmailLinkCodeHeaders = z.object({
+  "Idempotency-Key": z.string().min(1).max(255),
+});
+
+export const zVerifyEmailLinkCodePath = z.object({
+  challengeID: z.uuid(),
+});
+
+/**
+ * Email linked and all pre-change Sessions rotated
+ */
+export const zVerifyEmailLinkCodeResponse = z.void();
+
+export const zUnlinkIdentityMethodHeaders = z.object({
+  "Idempotency-Key": z.string().min(1).max(255),
+});
+
+export const zUnlinkIdentityMethodPath = z.object({
+  method: z.enum(["email", "google", "github"]),
+});
+
+/**
+ * Method unlinked and all pre-change Sessions rotated
+ */
+export const zUnlinkIdentityMethodResponse = z.void();
 
 /**
  * Browser session revoked

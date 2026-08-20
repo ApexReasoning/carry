@@ -7,16 +7,23 @@ import {
   listConversationMessages as listConversationMessagesRequest,
   listWorks as listWorksRequest,
   loadCurrentUser,
+  loadIdentityMethods as loadIdentityMethodsRequest,
   loadWork as loadWorkRequest,
   requestEmailCode as requestEmailCodeRequest,
+  requestEmailLinkCode as requestEmailLinkCodeRequest,
+  requestEmailReauthenticationCode as requestEmailReauthenticationCodeRequest,
   retryWork as retryWorkRequest,
   revokeCurrentBrowserSession,
   sendConversationMessage as sendConversationMessageRequest,
+  unlinkIdentityMethod as unlinkIdentityMethodRequest,
   verifyEmailCode as verifyEmailCodeRequest,
+  verifyEmailLinkCode as verifyEmailLinkCodeRequest,
+  verifyEmailReauthenticationCode as verifyEmailReauthenticationCodeRequest,
 } from "./generated/sdk.gen";
 import type {
   ConversationMessage,
   EmailChallenge,
+  IdentityMethods,
   Membership,
   User,
   Work,
@@ -83,6 +90,82 @@ export async function verifyEmailCode(
     path: { challengeID },
   });
   requireMutationSuccess(result.response, result.error, "Verify email code");
+}
+
+export async function identityMethods(): Promise<IdentityMethods> {
+  const result = await loadIdentityMethodsRequest(sameOrigin);
+  return requireData(
+    result.data,
+    result.response,
+    result.error,
+    "Load sign-in methods",
+  );
+}
+
+export async function requestIdentityEmailCode(
+  purpose: "reauthenticate" | "link",
+  challengeID: string,
+  idempotencyKey: string,
+  email?: string,
+): Promise<EmailChallenge> {
+  const request =
+    purpose === "link"
+      ? requestEmailLinkCodeRequest({
+          ...sameOrigin,
+          body: { challenge_id: challengeID, email: email ?? "" },
+          headers: { "Idempotency-Key": idempotencyKey },
+        })
+      : requestEmailReauthenticationCodeRequest({
+          ...sameOrigin,
+          body: { challenge_id: challengeID },
+          headers: { "Idempotency-Key": idempotencyKey },
+        });
+  const result = await request;
+  return requireMutationData(
+    result.data,
+    result.response,
+    result.error,
+    purpose === "link" ? "Link email" : "Confirm email",
+  );
+}
+
+export async function verifyIdentityEmailCode(
+  purpose: "reauthenticate" | "link",
+  challengeID: string,
+  code: string,
+  idempotencyKey: string,
+): Promise<void> {
+  const options = {
+    ...sameOrigin,
+    body: { code },
+    headers: { "Idempotency-Key": idempotencyKey },
+    path: { challengeID },
+  };
+  const result =
+    purpose === "link"
+      ? await verifyEmailLinkCodeRequest(options)
+      : await verifyEmailReauthenticationCodeRequest(options);
+  requireMutationSuccess(
+    result.response,
+    result.error,
+    purpose === "link" ? "Link email" : "Confirm email",
+  );
+}
+
+export async function unlinkIdentityMethod(
+  method: "email" | "google" | "github",
+  idempotencyKey: string,
+): Promise<void> {
+  const result = await unlinkIdentityMethodRequest({
+    ...sameOrigin,
+    headers: { "Idempotency-Key": idempotencyKey },
+    path: { method },
+  });
+  requireMutationSuccess(
+    result.response,
+    result.error,
+    "Remove sign-in method",
+  );
 }
 
 export async function createFirstSpace(

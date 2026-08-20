@@ -38,18 +38,24 @@ func (q *Queries) AuthenticateBrowserSession(ctx context.Context, sessionID stri
 }
 
 const createBrowserSession = `-- name: CreateBrowserSession :one
-INSERT INTO browser_sessions (session_id, user_id, expires_at)
-VALUES ($1, $2, transaction_timestamp() + interval '30 days')
-RETURNING user_id, created_at, expires_at, revoked_at, session_id
+INSERT INTO browser_sessions (session_id, user_id, identity_proof_method, expires_at)
+VALUES (
+    $1,
+    $2,
+    $3,
+    transaction_timestamp() + interval '30 days'
+)
+RETURNING user_id, created_at, expires_at, revoked_at, session_id, identity_proved_at, identity_proof_method
 `
 
 type CreateBrowserSessionParams struct {
-	SessionID string
-	UserID    string
+	SessionID           string
+	UserID              string
+	IdentityProofMethod string
 }
 
 func (q *Queries) CreateBrowserSession(ctx context.Context, arg CreateBrowserSessionParams) (BrowserSession, error) {
-	row := q.db.QueryRow(ctx, createBrowserSession, arg.SessionID, arg.UserID)
+	row := q.db.QueryRow(ctx, createBrowserSession, arg.SessionID, arg.UserID, arg.IdentityProofMethod)
 	var i BrowserSession
 	err := row.Scan(
 		&i.UserID,
@@ -57,12 +63,14 @@ func (q *Queries) CreateBrowserSession(ctx context.Context, arg CreateBrowserSes
 		&i.ExpiresAt,
 		&i.RevokedAt,
 		&i.SessionID,
+		&i.IdentityProvedAt,
+		&i.IdentityProofMethod,
 	)
 	return i, err
 }
 
 const loadActiveBrowserSessionByID = `-- name: LoadActiveBrowserSessionByID :one
-SELECT session_id, user_id, expires_at, revoked_at
+SELECT session_id, user_id, expires_at, revoked_at, identity_proved_at, identity_proof_method
 FROM browser_sessions
 WHERE session_id = $1
     AND revoked_at IS NULL
@@ -70,10 +78,12 @@ WHERE session_id = $1
 `
 
 type LoadActiveBrowserSessionByIDRow struct {
-	SessionID string
-	UserID    string
-	ExpiresAt pgtype.Timestamptz
-	RevokedAt pgtype.Timestamptz
+	SessionID           string
+	UserID              string
+	ExpiresAt           pgtype.Timestamptz
+	RevokedAt           pgtype.Timestamptz
+	IdentityProvedAt    pgtype.Timestamptz
+	IdentityProofMethod string
 }
 
 func (q *Queries) LoadActiveBrowserSessionByID(ctx context.Context, sessionID string) (LoadActiveBrowserSessionByIDRow, error) {
@@ -84,21 +94,25 @@ func (q *Queries) LoadActiveBrowserSessionByID(ctx context.Context, sessionID st
 		&i.UserID,
 		&i.ExpiresAt,
 		&i.RevokedAt,
+		&i.IdentityProvedAt,
+		&i.IdentityProofMethod,
 	)
 	return i, err
 }
 
 const loadBrowserSessionByID = `-- name: LoadBrowserSessionByID :one
-SELECT session_id, user_id, expires_at, revoked_at
+SELECT session_id, user_id, expires_at, revoked_at, identity_proved_at, identity_proof_method
 FROM browser_sessions
 WHERE session_id = $1
 `
 
 type LoadBrowserSessionByIDRow struct {
-	SessionID string
-	UserID    string
-	ExpiresAt pgtype.Timestamptz
-	RevokedAt pgtype.Timestamptz
+	SessionID           string
+	UserID              string
+	ExpiresAt           pgtype.Timestamptz
+	RevokedAt           pgtype.Timestamptz
+	IdentityProvedAt    pgtype.Timestamptz
+	IdentityProofMethod string
 }
 
 func (q *Queries) LoadBrowserSessionByID(ctx context.Context, sessionID string) (LoadBrowserSessionByIDRow, error) {
@@ -109,6 +123,8 @@ func (q *Queries) LoadBrowserSessionByID(ctx context.Context, sessionID string) 
 		&i.UserID,
 		&i.ExpiresAt,
 		&i.RevokedAt,
+		&i.IdentityProvedAt,
+		&i.IdentityProofMethod,
 	)
 	return i, err
 }

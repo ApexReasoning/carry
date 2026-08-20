@@ -76,22 +76,37 @@ const createExternalLogin = `-- name: CreateExternalLogin :one
 INSERT INTO external_login_transactions (
     transaction_id,
     provider,
+    purpose,
+    target_user_id,
+    initiating_session_id,
     expires_at
 ) VALUES (
     $1,
     $2,
+    $3,
+    $4,
+    $5,
     transaction_timestamp() + interval '10 minutes'
 )
 RETURNING expires_at
 `
 
 type CreateExternalLoginParams struct {
-	TransactionID string
-	Provider      string
+	TransactionID       string
+	Provider            string
+	Purpose             string
+	TargetUserID        pgtype.UUID
+	InitiatingSessionID pgtype.UUID
 }
 
 func (q *Queries) CreateExternalLogin(ctx context.Context, arg CreateExternalLoginParams) (pgtype.Timestamptz, error) {
-	row := q.db.QueryRow(ctx, createExternalLogin, arg.TransactionID, arg.Provider)
+	row := q.db.QueryRow(ctx, createExternalLogin,
+		arg.TransactionID,
+		arg.Provider,
+		arg.Purpose,
+		arg.TargetUserID,
+		arg.InitiatingSessionID,
+	)
 	var expires_at pgtype.Timestamptz
 	err := row.Scan(&expires_at)
 	return expires_at, err
@@ -215,7 +230,7 @@ func (q *Queries) LoadGoogleIdentity(ctx context.Context, arg LoadGoogleIdentity
 }
 
 const lockExternalLogin = `-- name: LockExternalLogin :one
-SELECT transaction_id, provider, status, callback_digest, created_at, expires_at, completed_at, user_id, browser_session_id
+SELECT transaction_id, provider, status, callback_digest, created_at, expires_at, completed_at, user_id, browser_session_id, purpose, target_user_id, initiating_session_id
 FROM external_login_transactions
 WHERE transaction_id = $1
 FOR UPDATE
@@ -234,6 +249,9 @@ func (q *Queries) LockExternalLogin(ctx context.Context, transactionID string) (
 		&i.CompletedAt,
 		&i.UserID,
 		&i.BrowserSessionID,
+		&i.Purpose,
+		&i.TargetUserID,
+		&i.InitiatingSessionID,
 	)
 	return i, err
 }
@@ -284,6 +302,31 @@ type MarkExternalLoginUnknownParams struct {
 
 func (q *Queries) MarkExternalLoginUnknown(ctx context.Context, arg MarkExternalLoginUnknownParams) (int64, error) {
 	result, err := q.db.Exec(ctx, markExternalLoginUnknown, arg.TransactionID, arg.Provider, arg.CallbackDigest)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const rejectExternalLogin = `-- name: RejectExternalLogin :execrows
+UPDATE external_login_transactions
+SET
+    status = 'rejected',
+    completed_at = transaction_timestamp()
+WHERE transaction_id = $1
+    AND provider = $2
+    AND status = 'exchanging'
+    AND callback_digest = $3
+`
+
+type RejectExternalLoginParams struct {
+	TransactionID  string
+	Provider       string
+	CallbackDigest []byte
+}
+
+func (q *Queries) RejectExternalLogin(ctx context.Context, arg RejectExternalLoginParams) (int64, error) {
+	result, err := q.db.Exec(ctx, rejectExternalLogin, arg.TransactionID, arg.Provider, arg.CallbackDigest)
 	if err != nil {
 		return 0, err
 	}

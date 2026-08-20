@@ -9,11 +9,13 @@ import (
 )
 
 type BrowserSession struct {
-	UserID    string
-	CreatedAt pgtype.Timestamptz
-	ExpiresAt pgtype.Timestamptz
-	RevokedAt pgtype.Timestamptz
-	SessionID string
+	UserID              string
+	CreatedAt           pgtype.Timestamptz
+	ExpiresAt           pgtype.Timestamptz
+	RevokedAt           pgtype.Timestamptz
+	SessionID           string
+	IdentityProvedAt    pgtype.Timestamptz
+	IdentityProofMethod string
 }
 
 type CarryUser struct {
@@ -89,18 +91,24 @@ type EmailLoginChallenge struct {
 	ConsumedAt            pgtype.Timestamptz
 	UserID                pgtype.UUID
 	BrowserSessionID      pgtype.UUID
+	Purpose               string
+	TargetUserID          pgtype.UUID
+	InitiatingSessionID   pgtype.UUID
 }
 
 type ExternalLoginTransaction struct {
-	TransactionID    string
-	Provider         string
-	Status           string
-	CallbackDigest   []byte
-	CreatedAt        pgtype.Timestamptz
-	ExpiresAt        pgtype.Timestamptz
-	CompletedAt      pgtype.Timestamptz
-	UserID           pgtype.UUID
-	BrowserSessionID pgtype.UUID
+	TransactionID       string
+	Provider            string
+	Status              string
+	CallbackDigest      []byte
+	CreatedAt           pgtype.Timestamptz
+	ExpiresAt           pgtype.Timestamptz
+	CompletedAt         pgtype.Timestamptz
+	UserID              pgtype.UUID
+	BrowserSessionID    pgtype.UUID
+	Purpose             string
+	TargetUserID        pgtype.UUID
+	InitiatingSessionID pgtype.UUID
 }
 
 type GithubIdentity struct {
@@ -114,6 +122,16 @@ type GoogleIdentity struct {
 	Subject    string
 	UserID     string
 	VerifiedAt pgtype.Timestamptz
+}
+
+type IdentityMethodUnlink struct {
+	UserID               string
+	InitiatingSessionID  string
+	Method               string
+	IdempotencyKey       string
+	RequestDigest        []byte
+	ReplacementSessionID string
+	CompletedAt          pgtype.Timestamptz
 }
 
 type Machine struct {

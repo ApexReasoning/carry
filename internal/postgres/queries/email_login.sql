@@ -47,6 +47,9 @@ INSERT INTO email_login_challenges (
     payload_digest,
     request_idempotency_key,
     request_digest,
+    purpose,
+    target_user_id,
+    initiating_session_id,
     expires_at
 ) VALUES (
     sqlc.arg(challenge_id),
@@ -56,6 +59,9 @@ INSERT INTO email_login_challenges (
     sqlc.arg(payload_digest),
     sqlc.arg(request_idempotency_key),
     sqlc.arg(request_digest),
+    sqlc.arg(purpose),
+    sqlc.narg(target_user_id),
+    sqlc.narg(initiating_session_id),
     transaction_timestamp() + interval '5 minutes'
 )
 RETURNING *;

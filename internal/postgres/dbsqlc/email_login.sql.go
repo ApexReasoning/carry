@@ -75,6 +75,9 @@ INSERT INTO email_login_challenges (
     payload_digest,
     request_idempotency_key,
     request_digest,
+    purpose,
+    target_user_id,
+    initiating_session_id,
     expires_at
 ) VALUES (
     $1,
@@ -84,9 +87,12 @@ INSERT INTO email_login_challenges (
     $5,
     $6,
     $7,
+    $8,
+    $9,
+    $10,
     transaction_timestamp() + interval '5 minutes'
 )
-RETURNING challenge_id, canonical_email, code_digest, source_digest, payload_digest, request_idempotency_key, request_digest, submission_state, provider_message_id, attempts_used, created_at, expires_at, invalidated_at, consumed_at, user_id, browser_session_id
+RETURNING challenge_id, canonical_email, code_digest, source_digest, payload_digest, request_idempotency_key, request_digest, submission_state, provider_message_id, attempts_used, created_at, expires_at, invalidated_at, consumed_at, user_id, browser_session_id, purpose, target_user_id, initiating_session_id
 `
 
 type CreateEmailChallengeParams struct {
@@ -97,6 +103,9 @@ type CreateEmailChallengeParams struct {
 	PayloadDigest         []byte
 	RequestIdempotencyKey string
 	RequestDigest         []byte
+	Purpose               string
+	TargetUserID          pgtype.UUID
+	InitiatingSessionID   pgtype.UUID
 }
 
 func (q *Queries) CreateEmailChallenge(ctx context.Context, arg CreateEmailChallengeParams) (EmailLoginChallenge, error) {
@@ -108,6 +117,9 @@ func (q *Queries) CreateEmailChallenge(ctx context.Context, arg CreateEmailChall
 		arg.PayloadDigest,
 		arg.RequestIdempotencyKey,
 		arg.RequestDigest,
+		arg.Purpose,
+		arg.TargetUserID,
+		arg.InitiatingSessionID,
 	)
 	var i EmailLoginChallenge
 	err := row.Scan(
@@ -127,6 +139,9 @@ func (q *Queries) CreateEmailChallenge(ctx context.Context, arg CreateEmailChall
 		&i.ConsumedAt,
 		&i.UserID,
 		&i.BrowserSessionID,
+		&i.Purpose,
+		&i.TargetUserID,
+		&i.InitiatingSessionID,
 	)
 	return i, err
 }
@@ -206,7 +221,7 @@ func (q *Queries) LoadEmailAttempt(ctx context.Context, arg LoadEmailAttemptPara
 }
 
 const loadEmailChallengeByRequestKey = `-- name: LoadEmailChallengeByRequestKey :one
-SELECT challenge_id, canonical_email, code_digest, source_digest, payload_digest, request_idempotency_key, request_digest, submission_state, provider_message_id, attempts_used, created_at, expires_at, invalidated_at, consumed_at, user_id, browser_session_id
+SELECT challenge_id, canonical_email, code_digest, source_digest, payload_digest, request_idempotency_key, request_digest, submission_state, provider_message_id, attempts_used, created_at, expires_at, invalidated_at, consumed_at, user_id, browser_session_id, purpose, target_user_id, initiating_session_id
 FROM email_login_challenges
 WHERE request_idempotency_key = $1
 `
@@ -231,6 +246,9 @@ func (q *Queries) LoadEmailChallengeByRequestKey(ctx context.Context, requestIde
 		&i.ConsumedAt,
 		&i.UserID,
 		&i.BrowserSessionID,
+		&i.Purpose,
+		&i.TargetUserID,
+		&i.InitiatingSessionID,
 	)
 	return i, err
 }
@@ -250,7 +268,7 @@ func (q *Queries) LoadEmailIdentity(ctx context.Context, canonicalEmail string) 
 }
 
 const loadLatestEmailChallenge = `-- name: LoadLatestEmailChallenge :one
-SELECT challenge_id, canonical_email, code_digest, source_digest, payload_digest, request_idempotency_key, request_digest, submission_state, provider_message_id, attempts_used, created_at, expires_at, invalidated_at, consumed_at, user_id, browser_session_id
+SELECT challenge_id, canonical_email, code_digest, source_digest, payload_digest, request_idempotency_key, request_digest, submission_state, provider_message_id, attempts_used, created_at, expires_at, invalidated_at, consumed_at, user_id, browser_session_id, purpose, target_user_id, initiating_session_id
 FROM email_login_challenges
 WHERE canonical_email = $1
 ORDER BY created_at DESC, challenge_id DESC
@@ -277,12 +295,15 @@ func (q *Queries) LoadLatestEmailChallenge(ctx context.Context, canonicalEmail s
 		&i.ConsumedAt,
 		&i.UserID,
 		&i.BrowserSessionID,
+		&i.Purpose,
+		&i.TargetUserID,
+		&i.InitiatingSessionID,
 	)
 	return i, err
 }
 
 const lockEmailChallenge = `-- name: LockEmailChallenge :one
-SELECT challenge_id, canonical_email, code_digest, source_digest, payload_digest, request_idempotency_key, request_digest, submission_state, provider_message_id, attempts_used, created_at, expires_at, invalidated_at, consumed_at, user_id, browser_session_id
+SELECT challenge_id, canonical_email, code_digest, source_digest, payload_digest, request_idempotency_key, request_digest, submission_state, provider_message_id, attempts_used, created_at, expires_at, invalidated_at, consumed_at, user_id, browser_session_id, purpose, target_user_id, initiating_session_id
 FROM email_login_challenges
 WHERE challenge_id = $1
 FOR UPDATE
@@ -308,6 +329,9 @@ func (q *Queries) LockEmailChallenge(ctx context.Context, challengeID string) (E
 		&i.ConsumedAt,
 		&i.UserID,
 		&i.BrowserSessionID,
+		&i.Purpose,
+		&i.TargetUserID,
+		&i.InitiatingSessionID,
 	)
 	return i, err
 }
@@ -347,7 +371,7 @@ SET
 WHERE challenge_id = $3
     AND payload_digest = $4
     AND submission_state IN ('prepared', 'unknown')
-RETURNING challenge_id, canonical_email, code_digest, source_digest, payload_digest, request_idempotency_key, request_digest, submission_state, provider_message_id, attempts_used, created_at, expires_at, invalidated_at, consumed_at, user_id, browser_session_id
+RETURNING challenge_id, canonical_email, code_digest, source_digest, payload_digest, request_idempotency_key, request_digest, submission_state, provider_message_id, attempts_used, created_at, expires_at, invalidated_at, consumed_at, user_id, browser_session_id, purpose, target_user_id, initiating_session_id
 `
 
 type RecordEmailSubmissionParams struct {
@@ -382,6 +406,9 @@ func (q *Queries) RecordEmailSubmission(ctx context.Context, arg RecordEmailSubm
 		&i.ConsumedAt,
 		&i.UserID,
 		&i.BrowserSessionID,
+		&i.Purpose,
+		&i.TargetUserID,
+		&i.InitiatingSessionID,
 	)
 	return i, err
 }

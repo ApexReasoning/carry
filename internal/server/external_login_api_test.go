@@ -176,6 +176,46 @@ func TestExternalLoginDenialIsBoundAndRedirectsWithoutAuthority(t *testing.T) {
 	}
 }
 
+func TestExternalMethodCallbackFailuresReturnToSettings(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		purpose  identity.ProofPurpose
+		cause    error
+		expected string
+	}{
+		{name: "link rejected", purpose: identity.LinkPurpose, cause: identity.ErrExternalLoginRejected, expected: "link_failed"},
+		{name: "link denied", purpose: identity.LinkPurpose, cause: identity.ErrExternalLoginDenied, expected: "link_cancelled"},
+		{name: "link unavailable", purpose: identity.LinkPurpose, cause: identity.ErrExternalLoginUnavailable, expected: "link_unavailable"},
+		{name: "confirmation rejected", purpose: identity.ReauthenticatePurpose, cause: identity.ErrExternalLoginRejected, expected: "confirmation_failed"},
+		{name: "confirmation denied", purpose: identity.ReauthenticatePurpose, cause: identity.ErrExternalLoginDenied, expected: "confirmation_cancelled"},
+		{name: "confirmation unavailable", purpose: identity.ReauthenticatePurpose, cause: identity.ErrExternalLoginUnavailable, expected: "confirmation_unavailable"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			login := &recordingExternalLogin{
+				completeErr: identity.ExternalProofFailure(test.purpose, test.cause),
+			}
+			handler := externalLoginTestAPI(t, login, &recordingBrowserSessions{})
+			request := httptest.NewRequest(
+				http.MethodGet,
+				"https://carry.example/v1/auth/google/callback?code=provider-code&state=opaque",
+				nil,
+			)
+			request.AddCookie(&http.Cookie{Name: externalLoginCookie, Value: "binding"})
+			response := httptest.NewRecorder()
+
+			handler.ServeHTTP(response, request)
+
+			expected := "https://carry.example/?identity_change=" + test.expected
+			if response.Code != http.StatusSeeOther || response.Header().Get("Location") != expected {
+				t.Fatalf("status = %d, location = %q, want %q", response.Code, response.Header().Get("Location"), expected)
+			}
+		})
+	}
+}
+
 func externalLoginTestAPI(t *testing.T, external ExternalLogin, sessions BrowserSessions) http.Handler {
 	t.Helper()
 	credentials := testIdentityCredentials(t)
@@ -189,7 +229,8 @@ func externalLoginTestAPI(t *testing.T, external ExternalLogin, sessions Browser
 		t.Fatalf("compose User authentication: %v", err)
 	}
 	identityRoutes, err := NewUserIdentityRoutes(
-		emailLogin, external, sessions, credentials, testExternalOrigin(t), NewRequestSource(nil), emptyMemberships{},
+		emailLogin, external, unavailableIdentityMethods{}, sessions, credentials,
+		testExternalOrigin(t), NewRequestSource(nil), emptyMemberships{},
 	)
 	if err != nil {
 		t.Fatalf("compose User identity routes: %v", err)
@@ -220,6 +261,26 @@ func (login *recordingExternalLogin) StartGoogle(context.Context) (identity.Exte
 
 func (login *recordingExternalLogin) StartGitHub(context.Context) (identity.ExternalLoginStart, error) {
 	login.started = "github"
+	return login.start, login.startErr
+}
+
+func (login *recordingExternalLogin) StartGoogleReauthentication(context.Context, string, string) (identity.ExternalLoginStart, error) {
+	login.started = "google-reauthenticate"
+	return login.start, login.startErr
+}
+
+func (login *recordingExternalLogin) StartGitHubReauthentication(context.Context, string, string) (identity.ExternalLoginStart, error) {
+	login.started = "github-reauthenticate"
+	return login.start, login.startErr
+}
+
+func (login *recordingExternalLogin) StartGoogleLink(context.Context, string, string) (identity.ExternalLoginStart, error) {
+	login.started = "google-link"
+	return login.start, login.startErr
+}
+
+func (login *recordingExternalLogin) StartGitHubLink(context.Context, string, string) (identity.ExternalLoginStart, error) {
+	login.started = "github-link"
 	return login.start, login.startErr
 }
 

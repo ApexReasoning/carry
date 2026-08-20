@@ -94,7 +94,7 @@ PostgreSQL 拥有事务、唯一 winner、lease、fence、幂等和恢复裁决�
 
 | Owner | 持久事实 | 当前消费者 |
 | --- | --- | --- |
-| Identity | User、邮箱/Google/GitHub proof、短期登录事务、User token、Browser Session | User API、Web、CLI |
+| Identity | User、邮箱/Google/GitHub proof、短期 proof 事务、显式登录方式变更、User token、Browser Session | User API、Web、CLI |
 | Space | Membership、Machine enrollment 权限 | User API、Host enrollment |
 | Work | 目标、负责人、消息、当前理解、阶段结果检查与接受事实 | 成员、执行路径 |
 | Conversation | 成员与 Carry 的私人消息、reply claim、private-side Work consequence | 准确成员、受限 Machine claim |
@@ -121,13 +121,19 @@ User 是经过认证的人，不因认证自动成为任何 Space 的成员。No
 
 Resend 是官方 Cloud 的唯一 concrete 邮件 adapter。发送意图先持久化，网络 I/O 在事务外，以固定 recipient、payload 和 provider idempotency key 提交。challenge 只记录 prepared、accepted、rejected 或 unknown 这类 submission fact；Accepted 只证明 provider 接受，Unknown 只允许在 challenge 有效期和 Resend 相同-key窗口内重放完全相同请求。当前不建立 provider registry、Delivery owner、webhook 或 outbox framework。
 
-成功 verify 在同一权威 transaction 中建立或读取 User、消费 challenge 并建立一个 Browser Session。Session cookie credential 由稳定 session identity 与 server-keyed MAC 组成，服务端可以在 exact committed replay 中重现同一 credential；PostgreSQL 保存 session identity、User、expiry 与 revocation，不保存可直接使用的 secret。Cookie 使用 `__Host-`、Secure、HttpOnly、SameSite Strict 与 Path `/`，logout 撤销准确 Session，stale cookie fail closed。
+成功 login verify 在同一权威 transaction 中建立或读取 User、消费 challenge 并建立一个 Browser Session。既有方法先锁 stable identity key，再锁已发现的 User 并重读 exact mapping，才允许签发 Session；首次方法则仍在 stable key 下收敛，不制造 orphan User。Session cookie credential 由稳定 session identity 与 server-keyed MAC 组成，服务端可以在 exact committed replay 中重现同一 credential；PostgreSQL 保存 session identity、User、expiry、`identity_proved_at`、内部 `identity_proof_method` 与 revocation，不保存可直接使用的 secret。新 session 的 proof time 等于数据库创建时间；Identity Settings 只把数据库时间十分钟内的 proof 视为 recent，并且不向协议公开 proof method。Cookie 使用 `__Host-`、Secure、HttpOnly、SameSite Strict 与 Path `/`，logout 撤销准确 Session，stale cookie fail closed。
 
 Google 和 GitHub authentication 继续属于 Identity，不建立 OAuth/provider owner 或 registry。Google identity 只按 canonical issuer 与 case-sensitive `sub` 保存；GitHub identity 只按每次用短期 access token 调用 authenticated `/user` 得到的正整数 ID 保存。provider email、login、name、node ID 和 token 都不能选择 User、查询 `email_identities`、修改 display name 或产生 Membership。
 
-每次 external login 由一个十分钟、provider-fixed 的 PostgreSQL transaction 与一个 `__Host-`、Secure、HttpOnly、SameSite Lax 的临时 browser binding 共同保护。Identity root 用不同 MAC domain 从 transaction identity 分别派生 state、binding、Google nonce 和 PKCE verifier；数据库不保存这些 plaintext 或 provider code/token。callback 先原子 claim exact response digest，唯一 winner 才在事务外 exchange；Google 验证 ID-token signature/JWKS、issuer、exact audience、expiry、issued time 与 nonce，GitHub 每次重新读取 `/user`。provider identity、User、现有 Browser Session 与 transaction completion 同事务提交；exact committed replay 只恢复同一仍有效 Session，不重做 provider I/O。provider exchange ambiguity 终结为 Unknown，不重放 code，也不建立 Carry authority；本地 completion response loss 则先用独立有界 context 重新读取同一 provider 与 callback digest，已提交时恢复准确 Session，未提交时才收敛为 Unknown。
+每次 external proof 由一个十分钟、provider-fixed、server-fixed `login`、`reauthenticate` 或 `link` purpose 的 PostgreSQL transaction 与一个 `__Host-`、Secure、HttpOnly、SameSite Lax 的临时 browser binding 共同保护。非 login purpose 还固定 exact target User 与 initiating Browser Session。Identity root 用不同 MAC domain 从 transaction identity 分别派生 state、binding、Google nonce 和 PKCE verifier；数据库不保存这些 plaintext 或 provider code/token。callback 先原子 claim exact response digest，唯一 winner 才在事务外 exchange；Google 验证 ID-token signature/JWKS、issuer、exact audience、expiry、issued time 与 nonce，GitHub 每次重新读取 `/user`。stored purpose 决定 completion，不能由 callback 或 provider content 切换；exact committed replay 不重做 provider I/O。provider exchange ambiguity 终结为 Unknown，不重放 code，也不建立 Carry authority；本地 completion response loss 则先用独立有界 context 重新读取同一 provider 与 callback digest，已提交时恢复准确结果，未提交时才收敛为 Unknown。
 
 OAuth callback URI 只从必填 canonical HTTPS external origin 和固定 Google/GitHub callback path 构造；Host 不匹配时 fail closed，`Forwarded`/`X-Forwarded-Host`/`X-Forwarded-Proto` 不改变它。两种 concrete client 固定官方 endpoint、bounded timeout/body、禁用 redirect；启动不做 provider discovery 或网络调用。GitHub 不请求 email/repository/organization scope，Google 只请求 `openid`，两者都使用 authorization code + PKCE S256。
+
+Identity Settings 只允许 Browser Session principal，不接受过渡 bearer 或 Machine mTLS。方法 projection 固定按 Email、Google、GitHub 返回标签和是否需要重新确认，不公开 email、issuer/sub、GitHub ID、profile、proof 或内部时间。`reauthenticate` 必须证明一个已经属于 exact current User 的方法，只旋转当前 session 并更新 replacement session proof time，不创建 User 或方法。
+
+`link` 必须同时依赖 recent initiating session 与 fresh candidate proof；PostgreSQL 统一先锁 candidate stable identity key，再锁 target User 并重读 exact mapping，occupied identity fail closed without merge，插入至多一个 concrete mapping，并在同一 transaction 撤销该 User 全部旧 sessions、为当前浏览器创建一个 replacement session、记录 proof completion。`unlink` 先只读获得 concrete method key，按同一顺序锁 stable key 与 User 后重读 mapping，再要求 recent session 的内部 proof method 不等于待移除方式、保留至少一个方式，并用窄 command replay fact原子记录删除、全 session revocation 与同一个 replacement session。exact committed replay 可以从 stale initiating credential 恢复仍有效的准确 replacement；different digest 冲突，replacement 后续过期或撤销后不 resurrect。
+
+Email challenge 以相同 closed purpose 固定目标：reauthenticate 不接收地址而投递至已关联 canonical email；link 只证明 candidate email，不能先创建/查找/切换 User 或 session。不存在 pending-link product/table/list、通用 authenticator/provider table、method generation、merge 或 change-history framework。
 
 新 User 在创建首个 Space 前允许没有 display name 和 Membership。`/v1/me` 的 User 与当前 Memberships 是 Web routing 的唯一事实；不增加 profile-completed、onboarding-state 或 default-Space。
 
@@ -338,8 +344,9 @@ Adapter cancellation、subprocess kill、temporary-directory cleanup 或 native 
 
 User API 只表达成员旅程：
 
-- 请求/重发邮箱 code，并验证准确 challenge 以建立 Browser Session；
+- 请求/重发邮箱 code，并验证准确 login challenge 以建立 Browser Session；
 - 从 same-origin POST 开始 Google/GitHub login，并在固定 callback 消费 provider proof 以建立同一种 Browser Session；
+- 以 Browser Session 读取固定登录方式标签、重新确认已有方式、显式关联新方式并幂等移除仍可安全移除的方式；
 - 撤销当前 Browser Session；
 - 读取当前 User 与 Spaces；
 - authenticated User 显式创建首个 Space；
@@ -371,7 +378,10 @@ Web 使用 `protocol/user/v1/openapi.yaml` 生成 client。CLI 与 Web 不复制
 
 | 行为 | 同一事务中完成 |
 | --- | --- |
-| 完成 Google/GitHub login | exact callback claim、provider identity、User、Browser Session、transaction completion |
+| 完成 Email/Google/GitHub login | exact proof claim、provider identity、User、Browser Session、transaction completion |
+| 重新确认已有登录方式 | exact purpose-bound proof、exact User/session、旧 session revoke、recent replacement Session、completion |
+| 关联登录方式 | target User/recent session、fresh candidate proof、stable identity ownership、concrete mapping、全旧 session revoke、replacement Session、completion |
+| 移除登录方式 | exact User/recent session、concrete mappings、至少一种保留、command replay、全旧 session revoke、replacement Session |
 | 创建 Work | Membership、目标、首任负责人、幂等身份、初始待应用状态 |
 | 追加 Work Message | Membership、Work lock、连续输入顺序、真实作者、幂等 |
 | 追加 private Conversation message | Membership、Conversation lock、请求重放、单一 outstanding turn、连续顺序、reply claim |
@@ -400,6 +410,7 @@ email_login_attempts
 google_identities
 github_identities
 external_login_transactions
+identity_method_unlinks
 spaces
 space_memberships
 user_tokens
@@ -503,7 +514,9 @@ protocol/
 - Pi 与 Codex 分别通过同一 execution conformance；
 - User API 的 Work summaries 与消息历史有界分页，只公开派生 `needs_review` 与同一 current detail 中的 opaque review identity，不暴露内部 sequence/version/Run/Attempt；
 - Google/GitHub state、browser binding、PKCE、Google nonce、provider proof、denial/outage、callback replay 与同 subject 并发保持一个 exchange winner 和准确 committed Session；
-- 相同邮箱或相同字面 subject 的 email/Google/GitHub identity 保持不同 User，且不能产生 Membership；
+- Email/Google/GitHub reauthenticate 只接受 exact current User 的既有方式；link 要求 recent current proof 与 fresh candidate proof，occupied identity 不 merge；
+- link/unlink 撤销全部旧 sessions并只签发一个 replacement；concurrent final-method removals 只允许一个 winner，response loss exact replay 不重复 mutation 或 resurrect revoked replacement；
+- 相同邮箱或相同字面 subject 的未关联 email/Google/GitHub identity 保持不同 User，且不能产生 Membership；
 - provider code/token/ID token 不进入数据库、Carry cookie、clean redirect URL 或 browser storage；
 - credential-bearing response 都是 `no-store`；
 - PostgreSQL focused tests 使用真实隔离数据库，缺失数据库不是 pass。

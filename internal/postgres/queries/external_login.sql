@@ -5,10 +5,16 @@ SELECT transaction_timestamp()::timestamptz;
 INSERT INTO external_login_transactions (
     transaction_id,
     provider,
+    purpose,
+    target_user_id,
+    initiating_session_id,
     expires_at
 ) VALUES (
     sqlc.arg(transaction_id),
     sqlc.arg(provider),
+    sqlc.arg(purpose),
+    sqlc.narg(target_user_id),
+    sqlc.narg(initiating_session_id),
     transaction_timestamp() + interval '10 minutes'
 )
 RETURNING expires_at;
@@ -39,6 +45,16 @@ WHERE transaction_id = sqlc.arg(transaction_id)
     AND provider = sqlc.arg(provider)
     AND status = 'prepared'
     AND expires_at > transaction_timestamp();
+
+-- name: RejectExternalLogin :execrows
+UPDATE external_login_transactions
+SET
+    status = 'rejected',
+    completed_at = transaction_timestamp()
+WHERE transaction_id = sqlc.arg(transaction_id)
+    AND provider = sqlc.arg(provider)
+    AND status = 'exchanging'
+    AND callback_digest = sqlc.arg(callback_digest);
 
 -- name: MarkExternalLoginUnknown :execrows
 UPDATE external_login_transactions

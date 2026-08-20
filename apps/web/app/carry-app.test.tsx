@@ -16,6 +16,50 @@ beforeEach(() => {
   window.history.replaceState(null, "", "/");
 });
 
+test("reopens Settings for a method callback failure", async () => {
+  window.history.replaceState(null, "", "/?identity_change=link_failed");
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request =
+        input instanceof Request ? input : new Request(input, init);
+      const path = new URL(request.url).pathname;
+      if (request.method === "GET" && path === "/v1/me") {
+        return json({
+          user_id: authenticatedMemberID,
+          display_name: "Alex Morgan",
+          spaces: [
+            {
+              space_id: spaceID,
+              name: "Research",
+              can_manage_members: true,
+              can_enroll_machines: true,
+            },
+          ],
+        });
+      }
+      if (request.method === "GET" && path === "/v1/identity/methods") {
+        return json({ methods: ["email"], reauthentication_required: false });
+      }
+      if (isConversationList(request, path)) return json({ messages: [] });
+      if (request.method === "GET" && path === `/v1/spaces/${spaceID}/works`) {
+        return json({ works: [], has_earlier_works: false });
+      }
+      throw new Error(`unexpected request: ${request.method} ${path}`);
+    }),
+  );
+
+  render(<App />);
+
+  expect(
+    await screen.findByRole("heading", { name: "Sign-in methods" }),
+  ).toBeVisible();
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Carry could not link this sign-in method. Your existing methods were not changed.",
+  );
+  expect(window.location.search).toBe("");
+});
+
 test("retries the exact email request after its response is lost", async () => {
   const requests: Array<{ body: unknown; key: string | null }> = [];
   vi.stubGlobal(

@@ -207,6 +207,304 @@ func TestExternalLoginBrowserJourneyWithConcreteProviders(t *testing.T) {
 	}
 }
 
+func TestIdentityMethodBrowserJourneyWithConcreteProviders(t *testing.T) {
+	ctx := context.Background()
+	pool := openExternalLoginTestPool(t, ctx)
+	store := carrypostgres.NewStore(pool)
+	credentials, err := identity.NewCredentials(bytes.Repeat([]byte{8}, identity.IdentityRootBytes))
+	if err != nil {
+		t.Fatalf("create Identity credentials: %v", err)
+	}
+	googleFixture := newGoogleProviderFixture(t)
+	defer googleFixture.Close()
+	githubFixture := newGitHubProviderFixture(t)
+	defer githubFixture.Close()
+	carry := httptest.NewUnstartedServer(nil)
+	origin, err := carryserver.ParseExternalOrigin("https://" + carry.Listener.Addr().String())
+	if err != nil {
+		t.Fatalf("parse test Carry origin: %v", err)
+	}
+	google, err := newGoogleLoginAt(
+		"google-client", "google-secret", origin.CallbackURL(identity.GoogleLoginProvider),
+		googleEndpoints{authorization: googleFixture.URL + "/authorize", token: googleFixture.URL + "/token", jwks: googleFixture.URL + "/jwks"},
+	)
+	if err != nil {
+		t.Fatalf("configure concrete Google client: %v", err)
+	}
+	github, err := newGitHubLoginAt(
+		"github-client", "github-secret", origin.CallbackURL(identity.GitHubLoginProvider),
+		githubEndpoints{authorization: githubFixture.URL + "/authorize", token: githubFixture.URL + "/token", user: githubFixture.URL + "/user"},
+	)
+	if err != nil {
+		t.Fatalf("configure concrete GitHub client: %v", err)
+	}
+	carry.Config.Handler = composeExternalLoginTestAPI(t, pool, store, store, credentials, origin, google, github)
+	carry.StartTLS()
+	defer carry.Close()
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatalf("create Browser cookie jar: %v", err)
+	}
+	browser := carry.Client()
+	browser.Jar = jar
+	browser.CheckRedirect = noRedirect
+
+	userID := "11111111-1111-4111-8111-111111111111"
+	initialSessionID := "22222222-2222-4222-8222-222222222222"
+	if _, err := pool.Exec(ctx, `insert into carry_users (user_id) values ($1)`, userID); err != nil {
+		t.Fatalf("seed Browser User: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `insert into email_identities (canonical_email, user_id) values ('browser-methods@example.com', $1)`, userID); err != nil {
+		t.Fatalf("seed Browser email method: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		insert into browser_sessions (session_id, user_id, identity_proof_method, expires_at)
+		values ($2, $1, 'email', transaction_timestamp() + interval '30 days')
+	`, userID, initialSessionID); err != nil {
+		t.Fatalf("seed Browser Session: %v", err)
+	}
+	initialCredential, _ := credentials.BrowserSessionCredential(initialSessionID)
+	carryOrigin, _ := url.Parse(carry.URL)
+	jar.SetCookies(carryOrigin, []*http.Cookie{{
+		Name: "__Host-carry_session", Value: initialCredential, Path: "/", Secure: true,
+	}})
+	createFirstSpace(t, browser, carry.URL, "Identity User", "Identity Space")
+	assertIdentityMethodsHTTP(t, browser, carry.URL, []string{"email"}, "browser-methods@example.com")
+	bearerRequest, err := http.NewRequest(http.MethodGet, carry.URL+"/v1/identity/methods", nil)
+	if err != nil {
+		t.Fatalf("create bearer Identity Settings request: %v", err)
+	}
+	bearerRequest.Header.Set("Authorization", "Bearer transitional-member-token")
+	bearerResponse, err := browser.Do(bearerRequest)
+	if err != nil {
+		t.Fatalf("send bearer Identity Settings request: %v", err)
+	}
+	_ = bearerResponse.Body.Close()
+	if bearerResponse.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("bearer Identity Settings status = %d", bearerResponse.StatusCode)
+	}
+
+	googleLink := browserProviderJourney{
+		name: "Google link", provider: identity.GoogleLoginProvider,
+		startPath: "/v1/identity/methods/google/start", callbackPath: "/v1/auth/google/callback",
+		prepare: func(authorization *url.URL) {
+			googleFixture.Expect(authorization.Query().Get("nonce"), authorization.Query().Get("code_challenge"))
+		},
+		providerCalls: func() int64 { return googleFixture.tokenCalls.Load() },
+	}
+	oldCredential := currentBrowserCredential(t, browser, carry.URL)
+	startedGoogleLink := startBrowserLogin(t, browser, carry.URL, googleLink)
+	linkedResponse, googleLinkedSession := completeBrowserLogin(t, browser, carry.URL, googleLink, startedGoogleLink, "link-google")
+	if linkedResponse.Header.Get("Location") != carry.URL+"/?identity_change=linked" {
+		t.Fatalf("Google link redirect = %q", linkedResponse.Header.Get("Location"))
+	}
+	callsAfterLink := googleFixture.tokenCalls.Load()
+	replayedGoogleLink := replayProviderCallback(t, browser, carry.URL, googleLink, startedGoogleLink, "link-google")
+	if replayedGoogleLink.Value != googleLinkedSession.Value || googleFixture.tokenCalls.Load() != callsAfterLink {
+		t.Fatalf("Google link replay Session = %q/%q, calls = %d/%d", replayedGoogleLink.Value, googleLinkedSession.Value, googleFixture.tokenCalls.Load(), callsAfterLink)
+	}
+	assertCredentialStatus(t, carry.Client(), carry.URL, oldCredential, http.StatusUnauthorized)
+	if gotUser, spaces := loadCurrentUser(t, browser, carry.URL); gotUser != userID || spaces != 1 {
+		t.Fatalf("after Google link User = %s/%s, Spaces = %d", gotUser, userID, spaces)
+	}
+	assertIdentityMethodsHTTP(t, browser, carry.URL, []string{"email", "google"}, "stable-google-subject")
+
+	googleReauthentication := googleLink
+	googleReauthentication.name = "Google reauthentication"
+	googleReauthentication.startPath = "/v1/identity/reauthentication/google/start"
+	oldCredential = currentBrowserCredential(t, browser, carry.URL)
+	startedReauthentication := startBrowserLogin(t, browser, carry.URL, googleReauthentication)
+	reauthenticatedResponse, _ := completeBrowserLogin(t, browser, carry.URL, googleReauthentication, startedReauthentication, "reauthenticate-google")
+	if reauthenticatedResponse.Header.Get("Location") != carry.URL+"/?identity_change=confirmed" {
+		t.Fatalf("Google reauthentication redirect = %q", reauthenticatedResponse.Header.Get("Location"))
+	}
+	assertCredentialStatus(t, carry.Client(), carry.URL, oldCredential, http.StatusUnauthorized)
+
+	githubLink := browserProviderJourney{
+		name: "GitHub link", provider: identity.GitHubLoginProvider,
+		startPath: "/v1/identity/methods/github/start", callbackPath: "/v1/auth/github/callback",
+		prepare:       func(authorization *url.URL) { githubFixture.Expect(authorization.Query().Get("code_challenge")) },
+		providerCalls: func() int64 { return githubFixture.tokenCalls.Load() + githubFixture.userCalls.Load() },
+	}
+	oldCredential = currentBrowserCredential(t, browser, carry.URL)
+	startedGitHubLink := startBrowserLogin(t, browser, carry.URL, githubLink)
+	githubResponse, _ := completeBrowserLogin(t, browser, carry.URL, githubLink, startedGitHubLink, "link-github")
+	if githubResponse.Header.Get("Location") != carry.URL+"/?identity_change=linked" {
+		t.Fatalf("GitHub link redirect = %q", githubResponse.Header.Get("Location"))
+	}
+	assertCredentialStatus(t, carry.Client(), carry.URL, oldCredential, http.StatusUnauthorized)
+	assertIdentityMethodsHTTP(t, browser, carry.URL, []string{"email", "google", "github"}, "424242")
+
+	unlinkInitiatingCredential := currentBrowserCredential(t, browser, carry.URL)
+	unlinkResponse := identityMethodRequest(
+		t, browser, http.MethodDelete, carry.URL+"/v1/identity/methods/email", carry.URL,
+		unlinkInitiatingCredential, "remove-email",
+	)
+	unlinkReplacement := responseCookie(unlinkResponse, "__Host-carry_session")
+	if unlinkResponse.StatusCode != http.StatusNoContent || unlinkReplacement == nil {
+		defer unlinkResponse.Body.Close()
+		t.Fatalf("unlink email status = %d, cookie = %#v, body = %s", unlinkResponse.StatusCode, unlinkReplacement, readBody(unlinkResponse))
+	}
+	_ = unlinkResponse.Body.Close()
+	replayResponse := identityMethodRequest(
+		t, carry.Client(), http.MethodDelete, carry.URL+"/v1/identity/methods/email", carry.URL,
+		unlinkInitiatingCredential, "remove-email",
+	)
+	replayedReplacement := responseCookie(replayResponse, "__Host-carry_session")
+	if replayResponse.StatusCode != http.StatusNoContent || replayedReplacement == nil || replayedReplacement.Value != unlinkReplacement.Value {
+		defer replayResponse.Body.Close()
+		t.Fatalf("unlink replay status = %d, replacement = %#v/%#v, body = %s", replayResponse.StatusCode, replayedReplacement, unlinkReplacement, readBody(replayResponse))
+	}
+	_ = replayResponse.Body.Close()
+	changedReplay := identityMethodRequest(
+		t, carry.Client(), http.MethodDelete, carry.URL+"/v1/identity/methods/google", carry.URL,
+		unlinkInitiatingCredential, "remove-email",
+	)
+	if changedReplay.StatusCode != http.StatusConflict {
+		defer changedReplay.Body.Close()
+		t.Fatalf("changed unlink replay status = %d, body = %s", changedReplay.StatusCode, readBody(changedReplay))
+	}
+	_ = changedReplay.Body.Close()
+	assertIdentityMethodsHTTP(t, browser, carry.URL, []string{"google", "github"}, "browser-methods@example.com")
+
+	replacementID, ok := credentials.ParseBrowserSessionCredential(unlinkReplacement.Value)
+	if !ok {
+		t.Fatal("parse unlink replacement credential")
+	}
+	if err := store.RevokeBrowserSession(ctx, replacementID); err != nil {
+		t.Fatalf("revoke unlink replacement Session: %v", err)
+	}
+	inactiveReplay := identityMethodRequest(
+		t, carry.Client(), http.MethodDelete, carry.URL+"/v1/identity/methods/email", carry.URL,
+		unlinkInitiatingCredential, "remove-email",
+	)
+	if inactiveReplay.StatusCode != http.StatusUnauthorized {
+		defer inactiveReplay.Body.Close()
+		t.Fatalf("inactive replacement replay status = %d, body = %s", inactiveReplay.StatusCode, readBody(inactiveReplay))
+	}
+	_ = inactiveReplay.Body.Close()
+
+	googleLogin := googleLink
+	googleLogin.name = "Google login after link"
+	googleLogin.startPath = "/v1/auth/google/start"
+	startedGoogleLogin := startBrowserLogin(t, browser, carry.URL, googleLogin)
+	_, _ = completeBrowserLogin(t, browser, carry.URL, googleLogin, startedGoogleLogin, "login-linked-google")
+	if gotUser, spaces := loadCurrentUser(t, browser, carry.URL); gotUser != userID || spaces != 1 {
+		t.Fatalf("linked Google login User = %s/%s, Spaces = %d", gotUser, userID, spaces)
+	}
+	logoutBrowser(t, browser, carry.URL)
+	githubLogin := githubLink
+	githubLogin.name = "GitHub login after link"
+	githubLogin.startPath = "/v1/auth/github/start"
+	startedGitHubLogin := startBrowserLogin(t, browser, carry.URL, githubLogin)
+	_, _ = completeBrowserLogin(t, browser, carry.URL, githubLogin, startedGitHubLogin, "login-linked-github")
+	if gotUser, spaces := loadCurrentUser(t, browser, carry.URL); gotUser != userID || spaces != 1 {
+		t.Fatalf("linked GitHub login User = %s/%s, Spaces = %d", gotUser, userID, spaces)
+	}
+}
+
+func assertIdentityMethodsHTTP(t *testing.T, browser *http.Client, carryURL string, expected []string, forbidden string) {
+	t.Helper()
+	response := browserRequest(t, browser, http.MethodGet, carryURL+"/v1/identity/methods", "", nil)
+	defer response.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("load Identity methods status = %d, body = %s", response.StatusCode, body)
+	}
+	if forbidden != "" && strings.Contains(string(body), forbidden) {
+		t.Fatalf("Identity methods exposed forbidden metadata %q: %s", forbidden, body)
+	}
+	var payload struct {
+		Methods []string `json:"methods"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("decode Identity methods: %v", err)
+	}
+	if fmt.Sprint(payload.Methods) != fmt.Sprint(expected) {
+		t.Fatalf("Identity methods = %#v, want %#v", payload.Methods, expected)
+	}
+}
+
+func currentBrowserCredential(t *testing.T, browser *http.Client, carryURL string) string {
+	t.Helper()
+	parsed, _ := url.Parse(carryURL)
+	for _, cookie := range browser.Jar.Cookies(parsed) {
+		if cookie.Name == "__Host-carry_session" {
+			return cookie.Value
+		}
+	}
+	t.Fatal("Browser has no Carry Session credential")
+	return ""
+}
+
+func replayProviderCallback(
+	t *testing.T,
+	browser *http.Client,
+	carryURL string,
+	journey browserProviderJourney,
+	started startedBrowserLogin,
+	code string,
+) *http.Cookie {
+	t.Helper()
+	callbackURL := carryURL + journey.callbackPath + "?code=" + url.QueryEscape(code) + "&state=" + url.QueryEscape(started.state)
+	request, err := http.NewRequest(http.MethodGet, callbackURL, nil)
+	if err != nil {
+		t.Fatalf("create %s replay: %v", journey.name, err)
+	}
+	request.AddCookie(&http.Cookie{Name: "__Host-carry_oauth", Value: started.binding})
+	response, err := browser.Do(request)
+	if err != nil {
+		t.Fatalf("replay %s callback: %v", journey.name, err)
+	}
+	defer response.Body.Close()
+	cookie := responseCookie(response, "__Host-carry_session")
+	if response.StatusCode != http.StatusSeeOther || cookie == nil {
+		t.Fatalf("replay %s status = %d, cookie = %#v, body = %s", journey.name, response.StatusCode, cookie, readBody(response))
+	}
+	return cookie
+}
+
+func identityMethodRequest(
+	t *testing.T,
+	client *http.Client,
+	method string,
+	requestURL string,
+	origin string,
+	credential string,
+	idempotencyKey string,
+) *http.Response {
+	t.Helper()
+	request, err := http.NewRequest(method, requestURL, nil)
+	if err != nil {
+		t.Fatalf("create Identity method request: %v", err)
+	}
+	request.Header.Set("Origin", origin)
+	request.Header.Set("Idempotency-Key", idempotencyKey)
+	request.AddCookie(&http.Cookie{Name: "__Host-carry_session", Value: credential})
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatalf("send Identity method request: %v", err)
+	}
+	return response
+}
+
+func assertCredentialStatus(t *testing.T, client *http.Client, carryURL string, credential string, expected int) {
+	t.Helper()
+	request, err := http.NewRequest(http.MethodGet, carryURL+"/v1/me", nil)
+	if err != nil {
+		t.Fatalf("create stale credential request: %v", err)
+	}
+	request.AddCookie(&http.Cookie{Name: "__Host-carry_session", Value: credential})
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatalf("send stale credential request: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != expected {
+		t.Fatalf("credential /me status = %d, want %d, body = %s", response.StatusCode, expected, readBody(response))
+	}
+}
+
 type browserProviderJourney struct {
 	name          string
 	provider      identity.ExternalLoginProvider
@@ -427,6 +725,10 @@ func composeExternalLoginTestAPI(
 	if err != nil {
 		t.Fatalf("compose external login: %v", err)
 	}
+	identityMethods, err := identity.NewMethods(store, credentials)
+	if err != nil {
+		t.Fatalf("compose Identity methods: %v", err)
+	}
 	firstSpace, err := space.NewFirstSpace(store)
 	if err != nil {
 		t.Fatalf("compose first Space: %v", err)
@@ -436,7 +738,8 @@ func composeExternalLoginTestAPI(
 		t.Fatalf("compose User authentication: %v", err)
 	}
 	identityRoutes, err := carryserver.NewUserIdentityRoutes(
-		emailLogin, externalLogin, store, credentials, origin, carryserver.NewRequestSource(nil), store,
+		emailLogin, externalLogin, identityMethods, store, credentials,
+		origin, carryserver.NewRequestSource(nil), store,
 	)
 	if err != nil {
 		t.Fatalf("compose User identity routes: %v", err)

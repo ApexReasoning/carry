@@ -196,6 +196,86 @@ func TestExternalLoginProviderFailureBecomesUnknownWithoutCompletion(t *testing.
 	}
 }
 
+func TestExternalLoginMethodFailuresRetainStoredPurpose(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name          string
+		outcome       ExternalCallbackOutcome
+		providerError error
+		completionErr error
+		want          error
+	}{
+		{name: "denied", outcome: ExternalCallbackDenied, want: ErrExternalLoginDenied},
+		{name: "unavailable", outcome: ExternalCallbackCode, providerError: errors.New("provider response was lost"), want: ErrExternalLoginUnavailable},
+		{name: "rejected", outcome: ExternalCallbackCode, completionErr: ErrIdentityMethodOccupied, want: ErrExternalLoginRejected},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			credentials := externalLoginTestCredentials(t)
+			persistence := &externalLoginMemoryPersistence{completionErr: test.completionErr}
+			login, err := NewExternalLogin(
+				persistence,
+				&recordingGoogleLogin{err: test.providerError},
+				&recordingGitHubLogin{},
+				credentials,
+			)
+			if err != nil {
+				t.Fatalf("compose external login: %v", err)
+			}
+			start, err := login.StartGoogleLink(
+				context.Background(),
+				"11111111-1111-4111-8111-111111111111",
+				"22222222-2222-4222-8222-222222222222",
+			)
+			if err != nil {
+				t.Fatalf("start Google link: %v", err)
+			}
+			state := queryParameter(t, start.AuthorizationURL, "state")
+			callback := ExternalLoginCallback{
+				State: state, BrowserCredential: start.BrowserCredential,
+				ExactResponse: "code=provider-code&state=" + state, Outcome: test.outcome,
+			}
+			if test.outcome == ExternalCallbackCode {
+				callback.Code = "provider-code"
+			} else {
+				callback.ExactResponse = "error=access_denied&state=" + state
+			}
+			_, err = login.CompleteGoogle(context.Background(), callback)
+			purpose, hasPurpose := ExternalProofFailurePurpose(err)
+			if !errors.Is(err, test.want) || !hasPurpose || purpose != LinkPurpose {
+				t.Fatalf("method failure = %v, purpose = %q/%t", err, purpose, hasPurpose)
+			}
+		})
+	}
+}
+
+func TestExternalLoginStartsFixedReauthenticationAndLinkPurposes(t *testing.T) {
+	t.Parallel()
+	credentials := externalLoginTestCredentials(t)
+	persistence := &externalLoginMemoryPersistence{}
+	login, err := NewExternalLogin(persistence, &recordingGoogleLogin{}, &recordingGitHubLogin{}, credentials)
+	if err != nil {
+		t.Fatalf("compose external login: %v", err)
+	}
+	userID := "11111111-1111-4111-8111-111111111111"
+	sessionID := "22222222-2222-4222-8222-222222222222"
+	if _, err := login.StartGoogleReauthentication(context.Background(), userID, sessionID); err != nil {
+		t.Fatalf("start Google reauthentication: %v", err)
+	}
+	if persistence.create.Purpose != ReauthenticatePurpose || persistence.create.Provider != GoogleLoginProvider ||
+		persistence.create.TargetUserID != userID || persistence.create.InitiatingSessionID != sessionID {
+		t.Fatalf("Google reauthentication command = %#v", persistence.create)
+	}
+	if _, err := login.StartGitHubLink(context.Background(), userID, sessionID); err != nil {
+		t.Fatalf("start GitHub link: %v", err)
+	}
+	if persistence.create.Purpose != LinkPurpose || persistence.create.Provider != GitHubLoginProvider ||
+		persistence.create.TargetUserID != userID || persistence.create.InitiatingSessionID != sessionID {
+		t.Fatalf("GitHub link command = %#v", persistence.create)
+	}
+}
+
 func TestExternalLoginRejectsWrongBrowserBindingBeforeProvider(t *testing.T) {
 	t.Parallel()
 	credentials := externalLoginTestCredentials(t)
@@ -220,12 +300,14 @@ func TestExternalLoginRejectsWrongBrowserBindingBeforeProvider(t *testing.T) {
 }
 
 type externalLoginMemoryPersistence struct {
+	create                  CreateExternalLoginCommand
 	transactionID           string
 	provider                ExternalLoginProvider
 	claimed                 bool
 	claimCalls              int
 	replay                  bool
 	unknown                 bool
+	rejected                bool
 	googleCompleted         bool
 	completionErr           error
 	commitOnCompletionError bool
@@ -236,6 +318,7 @@ func (p *externalLoginMemoryPersistence) CreateExternalLogin(
 	_ context.Context,
 	command CreateExternalLoginCommand,
 ) (time.Time, error) {
+	p.create = command
 	p.transactionID = command.TransactionID
 	p.provider = command.Provider
 	return time.Now().Add(30 * time.Minute), nil
@@ -250,17 +333,20 @@ func (p *externalLoginMemoryPersistence) ClaimExternalLogin(
 	if command.TransactionID != p.transactionID || command.Provider != p.provider {
 		return ExternalLoginClaim{}, ErrExternalLoginInvalid
 	}
+	claim := ExternalLoginClaim{Purpose: p.create.Purpose}
 	if command.Outcome == ExternalCallbackDenied {
-		return ExternalLoginClaim{}, ErrExternalLoginDenied
+		return claim, ErrExternalLoginDenied
 	}
 	if command.Outcome == ExternalCallbackUnavailable {
 		p.unknown = true
-		return ExternalLoginClaim{}, ErrExternalLoginUnavailable
+		return claim, ErrExternalLoginUnavailable
 	}
 	if p.replay {
-		return ExternalLoginClaim{IsReplay: true, Session: p.session}, nil
+		claim.IsReplay = true
+		claim.Session = p.session
+		return claim, nil
 	}
-	return ExternalLoginClaim{}, nil
+	return claim, nil
 }
 
 func (p *externalLoginMemoryPersistence) CompleteGoogleLogin(
@@ -286,6 +372,14 @@ func (p *externalLoginMemoryPersistence) CompleteGitHubLogin(
 		return BrowserSession{}, p.completionErr
 	}
 	return p.session, nil
+}
+
+func (p *externalLoginMemoryPersistence) RejectExternalLogin(
+	_ context.Context,
+	_ MarkExternalLoginUnknownCommand,
+) error {
+	p.rejected = true
+	return nil
 }
 
 func (p *externalLoginMemoryPersistence) MarkExternalLoginUnknown(

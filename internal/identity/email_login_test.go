@@ -72,7 +72,8 @@ func TestEmailLoginOwnsCanonicalizationDerivationAndSubmission(t *testing.T) {
 		t.Fatalf("request code: %v", err)
 	}
 	expectedRequestDigest := credentials.RequestDigest(
-		"request-email-code", persistence.prepared.ChallengeID, "person@example.com",
+		"request-email-code", string(LoginPurpose), persistence.prepared.ChallengeID,
+		"person@example.com", "", "",
 	)
 	if persistence.prepare.CanonicalEmail != "person@example.com" ||
 		persistence.prepare.RequestDigest != expectedRequestDigest || submitter.calls != 1 ||
@@ -141,6 +142,53 @@ func TestEmailLoginAcceptedAndRejectedSubmissionsAreTerminal(t *testing.T) {
 	}
 }
 
+func TestEmailMethodProofsFixPurposeTargetAndReauthenticationAddress(t *testing.T) {
+	t.Parallel()
+	credentials, _ := NewCredentials(bytes.Repeat([]byte{8}, IdentityRootBytes))
+	userID := "11111111-1111-4111-8111-111111111111"
+	sessionID := "22222222-2222-4222-8222-222222222222"
+
+	reauthentication := &recordingEmailPersistence{prepared: EmailChallenge{
+		ChallengeID: "33333333-3333-4333-8333-333333333333", CanonicalEmail: "linked@example.com",
+		ExpiresAt: time.Now().Add(time.Minute), SubmissionState: EmailSubmissionPrepared, CanSubmit: true,
+	}}
+	login, err := NewEmailLogin(reauthentication, &recordingEmailSubmitter{}, credentials)
+	if err != nil {
+		t.Fatalf("compose reauthentication: %v", err)
+	}
+	_, err = login.RequestReauthenticationCode(context.Background(), RequestEmailMethodCodeCommand{
+		ChallengeID: reauthentication.prepared.ChallengeID, Email: "attacker@example.com", Source: "203.0.113.20",
+		IdempotencyKey: "reauthenticate-email", UserID: userID, SessionID: sessionID,
+	})
+	if err != nil {
+		t.Fatalf("request reauthentication code: %v", err)
+	}
+	if reauthentication.prepare.CanonicalEmail != "person@example.com" {
+		t.Fatalf("reauthentication candidate = %#v", reauthentication.prepare)
+	}
+	if reauthentication.prepare.Purpose != ReauthenticatePurpose || reauthentication.prepare.TargetUserID != userID ||
+		reauthentication.prepare.InitiatingSessionID != sessionID {
+		t.Fatalf("reauthentication command = %#v", reauthentication.prepare)
+	}
+
+	link := &recordingEmailPersistence{prepared: EmailChallenge{
+		ChallengeID: "44444444-4444-4444-8444-444444444444", CanonicalEmail: "candidate@example.com",
+		ExpiresAt: time.Now().Add(time.Minute), SubmissionState: EmailSubmissionPrepared, CanSubmit: true,
+	}}
+	login, _ = NewEmailLogin(link, &recordingEmailSubmitter{}, credentials)
+	_, err = login.RequestLinkCode(context.Background(), RequestEmailMethodCodeCommand{
+		ChallengeID: link.prepared.ChallengeID, Email: " Candidate@Example.COM ", Source: "203.0.113.21",
+		IdempotencyKey: "link-email", UserID: userID, SessionID: sessionID,
+	})
+	if err != nil {
+		t.Fatalf("request link code: %v", err)
+	}
+	if link.prepare.CanonicalEmail != "candidate@example.com" || link.prepare.Purpose != LinkPurpose ||
+		link.prepare.TargetUserID != userID || link.prepare.InitiatingSessionID != sessionID {
+		t.Fatalf("link command = %#v", link.prepare)
+	}
+}
+
 func TestEmailLoginDoesNotSubmitExpiredPreparedReplay(t *testing.T) {
 	t.Parallel()
 	credentials, _ := NewCredentials(bytes.Repeat([]byte{5}, IdentityRootBytes))
@@ -194,6 +242,10 @@ func (persistence *recordingEmailPersistence) RecordEmailSubmission(
 
 func (*recordingEmailPersistence) VerifyEmailChallenge(context.Context, VerifyEmailChallengeCommand) (BrowserSession, error) {
 	return BrowserSession{}, nil
+}
+
+func (*recordingEmailPersistence) EmailForReauthentication(context.Context, string, string) (string, error) {
+	return "person@example.com", nil
 }
 
 type recordingEmailSubmitter struct {

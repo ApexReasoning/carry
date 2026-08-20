@@ -18,6 +18,7 @@ var (
 	ErrExternalLoginConflict    = errors.New("external sign-in response conflicts with an earlier response")
 	ErrExternalLoginDenied      = errors.New("external sign-in was cancelled")
 	ErrExternalLoginUnavailable = errors.New("external sign-in could not be confirmed")
+	ErrExternalLoginRejected    = errors.New("sign-in method could not be changed")
 )
 
 type ExternalLoginProvider string
@@ -63,6 +64,7 @@ type ExternalLoginPersistence interface {
 	ClaimExternalLogin(context.Context, ClaimExternalLoginCommand) (ExternalLoginClaim, error)
 	CompleteGoogleLogin(context.Context, CompleteGoogleLoginCommand) (BrowserSession, error)
 	CompleteGitHubLogin(context.Context, CompleteGitHubLoginCommand) (BrowserSession, error)
+	RejectExternalLogin(context.Context, MarkExternalLoginUnknownCommand) error
 	MarkExternalLoginUnknown(context.Context, MarkExternalLoginUnknownCommand) error
 }
 
@@ -97,50 +99,69 @@ type ExternalLoginStart struct {
 }
 
 func (login *ExternalLogin) StartGoogle(ctx context.Context) (ExternalLoginStart, error) {
+	return login.start(ctx, GoogleLoginProvider, LoginPurpose, "", "")
+}
+
+func (login *ExternalLogin) StartGoogleReauthentication(ctx context.Context, userID string, sessionID string) (ExternalLoginStart, error) {
+	return login.start(ctx, GoogleLoginProvider, ReauthenticatePurpose, userID, sessionID)
+}
+
+func (login *ExternalLogin) StartGoogleLink(ctx context.Context, userID string, sessionID string) (ExternalLoginStart, error) {
+	return login.start(ctx, GoogleLoginProvider, LinkPurpose, userID, sessionID)
+}
+
+func (login *ExternalLogin) StartGitHub(ctx context.Context) (ExternalLoginStart, error) {
+	return login.start(ctx, GitHubLoginProvider, LoginPurpose, "", "")
+}
+
+func (login *ExternalLogin) StartGitHubReauthentication(ctx context.Context, userID string, sessionID string) (ExternalLoginStart, error) {
+	return login.start(ctx, GitHubLoginProvider, ReauthenticatePurpose, userID, sessionID)
+}
+
+func (login *ExternalLogin) StartGitHubLink(ctx context.Context, userID string, sessionID string) (ExternalLoginStart, error) {
+	return login.start(ctx, GitHubLoginProvider, LinkPurpose, userID, sessionID)
+}
+
+func (login *ExternalLogin) start(
+	ctx context.Context,
+	provider ExternalLoginProvider,
+	purpose ProofPurpose,
+	userID string,
+	sessionID string,
+) (ExternalLoginStart, error) {
 	transactionID := uuid.NewString()
 	expiresAt, err := login.persistence.CreateExternalLogin(ctx, CreateExternalLoginCommand{
-		TransactionID: transactionID,
-		Provider:      GoogleLoginProvider,
+		TransactionID: transactionID, Provider: provider, Purpose: purpose,
+		TargetUserID: userID, InitiatingSessionID: sessionID,
 	})
 	if err != nil {
 		return ExternalLoginStart{}, err
 	}
-	state, cookie, err := login.credentials.externalLoginBindings(transactionID, GoogleLoginProvider)
+	state, cookie, err := login.credentials.externalLoginBindings(transactionID, provider)
 	if err != nil {
 		return ExternalLoginStart{}, err
 	}
 	return ExternalLoginStart{
-		AuthorizationURL: login.google.AuthorizationURL(
-			state,
-			login.credentials.GoogleNonce(transactionID),
-			login.credentials.PKCEChallenge(transactionID, GoogleLoginProvider),
-		),
+		AuthorizationURL:  login.authorizationURL(provider, transactionID, state),
 		BrowserCredential: cookie,
 		ExpiresAt:         expiresAt,
 	}, nil
 }
 
-func (login *ExternalLogin) StartGitHub(ctx context.Context) (ExternalLoginStart, error) {
-	transactionID := uuid.NewString()
-	expiresAt, err := login.persistence.CreateExternalLogin(ctx, CreateExternalLoginCommand{
-		TransactionID: transactionID,
-		Provider:      GitHubLoginProvider,
-	})
-	if err != nil {
-		return ExternalLoginStart{}, err
+func (login *ExternalLogin) authorizationURL(provider ExternalLoginProvider, transactionID string, state string) string {
+	switch provider {
+	case GoogleLoginProvider:
+		return login.google.AuthorizationURL(
+			state, login.credentials.GoogleNonce(transactionID),
+			login.credentials.PKCEChallenge(transactionID, provider),
+		)
+	case GitHubLoginProvider:
+		return login.github.AuthorizationURL(
+			state, login.credentials.PKCEChallenge(transactionID, provider),
+		)
+	default:
+		return ""
 	}
-	state, cookie, err := login.credentials.externalLoginBindings(transactionID, GitHubLoginProvider)
-	if err != nil {
-		return ExternalLoginStart{}, err
-	}
-	return ExternalLoginStart{
-		AuthorizationURL: login.github.AuthorizationURL(
-			state,
-			login.credentials.PKCEChallenge(transactionID, GitHubLoginProvider),
-		),
-		BrowserCredential: cookie,
-		ExpiresAt:         expiresAt,
-	}, nil
 }
 
 type ExternalLoginCallback struct {
@@ -181,7 +202,7 @@ func (login *ExternalLogin) complete(
 		Outcome:        callback.Outcome,
 	})
 	if err != nil {
-		return BrowserSession{}, err
+		return BrowserSession{}, ExternalProofFailure(claim.Purpose, err)
 	}
 	if claim.IsReplay {
 		return claim.Session, nil
@@ -199,7 +220,7 @@ func (login *ExternalLogin) complete(
 		)
 		if err != nil {
 			login.markUnknown(ctx, transactionID, provider, callbackDigest)
-			return BrowserSession{}, ErrExternalLoginUnavailable
+			return BrowserSession{}, ExternalProofFailure(claim.Purpose, ErrExternalLoginUnavailable)
 		}
 		session, completionErr = login.completeGoogle(ctx, transactionID, callbackDigest, proof)
 	case GitHubLoginProvider:
@@ -208,7 +229,7 @@ func (login *ExternalLogin) complete(
 		)
 		if err != nil {
 			login.markUnknown(ctx, transactionID, provider, callbackDigest)
-			return BrowserSession{}, ErrExternalLoginUnavailable
+			return BrowserSession{}, ExternalProofFailure(claim.Purpose, ErrExternalLoginUnavailable)
 		}
 		session, completionErr = login.completeGitHub(ctx, transactionID, callbackDigest, proof)
 	default:
@@ -220,8 +241,11 @@ func (login *ExternalLogin) complete(
 	if reconciled, ok := login.reconcileCompletion(transactionID, provider, callbackDigest); ok {
 		return reconciled, nil
 	}
+	if knownExternalProofRejection(completionErr) && login.reject(ctx, transactionID, provider, callbackDigest) {
+		return BrowserSession{}, ExternalProofFailure(claim.Purpose, ErrExternalLoginRejected)
+	}
 	login.markUnknown(ctx, transactionID, provider, callbackDigest)
-	return BrowserSession{}, ErrExternalLoginUnavailable
+	return BrowserSession{}, ExternalProofFailure(claim.Purpose, ErrExternalLoginUnavailable)
 }
 
 func (login *ExternalLogin) completeGoogle(
@@ -280,6 +304,27 @@ func (login *ExternalLogin) reconcileCompletion(
 		return BrowserSession{}, false
 	}
 	return claim.Session, true
+}
+
+func (login *ExternalLogin) reject(
+	ctx context.Context,
+	transactionID string,
+	provider ExternalLoginProvider,
+	callbackDigest [sha256.Size]byte,
+) bool {
+	rejectCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	return login.persistence.RejectExternalLogin(rejectCtx, MarkExternalLoginUnknownCommand{
+		TransactionID: transactionID, Provider: provider, CallbackDigest: callbackDigest,
+	}) == nil
+}
+
+func knownExternalProofRejection(err error) bool {
+	return errors.Is(err, ErrIdentityMethodOccupied) ||
+		errors.Is(err, ErrIdentityMethodAlreadyLinked) ||
+		errors.Is(err, ErrIdentityMethodNotLinked) ||
+		errors.Is(err, ErrRecentIdentityProofRequired) ||
+		errors.Is(err, ErrUnauthenticated)
 }
 
 func (login *ExternalLogin) markUnknown(
@@ -381,8 +426,11 @@ func validExternalLoginProvider(provider ExternalLoginProvider) bool {
 }
 
 type CreateExternalLoginCommand struct {
-	TransactionID string
-	Provider      ExternalLoginProvider
+	TransactionID       string
+	Provider            ExternalLoginProvider
+	Purpose             ProofPurpose
+	TargetUserID        string
+	InitiatingSessionID string
 }
 
 type ClaimExternalLoginCommand struct {
@@ -395,6 +443,30 @@ type ClaimExternalLoginCommand struct {
 type ExternalLoginClaim struct {
 	IsReplay bool
 	Session  BrowserSession
+	Purpose  ProofPurpose
+}
+
+type externalProofFailure struct {
+	purpose ProofPurpose
+	cause   error
+}
+
+func (failure externalProofFailure) Error() string { return failure.cause.Error() }
+func (failure externalProofFailure) Unwrap() error { return failure.cause }
+
+func ExternalProofFailure(purpose ProofPurpose, cause error) error {
+	if !validProofPurpose(purpose) || cause == nil {
+		return cause
+	}
+	return externalProofFailure{purpose: purpose, cause: cause}
+}
+
+func ExternalProofFailurePurpose(err error) (ProofPurpose, bool) {
+	var failure externalProofFailure
+	if !errors.As(err, &failure) {
+		return "", false
+	}
+	return failure.purpose, true
 }
 
 type CompleteGoogleLoginCommand struct {
