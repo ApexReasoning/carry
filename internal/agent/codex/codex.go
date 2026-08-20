@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ApexReasoning/carry/internal/agent/reference"
 	"github.com/ApexReasoning/carry/internal/conversation"
 	"github.com/ApexReasoning/carry/internal/host"
 )
@@ -38,29 +37,14 @@ var disabledFeatures = [...]string{
 }
 
 // Adapter owns the Codex app-server protocol used by Carry.
-type Adapter struct {
-	referenceBaseURL string
-	reference        *reference.Client
-}
+type Adapter struct{}
 
-// New constructs the Codex adapter without an optional Reference Catalog.
+// New constructs the single supported Codex adapter.
 func New() *Adapter {
-	return NewWithReferenceBaseURL("")
-}
-
-// NewWithReferenceBaseURL constructs a Codex adapter with one fixed Reference Catalog URL.
-func NewWithReferenceBaseURL(baseURL string) *Adapter {
-	adapter := &Adapter{referenceBaseURL: baseURL}
-	if baseURL != "" {
-		adapter.reference, _ = reference.New(baseURL)
-	}
-	return adapter
+	return &Adapter{}
 }
 
 func (adapter *Adapter) Diagnose(ctx context.Context) error {
-	if adapter.reference == nil && adapter.referenceBaseURL != "" {
-		return fmt.Errorf("%w: Reference Catalog is invalid", host.ErrAgentUnavailable)
-	}
 	if _, err := exec.LookPath("codex"); err != nil {
 		return fmt.Errorf("%w: Codex executable: %v", host.ErrAgentUnavailable, err)
 	}
@@ -84,7 +68,7 @@ func (adapter *Adapter) Execute(ctx context.Context, request host.ExecutionReque
 	if err != nil {
 		return host.UnderstandingUpdate{}, err
 	}
-	text, err := adapter.generate(ctx, prompt, host.UnderstandingOutputSchema, true, adapter.reference != nil)
+	text, err := adapter.generate(ctx, prompt, host.UnderstandingOutputSchema, true)
 	if err != nil {
 		return host.UnderstandingUpdate{}, err
 	}
@@ -96,14 +80,14 @@ func (adapter *Adapter) Reply(ctx context.Context, request host.ConversationRepl
 	if err != nil {
 		return conversation.ReplyCandidate{}, err
 	}
-	text, err := adapter.generate(ctx, prompt, host.ConversationReplyOutputSchema, false, false)
+	text, err := adapter.generate(ctx, prompt, host.ConversationReplyOutputSchema, false)
 	if err != nil {
 		return conversation.ReplyCandidate{}, host.SanitizePrivateAgentError(err)
 	}
 	return host.ParseConversationReply(text)
 }
 
-func (adapter *Adapter) generate(ctx context.Context, prompt string, outputSchema []byte, includeStderr bool, enableReference bool) ([]byte, error) {
+func (adapter *Adapter) generate(ctx context.Context, prompt string, outputSchema []byte, includeStderr bool) ([]byte, error) {
 	attemptDirectory, err := os.MkdirTemp("", "carry-codex-attempt-")
 	if err != nil {
 		return nil, fmt.Errorf("create Codex Attempt directory: %w", err)
@@ -129,11 +113,7 @@ func (adapter *Adapter) generate(ctx context.Context, prompt string, outputSchem
 	processDone := make(chan error, 1)
 	go func() { processDone <- command.Wait() }()
 
-	var lookup func(context.Context, string) (string, error)
-	if enableReference && adapter.reference != nil {
-		lookup = adapter.reference.Lookup
-	}
-	client := newAppServerClient(stdin, stdout, lookup)
+	client := newAppServerClient(stdin, stdout)
 	text, resultErr := client.execute(ctx, attemptDirectory, prompt, outputSchema)
 	_ = stdin.Close()
 	if resultErr == nil {

@@ -10,32 +10,19 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ApexReasoning/carry/internal/agent/reference"
 	"github.com/ApexReasoning/carry/internal/conversation"
 	"github.com/ApexReasoning/carry/internal/host"
 )
 
 // Adapter owns the documented Pi RPC subprocess protocol.
-type Adapter struct {
-	referenceBaseURL string
-}
+type Adapter struct{}
 
-// New constructs the Pi adapter without an optional Reference Catalog.
+// New constructs the single supported Pi adapter.
 func New() *Adapter {
-	return NewWithReferenceBaseURL("")
-}
-
-// NewWithReferenceBaseURL constructs a Pi adapter with one fixed Reference Catalog URL.
-func NewWithReferenceBaseURL(baseURL string) *Adapter {
-	return &Adapter{referenceBaseURL: baseURL}
+	return &Adapter{}
 }
 
 func (adapter *Adapter) Diagnose(ctx context.Context) error {
-	if adapter.referenceBaseURL != "" {
-		if _, err := reference.New(adapter.referenceBaseURL); err != nil {
-			return fmt.Errorf("%w: Reference Catalog: %v", host.ErrAgentUnavailable, err)
-		}
-	}
 	if _, err := exec.LookPath("pi"); err != nil {
 		return fmt.Errorf("%w: Pi executable: %v", host.ErrAgentUnavailable, err)
 	}
@@ -59,7 +46,7 @@ func (adapter *Adapter) Execute(ctx context.Context, request host.ExecutionReque
 	if err != nil {
 		return host.UnderstandingUpdate{}, err
 	}
-	text, err := adapter.generate(ctx, prompt, true, adapter.referenceBaseURL != "")
+	text, err := adapter.generate(ctx, prompt, true)
 	if err != nil {
 		return host.UnderstandingUpdate{}, err
 	}
@@ -71,29 +58,21 @@ func (adapter *Adapter) Reply(ctx context.Context, request host.ConversationRepl
 	if err != nil {
 		return conversation.ReplyCandidate{}, err
 	}
-	text, err := adapter.generate(ctx, prompt, false, false)
+	text, err := adapter.generate(ctx, prompt, false)
 	if err != nil {
 		return conversation.ReplyCandidate{}, host.SanitizePrivateAgentError(err)
 	}
 	return host.ParseConversationReply(text)
 }
 
-func (adapter *Adapter) generate(ctx context.Context, prompt string, includeStderr bool, enableReference bool) ([]byte, error) {
+func (adapter *Adapter) generate(ctx context.Context, prompt string, includeStderr bool) ([]byte, error) {
 	attemptDirectory, err := os.MkdirTemp("", "carry-pi-attempt-")
 	if err != nil {
 		return nil, fmt.Errorf("create Pi Attempt directory: %w", err)
 	}
 	defer func() { _ = os.RemoveAll(attemptDirectory) }()
 
-	arguments := piRPCArguments()
-	if enableReference {
-		extensionPath, extensionErr := writeReferenceExtension(attemptDirectory, adapter.referenceBaseURL)
-		if extensionErr != nil {
-			return nil, extensionErr
-		}
-		arguments = append(arguments, "-e", extensionPath)
-	}
-	command := exec.CommandContext(ctx, "pi", arguments...)
+	command := exec.CommandContext(ctx, "pi", piRPCArguments()...)
 	command.WaitDelay = time.Second
 	command.Dir = attemptDirectory
 	stdin, err := command.StdinPipe()
@@ -119,7 +98,7 @@ func (adapter *Adapter) generate(ctx context.Context, prompt string, includeStde
 		return nil, fmt.Errorf("write Pi prompt: %w", err)
 	}
 
-	text, resultErr := awaitText(ctx, stdout, enableReference)
+	text, resultErr := awaitText(ctx, stdout)
 	_ = stdin.Close()
 	if resultErr == nil {
 		if err := waitForExit(command, processDone); err != nil {

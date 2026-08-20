@@ -138,7 +138,6 @@ internal/
 ├── run/
 ├── host/
 ├── agent/
-│   ├── reference/
 │   ├── pi/
 │   └── codex/
 ├── postgres/

@@ -318,10 +318,6 @@ Conversation Reply:  reply + nullable delegation_goal
 
 Codex 缓冲结束但缺少准确 terminal notification 时，只可有界只读核对；不能证明完成则 Finish Unknown。Host 不在 claim 后切换到另一 adapter。
 
-Node 10 的第一条第三方能力是一个不独立持久化原始 response 的 Reference Catalog。Operator 通过 `CARRY_REFERENCE_BASE_URL` 为 Host 固定一个 HTTPS base URL；Pi/Codex 在 Work Execute 行为中各自通过 native tool wire 暴露 `lookup_reference(key)`。tool handler 只接受 key，固定执行一次 `GET /v1/references/{url_escaped_key}`，拒绝 redirect、非成功状态、无效 UTF-8、超过 64 KiB 的 response 和任何隐式 retry。原始 response 只作为当前 Attempt 的不可信上下文，不成为 PostgreSQL、Conversation、browser storage、日志或持久 provider Session 事实。模型可以引用或解释它形成普通 Work understanding；这仍是模型输出，不保存独立 Reference provenance，也不能提供 authority 或证明外部事实。能力失败使 native execution 失败，不能形成虚假的 Work update；既有 Machine/Run/Attempt/fence/lease/base-version commit 仍是唯一写入 authority。
-
-Reference Catalog 不是 Carry 的产品对象、Plugin、MCP server、provider registry 或持久 owner。Pi 的 concrete extension 与 Codex 的 experimental dynamic tool contract 只在各自 adapter 内实现；两者共享产品语义和 bounded HTTP 行为，不共享 provider wire。
-
 ## 10. User API
 
 User API 只表达成员旅程：
@@ -431,7 +427,6 @@ internal/
   run/
   host/
   agent/
-    reference/
     pi/
     codex/
   postgres/
@@ -475,7 +470,7 @@ protocol/
 - 接受只记录 Work-owned 检查事实，不关闭 Work、不创建输入、Run 或外部 authority；
 - Needs You 只返回当前 owner 的 current result check 或 explicit retry，不从普通进度、active/recovered Attempt 推断；
 - revoked Machine 不能领取或修改执行；
-- Pi 与 Codex 分别通过同一 execution conformance；Reference capability 只在 Work Execute 启用，fixed origin、single attempt、严格参数、response bounds、failure 与 terminal ordering 均有 concrete adapter 证据；
+- Pi 与 Codex 分别通过同一 execution conformance；
 - User API 的 Work summaries 与消息历史有界分页，只公开派生 `needs_review` 与同一 current detail 中的 opaque review identity，不暴露内部 sequence/version/Run/Attempt；
 - credential-bearing response 都是 `no-store`；
 - PostgreSQL focused tests 使用真实隔离数据库，缺失数据库不是 pass。
