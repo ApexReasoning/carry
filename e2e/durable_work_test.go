@@ -3,11 +3,8 @@
 package e2e
 
 import (
-	"context"
 	"encoding/json"
-	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -31,6 +28,7 @@ func TestMemberCreatesMessagesAndReloadsDurableWork(t *testing.T) {
 	pkiDirectory := filepath.Join(temporary, "pki")
 	run(t, root, nil, carryServer, "pki", "init", "--dir", pkiDirectory, "--hosts", "localhost,127.0.0.1")
 	bootstrapOutput := bootstrapCarry(t, root, carryServer, databaseURL)
+	resetProductJourneyFacts(t, databaseURL)
 	var bootstrap struct {
 		UserToken string `json:"user_token"`
 	}
@@ -103,6 +101,7 @@ func TestBrowserCreatesDurableWorkWithoutStoringBearer(t *testing.T) {
 	pkiDirectory := filepath.Join(temporary, "pki")
 	run(t, root, nil, carryServer, "pki", "init", "--dir", pkiDirectory, "--hosts", "localhost,127.0.0.1")
 	bootstrapOutput := bootstrapCarry(t, root, carryServer, databaseURL)
+	resetProductJourneyFacts(t, databaseURL)
 	var bootstrap struct {
 		UserToken string `json:"user_token"`
 	}
@@ -137,49 +136,4 @@ func TestBrowserCreatesDurableWorkWithoutStoringBearer(t *testing.T) {
 	if !strings.Contains(output, "1 passed") {
 		t.Fatalf("durable Work Playwright spec did not execute:\n%s", output)
 	}
-}
-
-func startWeb(
-	t *testing.T,
-	root string,
-	address string,
-	apiURL string,
-	pkiDirectory string,
-) (func(), *lockedBuffer) {
-	t.Helper()
-	host, port, err := net.SplitHostPort(address)
-	if err != nil {
-		t.Fatalf("parse Web address: %v", err)
-	}
-	webCtx, cancel := context.WithCancel(t.Context())
-	webLog := &lockedBuffer{}
-	vite := filepath.Join(root, "apps", "web", "node_modules", ".bin", "vite")
-	command := exec.CommandContext(
-		webCtx, vite, "preview", "--host", host, "--port", port,
-	)
-	command.Dir = filepath.Join(root, "apps", "web")
-	command.Env = append(
-		os.Environ(),
-		"CARRY_API_URL="+apiURL,
-		"CARRY_WEB_TLS_CERT="+filepath.Join(pkiDirectory, "server.pem"),
-		"CARRY_WEB_TLS_KEY="+filepath.Join(pkiDirectory, "server-key.pem"),
-	)
-	command.Stdout = webLog
-	command.Stderr = webLog
-	if err := command.Start(); err != nil {
-		cancel()
-		t.Fatalf("start Web preview: %v", err)
-	}
-	stopped := false
-	stop := func() {
-		if stopped {
-			return
-		}
-		stopped = true
-		cancel()
-		if err := command.Wait(); err != nil && webCtx.Err() == nil {
-			t.Errorf("wait for Web preview: %v", err)
-		}
-	}
-	return stop, webLog
 }

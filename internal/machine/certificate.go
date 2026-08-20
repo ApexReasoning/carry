@@ -19,7 +19,7 @@ import (
 	"time"
 )
 
-type PKIBundle struct {
+type CertificateBundle struct {
 	CACertificatePEM     []byte
 	CAPrivateKeyPEM      []byte
 	ServerCertificatePEM []byte
@@ -36,18 +36,18 @@ type CertificateAuthority struct {
 	privateKey  crypto.Signer
 }
 
-func CreatePKI(serverNames []string, now time.Time) (PKIBundle, error) {
+func CreateCertificateBundle(serverNames []string, now time.Time) (CertificateBundle, error) {
 	if len(serverNames) == 0 {
-		return PKIBundle{}, errors.New("at least one server name is required")
+		return CertificateBundle{}, errors.New("at least one server name is required")
 	}
 
 	caPublicKey, caPrivateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
-		return PKIBundle{}, fmt.Errorf("generate CA key: %w", err)
+		return CertificateBundle{}, fmt.Errorf("generate CA key: %w", err)
 	}
 	caSerial, err := certificateSerial()
 	if err != nil {
-		return PKIBundle{}, err
+		return CertificateBundle{}, err
 	}
 	caTemplate := &x509.Certificate{
 		SerialNumber:          caSerial,
@@ -60,21 +60,21 @@ func CreatePKI(serverNames []string, now time.Time) (PKIBundle, error) {
 	}
 	caDER, err := x509.CreateCertificate(rand.Reader, caTemplate, caTemplate, caPublicKey, caPrivateKey)
 	if err != nil {
-		return PKIBundle{}, fmt.Errorf("create CA certificate: %w", err)
+		return CertificateBundle{}, fmt.Errorf("create CA certificate: %w", err)
 	}
 	caCertificate, err := x509.ParseCertificate(caDER)
 	if err != nil {
-		return PKIBundle{}, fmt.Errorf("parse created CA certificate: %w", err)
+		return CertificateBundle{}, fmt.Errorf("parse created CA certificate: %w", err)
 	}
 
 	serverPrivateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
-		return PKIBundle{}, fmt.Errorf("generate server key: %w", err)
+		return CertificateBundle{}, fmt.Errorf("generate server key: %w", err)
 	}
 	serverPublicKey := &serverPrivateKey.PublicKey
 	serverSerial, err := certificateSerial()
 	if err != nil {
-		return PKIBundle{}, err
+		return CertificateBundle{}, err
 	}
 	serverTemplate := &x509.Certificate{
 		SerialNumber: serverSerial,
@@ -87,7 +87,7 @@ func CreatePKI(serverNames []string, now time.Time) (PKIBundle, error) {
 	for _, name := range serverNames {
 		name = strings.TrimSpace(name)
 		if name == "" {
-			return PKIBundle{}, errors.New("server name cannot be empty")
+			return CertificateBundle{}, errors.New("server name cannot be empty")
 		}
 		if address := net.ParseIP(name); address != nil {
 			serverTemplate.IPAddresses = append(serverTemplate.IPAddresses, address)
@@ -99,18 +99,18 @@ func CreatePKI(serverNames []string, now time.Time) (PKIBundle, error) {
 		rand.Reader, serverTemplate, caCertificate, serverPublicKey, caPrivateKey,
 	)
 	if err != nil {
-		return PKIBundle{}, fmt.Errorf("create server certificate: %w", err)
+		return CertificateBundle{}, fmt.Errorf("create server certificate: %w", err)
 	}
 
 	caKeyPEM, err := encodePrivateKey(caPrivateKey)
 	if err != nil {
-		return PKIBundle{}, err
+		return CertificateBundle{}, err
 	}
 	serverKeyPEM, err := encodePrivateKey(serverPrivateKey)
 	if err != nil {
-		return PKIBundle{}, err
+		return CertificateBundle{}, err
 	}
-	return PKIBundle{
+	return CertificateBundle{
 		CACertificatePEM:     pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER}),
 		CAPrivateKeyPEM:      caKeyPEM,
 		ServerCertificatePEM: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: serverDER}),

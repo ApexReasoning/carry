@@ -226,7 +226,7 @@ func testAuthority(t *testing.T) *machine.CertificateAuthority {
 func testMachineCertificate(t *testing.T, machineID string) (*machine.CertificateAuthority, *x509.Certificate) {
 	t.Helper()
 	now := time.Date(2026, time.August, 18, 16, 0, 0, 0, time.UTC)
-	bundle, err := machine.CreatePKI([]string{"localhost"}, now)
+	bundle, err := machine.CreateCertificateBundle([]string{"localhost"}, now)
 	if err != nil {
 		t.Fatalf("create PKI: %v", err)
 	}

@@ -8,6 +8,8 @@ Carry 是团队可以长期托付工作的 AI 同事。
 
 Carry 不是聊天机器人、任务清单、工作流编辑器、Agent 管理平台或只面向研发团队的自动化工具。它的价值不是完成一次模型调用，而是让一份责任跨越时间、成员、工具、模型和机器后仍然可理解、可纠正、可继续。
 
+除明确标注为未来方向的段落外，本文件描述当前 M1 合同。Nodes 5+ 的顺序和进入条件只由 `docs/implementation.md` 定义；未来方向不是当前 API、状态或用户承诺。
+
 ## 设计哲学：克制与自由
 
 Carry 以克制保护真实、权限和承诺，以自由容纳目标、方法和演化。
@@ -107,19 +109,11 @@ Work
 
 `Needs You` 是从 Work 中得出的个人视图，不是第四种产品对象。
 
-一个词只有同时拥有独立生命周期、持久身份、独立权限边界和明确用户价值时，才可以升级成新的产品对象。一个事实在某次判断中的用途，不构成新对象。
-
-例如：
-
-- Artifact 可以是长期保存的不可变文件；
-- “evidence”只是 Message、Artifact、外部回执或数据库事实支持一次判断时扮演的角色；
-- 因此 Carry 不建立 Evidence 对象、Evidence API 或 Evidence owner。
-
-相同规则适用于 Result、Question、Timer、Event、Delivery、Plugin 等候选词：先完成真实旅程，只有相邻事实无法自然表达独立生命周期时才提升概念。
+一个词只有同时拥有独立生命周期、持久身份、独立权限边界和明确用户价值时，才可以升级成新的产品对象。一个事实在某次判断中的用途不构成新对象；未来候选词及其进入顺序只在 `docs/implementation.md` 维护。
 
 ## Space
 
-Space 是团队边界，包含成员、团队权限、共同 Work、已确认的外部连接和允许的执行机器。
+Space 是当前的团队边界，包含成员、团队权限、共同 Work 和允许的执行机器。外部连接尚未进入 M1。
 
 Space 不是文件夹。它决定哪些人和能力可以共同参与一份责任。
 
@@ -186,56 +180,26 @@ Work Message 保存真实作者和来源。私人 Conversation 内容不会因�
 
 ### 负责人
 
-每个开放 Work 有且只有一名当前负责人。创建者默认是第一任负责人。
+当前每个 Work 有且只有一名负责人，创建者是第一任负责人。M1 尚未提供转交；未来转交必须由成员明确发生，不能由 Carry 根据职位、活跃度或最后发言者推断。
 
-负责人转交必须明确发生并保留真实任期；Carry 可以建议，不能根据活跃度、职位或最后发言者自动改变负责人。
+### 当前生命周期
 
-### 生命周期
+M1 的正式生命周期只有 `Open`。`Paused`、`Closed` 与 `Reopen` 属于后续 Responsibility journey，尚不是当前状态或 API。正在推进、等待回复、计划稍后继续和需要成员决定始终是从事实派生的描述，不自动成为生命周期。
 
-Work 的正式生命周期只有：
+### 当前结果表达
 
-```text
-Open
-Paused
-Closed
-```
+当前结果直接表达在 Work 的 understanding、next step 和 Messages 中，不存在独立 Result。成员显式 `Try again` 只是允许一次 fresh Run，不改变 Work 生命周期。
 
-“正在推进”“等待回复”“计划稍后继续”“需要你决定”是从事实得出的活动描述，不是新的生命周期状态。
+## 未来产品方向（当前 M1 未实现）
 
-Pause 阻止新的执行。Close 明确结束旧责任。继续一个 Closed Work 必须显式 Reopen，不能由旧执行或旧时间约定偷偷恢复。
-
-### 结果
-
-成员需要检查的是 Work 中的结果，不是另一个必须学习的顶层对象。
-
-第一条结果旅程应优先使用现有 Work 内容表达。只有当一个结果确实需要独立版本、接受/要求修改/撤回的生命周期，并且这些规则不能自然属于 Work 时，才在 Work 内提升独立 Result identity。
-
-接受一个阶段结果不会自动关闭仍有后续责任的 Work。
-
-### 未来继续
-
-时间是 Work 继续行动的条件，不是独立产品。
-
-第一条未来继续旅程优先保存 Work 的下一次明确继续时间。只有一个 Work 确实需要多个可独立取消、重复和审计的时间约定时，才提升 Timer identity。
-
-成员使用自然语言表达时间；不需要 cron、JSON、DSL 或工作流编辑器。
-
-## Needs You
-
-Needs You 只展示某个成员必须亲自处理的 Work 事项，例如：
-
-- 回答 Carry 无法自行判断的问题；
-- 检查或接受一个重要结果；
-- 批准会改变外部系统的操作；
-- 接受负责人转交；
-- 决定继续、暂停或关闭；
-- 处理真实的不确定外部结果。
-
-Needs You 不显示 Agent 重试、Runtime 状态、lease、fence 或技术恢复。
+- Needs You 仍应是从 Work 派生的个人查询，不是新对象；
+- 只有独立结果确实需要可引用版本及接受、修改或撤回生命周期时，才考虑 Result identity；
+- 第一条未来继续优先是 Work 的一个明确时间条件，不预建 Timer；
+- Pause、Close、Reopen、负责人转交、渠道、第三方能力和外部 Action 按 `docs/implementation.md` 的后续 journey 逐条重新设计。
 
 ## 私人对话
 
-成员可以在原生界面或已连接渠道中私下与 Carry 交谈。
+当前成员可以在原生 Web 界面中私下与 Carry 交谈；连接渠道属于后续 journey，M1 尚未实现。
 
 第一条原生旅程在每个成员与 Space 之间维持一段私人 Conversation。Carry 是隐含参与者；成员不需要创建、命名或管理 Conversation。为保持清楚因果，当前一次只接受一个尚未得到 Carry 回复的成员 turn。
 
@@ -245,47 +209,11 @@ Needs You 不显示 Agent 重试、Runtime 状态、lease、fence 或技术恢�
 
 普通问题只形成私人回复。清晰委托形成私人回复和至多一份共享 Work；同一 source message 的执行或网络重放必须返回同一回复和 Work。
 
-## 外部世界
+## 外部世界与 Artifact（未来方向，当前 M1 未实现）
 
-Carry 只在真实旅程出现时引入必要的物理事实。
+M1 没有渠道、第三方 capability、外部 Action、Event 或 Artifact owner。未来第一条真实旅程仍遵守三条产品边界：普通投递不能伪造已读；改变外部系统或受众的操作必须固定授权、目标、参数和 Unknown；长期 bytes 只有在确实需要独立引用、权限与保留生命周期时才成为 Artifact。
 
-### 普通消息
-
-沿已有、已授权会话关系发送一条已经保存的消息，是普通投递。渠道接受不代表对方已经阅读。
-
-### 新的外部后果
-
-创建、修改、删除、付款或扩大受众属于 Action。Action 必须固定准确目标和参数，并使用真实授权。响应丢失时保持 Unknown。
-
-Action 的独立身份来自它的授权和外部后果生命周期；它不是因为一次 tool call 就自动成立。
-
-### 没有明确目标的外部事实
-
-只有第一条真实、授权采集且没有明确 Conversation 或 Work 目标的来源出现后，才建立 Event owner。Event 不能自行创建 Work 或授予权限。
-
-### 第三方能力
-
-第三方 Skill、MCP server 或其他能力是 Carry 的实现能力，不是新的同事，也不拥有 Work。
-
-声明需要权限不等于获得授权。长期 credential 不进入 Agent prompt、内容包或模型输出。会改变外部系统的调用仍然遵守 Action 规则。
-
-在第一条真实安装与调用旅程前，不冻结 Plugin marketplace、两种 MCP transport、通用 tool registry 或 provider registry。
-
-## Artifact 与依据
-
-Artifact 只在 Carry 必须长期保存和引用不可变 bytes 时成立，例如附件、安装包或可下载交付物。
-
-Artifact 保存 bytes 的 identity、digest、类型、来源、权限和保留策略。它不保存业务判断，也不因为被用于证明某件事就变成另一份 Evidence。
-
-支持判断的依据可以是：
-
-- 一条 Message；
-- 一个 Artifact；
-- 一个外部只读回执；
-- 一个 Action outcome；
-- 一个数据库并发事实。
-
-需要记录关联时，拥有该判断的 owner 保存准确引用；不建立开放 polymorphic Evidence 仓库。
+Skill、MCP server、文件、外部消息和模型输出只能提供内容或方法，不能自行创建 Work、扩大权限或证明外部后果。一个既有事实被用于支持判断时仍属于原 owner，不建立 Evidence 对象或开放 polymorphic 引用仓库。
 
 ## 权限哲学
 
@@ -312,10 +240,7 @@ Carry 的权限来自真实关系：
 - 私人消息默认只对准确成员可见，不能从共享 Work 反向读取；
 - 私人文本或可猜测的 deterministic digest 不进入 browser storage、URL、日志或长期 provider Session；
 - Space Machine 对私人上下文的读取必须绑定 exact claim、fence、lease 和有界输入，不能获得通用 transcript capability；
-- 外部 thread 关联是可撤销的通信同意，不是 Membership；
-- provider-native payload 不是长期产品模型；
-- 临时下载 URL 和 credential 不进入长期 Work 或 Agent prompt；
-- 删除必须区分停止未来访问、删除可删除内容和保留必要审计事实；第一条 Conversation journey 不提前建立删除或 retention lifecycle。
+- 当前 Conversation 没有删除或 retention lifecycle；未来渠道、文件和删除旅程必须重新定义各自的 consent、credential 与必要保留事实。
 
 ## 失败与恢复
 
@@ -347,19 +272,16 @@ Carry 第一阶段明确不做：
 
 ## 产品语言
 
-推荐（只有独立活动事实存在时才说“正在推进”）：
+当前 M1 推荐：
 
 ```text
 Carry 已收到这份责任
 你补充的信息尚未应用
 等待 Carry 回复
-Carry 正在等待 Alice 回复
-Carry 将在下周一继续
-这是当前结果
-Carry 需要你的决定
 Carry 没有形成可确认的更新；由你选择是否重新推进
-这次操作可能已经发生，结果尚不确定
 ```
+
+只有后续 journey 建立了独立的人类等待、时间、结果检查或外部 outcome 事实后，才使用“等待 Alice”“将在下周一继续”“当前结果”“需要你的决定”或“结果尚不确定”。没有独立活动事实时不说“正在推进”。
 
 避免：
 

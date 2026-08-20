@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/ApexReasoning/carry/internal/conversation"
@@ -183,7 +184,11 @@ func (worker Worker) executeConversation(ctx context.Context, claim conversation
 				if ctx.Err() != nil {
 					return nil
 				}
-				return fmt.Errorf("generate private Conversation reply: %w", result.err)
+				slog.Warn(
+					"private Conversation reply generation failed; leaving claim unresolved",
+					"error", SanitizePrivateAgentError(result.err),
+				)
+				return nil
 			}
 			if _, err := worker.Conversations.CommitConversation(ctx, claim, result.candidate); err != nil {
 				return fmt.Errorf("commit private Conversation reply: %w", err)

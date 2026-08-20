@@ -13,6 +13,7 @@ import (
 	"github.com/ApexReasoning/carry/internal/work"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // ClaimRun atomically creates or recovers a Run and its sole active Attempt.
@@ -91,6 +92,12 @@ func (s *Store) ClaimRun(ctx context.Context, machineID string) (run.Claim, erro
 			InputStartSeq: inputStartSeq, InputEndSeq: inputEndSeq,
 			BaseUnderstandingVersion: work.UnderstandingVersion,
 		}); createErr != nil {
+			var databaseError *pgconn.PgError
+			if errors.As(createErr, &databaseError) &&
+				databaseError.Code == "23505" &&
+				databaseError.ConstraintName == "runs_unresolved_work_idx" {
+				return run.Claim{}, run.ErrNoRunAvailable
+			}
 			return run.Claim{}, fmt.Errorf("create Run: %w", createErr)
 		}
 	default:

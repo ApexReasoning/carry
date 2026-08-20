@@ -132,7 +132,7 @@ func run(ctx context.Context, arguments []string, stdout io.Writer, stderr io.Wr
 	if err := carrypostgres.Migrate(ctx, pool); err != nil {
 		return err
 	}
-	tlsConfig, authority, err := loadServerPKI(
+	tlsConfig, authority, err := loadServerTLS(
 		filepath.Join(parsed.pkiDirectory, "ca.pem"),
 		filepath.Join(parsed.pkiDirectory, "ca-key.pem"),
 		filepath.Join(parsed.pkiDirectory, "server.pem"),

@@ -8,6 +8,10 @@ import {
 } from "../../carry-api";
 import type { ConversationMessage } from "../../generated/types.gen";
 import {
+  appendUniqueMessages,
+  prependUniqueMessages,
+} from "./conversation-page";
+import {
   clearPendingConversationRequestID,
   loadPendingConversationRequestID,
   pendingConversationRequestID,
@@ -27,8 +31,9 @@ export function useConversation(memberID: string, spaceID: string) {
 
   useEffect(() => {
     let active = true;
-    void listConversationMessages(spaceID)
-      .then((loaded) => {
+    async function loadInitialPage(): Promise<void> {
+      try {
+        const loaded = await listConversationMessages(spaceID);
         if (!active) return;
         setMessages(loaded);
         setCanLoadEarlier(loaded.length === pageSize);
@@ -38,13 +43,13 @@ export function useConversation(memberID: string, spaceID: string) {
           setIdentityBlocked(true);
           setError(errorMessage(caught));
         }
-      })
-      .catch((caught: unknown) => {
+      } catch (caught) {
         if (active) setError(errorMessage(caught));
-      })
-      .finally(() => {
+      } finally {
         if (active) setLoading(false);
-      });
+      }
+    }
+    void loadInitialPage();
     return () => {
       active = false;
     };
@@ -55,24 +60,26 @@ export function useConversation(memberID: string, spaceID: string) {
   const newestMessageID = awaitingReply ? newestMessage.message_id : null;
 
   useEffect(() => {
-    if (!newestMessageID) return;
+    const replyCursor = newestMessageID;
+    if (!replyCursor) return;
     let active = true;
     let polling = false;
-    const poll = window.setInterval(() => {
+    async function loadNewReplies(after: string): Promise<void> {
       if (polling) return;
       polling = true;
-      void listConversationMessages(spaceID, { after: newestMessageID })
-        .then((loaded) => {
-          if (!active || loaded.length === 0) return;
-          setMessages((current) => appendUnique(current, loaded));
-          setError(null);
-        })
-        .catch((caught: unknown) => {
-          if (active) setError(errorMessage(caught));
-        })
-        .finally(() => {
-          polling = false;
-        });
+      try {
+        const loaded = await listConversationMessages(spaceID, { after });
+        if (!active || loaded.length === 0) return;
+        setMessages((current) => appendUniqueMessages(current, loaded));
+        setError(null);
+      } catch (caught) {
+        if (active) setError(errorMessage(caught));
+      } finally {
+        polling = false;
+      }
+    }
+    const poll = window.setInterval(() => {
+      void loadNewReplies(replyCursor);
     }, pollIntervalMilliseconds);
     return () => {
       active = false;
@@ -98,7 +105,7 @@ export function useConversation(memberID: string, spaceID: string) {
 
     try {
       const admitted = await sendConversationMessage(spaceID, text, requestID);
-      setMessages((current) => appendUnique(current, [admitted]));
+      setMessages((current) => appendUniqueMessages(current, [admitted]));
       clearAdmittedIdentity(memberID, spaceID, requestID);
       return true;
     } catch (caught) {
@@ -106,7 +113,7 @@ export function useConversation(memberID: string, spaceID: string) {
         try {
           clearPendingConversationRequestID(memberID, spaceID, requestID);
           const newest = await listConversationMessages(spaceID);
-          setMessages((current) => appendUnique(current, newest));
+          setMessages((current) => appendUniqueMessages(current, newest));
           setError(
             "This private conversation changed in another browser. Review the latest messages, then send again.",
           );
@@ -124,7 +131,7 @@ export function useConversation(memberID: string, spaceID: string) {
           const admitted = newest.some(
             (message) => message.request_id === requestID,
           );
-          setMessages((current) => appendUnique(current, newest));
+          setMessages((current) => appendUniqueMessages(current, newest));
           if (admitted) {
             clearAdmittedIdentity(memberID, spaceID, requestID);
             return true;
@@ -152,7 +159,7 @@ export function useConversation(memberID: string, spaceID: string) {
       const earlier = await listConversationMessages(spaceID, {
         before: firstMessage.message_id,
       });
-      setMessages((current) => prependUnique(earlier, current));
+      setMessages((current) => prependUniqueMessages(earlier, current));
       setCanLoadEarlier(earlier.length === pageSize);
     } catch (caught) {
       setError(errorMessage(caught));
@@ -204,28 +211,6 @@ function clearPendingIfAdmitted(
   ) {
     clearPendingConversationRequestID(memberID, spaceID, requestID);
   }
-}
-
-function appendUnique(
-  current: Array<ConversationMessage>,
-  incoming: Array<ConversationMessage>,
-): Array<ConversationMessage> {
-  const known = new Set(current.map((message) => message.message_id));
-  return [
-    ...current,
-    ...incoming.filter((message) => !known.has(message.message_id)),
-  ];
-}
-
-function prependUnique(
-  earlier: Array<ConversationMessage>,
-  current: Array<ConversationMessage>,
-): Array<ConversationMessage> {
-  const known = new Set(current.map((message) => message.message_id));
-  return [
-    ...earlier.filter((message) => !known.has(message.message_id)),
-    ...current,
-  ];
 }
 
 function errorMessage(value: unknown): string {

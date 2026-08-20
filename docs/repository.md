@@ -166,9 +166,9 @@ Web 不复制 Go domain，也不把后端 package tree 映射成 feature tree。
 
 ### `e2e/`
 
-只保存跨进程、通过公开协议运行的少量关键旅程。
+只保存跨进程、通过公开协议运行的少量关键旅程。文件按长期产品行为命名，不按 Node、milestone 或 review 批次命名；跨旅程共用的 process/build/network fixture 只放在 `harness_test.go`，owner-specific fixture 留在对应行为文件旁边。
 
-Package 集成测试留在 owner 附近，不搬到 `e2e/` 只是为了统一。
+Package 集成测试留在 owner 附近，不搬到 `e2e/` 只是为了统一，也不建立通用测试 framework。
 
 ### `experiments/`
 

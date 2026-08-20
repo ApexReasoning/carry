@@ -40,6 +40,7 @@ func TestInterruptedHostWorkContinuesWithNewAttempt(t *testing.T) {
 	pkiDirectory := filepath.Join(temporary, "pki")
 	run(t, root, nil, carryServer, "pki", "init", "--dir", pkiDirectory, "--hosts", "localhost,127.0.0.1")
 	bootstrapOutput := bootstrapCarry(t, root, carryServer, databaseURL)
+	resetProductJourneyFacts(t, databaseURL)
 	var bootstrap struct {
 		SpaceID   string `json:"space_id"`
 		UserToken string `json:"user_token"`

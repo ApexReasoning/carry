@@ -11,11 +11,11 @@ import (
 	"time"
 )
 
-func TestCreatePKIAndIssueMachineCertificate(t *testing.T) {
+func TestCreateCertificateBundleAndIssueMachineCertificate(t *testing.T) {
 	t.Parallel()
 
 	now := time.Date(2026, time.August, 18, 16, 0, 0, 0, time.UTC)
-	bundle, err := CreatePKI([]string{"localhost", "127.0.0.1"}, now)
+	bundle, err := CreateCertificateBundle([]string{"localhost", "127.0.0.1"}, now)
 	if err != nil {
 		t.Fatalf("create PKI: %v", err)
 	}

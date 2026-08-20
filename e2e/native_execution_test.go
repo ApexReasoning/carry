@@ -31,6 +31,7 @@ func TestHostAdvancesWorkThroughNativeExecutionContract(t *testing.T) {
 	pkiDirectory := filepath.Join(temporary, "pki")
 	run(t, root, nil, carryServer, "pki", "init", "--dir", pkiDirectory, "--hosts", "localhost,127.0.0.1")
 	bootstrapOutput := bootstrapCarry(t, root, carryServer, databaseURL)
+	resetProductJourneyFacts(t, databaseURL)
 	var bootstrap struct {
 		SpaceID   string `json:"space_id"`
 		UserToken string `json:"user_token"`
@@ -56,7 +57,7 @@ func TestHostAdvancesWorkThroughNativeExecutionContract(t *testing.T) {
 	run(
 		t, root, clientEnvironment, carry, "host", "enroll",
 		"--space", bootstrap.SpaceID,
-		"--name", "node-two-host",
+		"--name", "native-execution-host",
 	)
 	createdOutput := run(
 		t,
@@ -132,24 +133,4 @@ func TestHostAdvancesWorkThroughNativeExecutionContract(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	t.Fatalf("Work was not advanced before deadline\nHost log:\n%s\nServer log:\n%s", hostLog.String(), serverLog.String())
-}
-
-func writeFakePi(t *testing.T, path string) {
-	t.Helper()
-	script := `#!/bin/sh
-set -eu
-if [ "${1:-}" = "--version" ]; then
-  printf '%s\n' '0.84.2'
-  exit 0
-fi
-IFS= read -r prompt
-printf '%s' "$prompt" > "$CARRY_FAKE_PI_PROMPT"
-printf '%s\n' \
-  '{"id":"carry-prompt","type":"response","command":"prompt","success":true}' \
-  '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"{\"understanding\":\"Finance approved a twelve month term.\",\"next_step\":\"Prepare the renewal recommendation.\"}"}],"stopReason":"stop"}}' \
-  '{"type":"agent_settled"}'
-`
-	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
-		t.Fatalf("write fake Pi executable: %v", err)
-	}
 }

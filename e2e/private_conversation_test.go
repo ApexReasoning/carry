@@ -17,13 +17,13 @@ import (
 )
 
 const (
-	node4QuestionText        = "What should I check before a customer renewal? Private reference ORCHID-QUESTION-739."
-	node4QuestionReply       = "Review the renewal date, notice window, owner, and approval dependencies first."
-	node4DelegationText      = "Carry, take responsibility for preparing the renewal brief. Private reference ORCHID-DELEGATION-842."
-	node4DelegationReply     = "I’ll keep the renewal brief moving as shared Work."
-	node4DelegationGoal      = "Prepare the renewal brief"
-	node4QuestionRequestID   = "11111111-1111-4111-8111-111111111111"
-	node4DelegationRequestID = "22222222-2222-4222-8222-222222222222"
+	privateConversationQuestionText        = "What should I check before a customer renewal? Private reference ORCHID-QUESTION-739."
+	privateConversationQuestionReply       = "Review the renewal date, notice window, owner, and approval dependencies first."
+	privateConversationDelegationText      = "Carry, take responsibility for preparing the renewal brief. Private reference ORCHID-DELEGATION-842."
+	privateConversationDelegationReply     = "I’ll keep the renewal brief moving as shared Work."
+	privateConversationDelegationGoal      = "Prepare the renewal brief"
+	privateConversationQuestionRequestID   = "11111111-1111-4111-8111-111111111111"
+	privateConversationDelegationRequestID = "22222222-2222-4222-8222-222222222222"
 )
 
 func TestMemberTalksPrivatelyAndDelegatesSharedWork(t *testing.T) {
@@ -45,11 +45,12 @@ func TestMemberTalksPrivatelyAndDelegatesSharedWork(t *testing.T) {
 	if err := os.Mkdir(binDirectory, 0o700); err != nil {
 		t.Fatalf("create fake Agent bin directory: %v", err)
 	}
-	build(t, root, filepath.Join(binDirectory, "pi"), "./e2e/testdata/node4pi")
+	build(t, root, filepath.Join(binDirectory, "pi"), "./e2e/testdata/privateconversationpi")
 
 	pkiDirectory := filepath.Join(temporary, "pki")
 	run(t, root, nil, carryServer, "pki", "init", "--dir", pkiDirectory, "--hosts", "localhost,127.0.0.1")
 	bootstrapOutput := bootstrapCarry(t, root, carryServer, databaseURL)
+	resetProductJourneyFacts(t, databaseURL)
 	var bootstrap struct {
 		UserID    string `json:"user_id"`
 		SpaceID   string `json:"space_id"`
@@ -122,10 +123,10 @@ func TestMemberTalksPrivatelyAndDelegatesSharedWork(t *testing.T) {
 
 	pool, err := carrypostgres.Open(t.Context(), databaseURL)
 	if err != nil {
-		t.Fatalf("open Node 4 evidence database: %v", err)
+		t.Fatalf("open private Conversation evidence database: %v", err)
 	}
 	defer pool.Close()
-	assertNode4ConversationEvidence(t, pool, bootstrap.SpaceID, bootstrap.UserID)
+	assertPrivateConversationEvidence(t, pool, bootstrap.SpaceID, bootstrap.UserID)
 }
 
 func waitForHostStart(t *testing.T, hostLog *lockedBuffer) {
@@ -140,9 +141,9 @@ func waitForHostStart(t *testing.T, hostLog *lockedBuffer) {
 	t.Fatalf("Carry Host did not start before deadline\n%s", hostLog.String())
 }
 
-// assertNode4ConversationEvidence reads only committed PostgreSQL facts after
+// assertPrivateConversationEvidence reads only committed PostgreSQL facts after
 // the public browser/Host journey. It does not participate in product writes.
-func assertNode4ConversationEvidence(t *testing.T, pool *pgxpool.Pool, spaceID string, userID string) {
+func assertPrivateConversationEvidence(t *testing.T, pool *pgxpool.Pool, spaceID string, userID string) {
 	t.Helper()
 	ctx := t.Context()
 
@@ -186,10 +187,10 @@ func assertNode4ConversationEvidence(t *testing.T, pool *pgxpool.Pool, spaceID s
 		text      string
 		requestID string
 	}{
-		{author: "member", text: node4QuestionText, requestID: node4QuestionRequestID},
-		{author: "carry", text: node4QuestionReply},
-		{author: "member", text: node4DelegationText, requestID: node4DelegationRequestID},
-		{author: "carry", text: node4DelegationReply},
+		{author: "member", text: privateConversationQuestionText, requestID: privateConversationQuestionRequestID},
+		{author: "carry", text: privateConversationQuestionReply},
+		{author: "member", text: privateConversationDelegationText, requestID: privateConversationDelegationRequestID},
+		{author: "carry", text: privateConversationDelegationReply},
 	}
 	for index, want := range expected {
 		got := messages[index]
@@ -220,7 +221,7 @@ func assertNode4ConversationEvidence(t *testing.T, pool *pgxpool.Pool, spaceID s
 		where conversation.space_id = $1
 		  and conversation.member_user_id = $2
 		  and source.member_request_id in ($3, $4)
-	`, spaceID, userID, node4QuestionRequestID, node4DelegationRequestID).Scan(
+	`, spaceID, userID, privateConversationQuestionRequestID, privateConversationDelegationRequestID).Scan(
 		&committedClaims, &ordinaryWorkID, &delegatedWorkID,
 	); err != nil {
 		t.Fatalf("load private reply consequences: %v", err)
@@ -242,7 +243,7 @@ func assertNode4ConversationEvidence(t *testing.T, pool *pgxpool.Pool, spaceID s
 	`, delegatedWorkID).Scan(&goal, &ownerUserID, &creatorUserID, &understanding, &nextStep); err != nil {
 		t.Fatalf("load delegated Work: %v", err)
 	}
-	if goal != node4DelegationGoal || ownerUserID != userID || creatorUserID != userID {
+	if goal != privateConversationDelegationGoal || ownerUserID != userID || creatorUserID != userID {
 		t.Fatalf("delegated Work = goal %q owner %s creator %s", goal, ownerUserID, creatorUserID)
 	}
 	if understanding != "Carry owns the renewal brief." || nextStep != "Draft the renewal brief." {
@@ -252,7 +253,7 @@ func assertNode4ConversationEvidence(t *testing.T, pool *pgxpool.Pool, spaceID s
 	var matchingGoals int
 	if err := pool.QueryRow(ctx, `
 		select count(*) from works where space_id = $1 and goal = $2
-	`, spaceID, node4DelegationGoal).Scan(&matchingGoals); err != nil {
+	`, spaceID, privateConversationDelegationGoal).Scan(&matchingGoals); err != nil {
 		t.Fatalf("count exact delegated Works: %v", err)
 	}
 	if matchingGoals != 1 {
@@ -281,8 +282,8 @@ func assertNode4ConversationEvidence(t *testing.T, pool *pgxpool.Pool, spaceID s
 
 	combinedWorkText := strings.Join([]string{goal, understanding, nextStep}, "\n")
 	for _, privateValue := range []string{
-		node4QuestionText,
-		node4DelegationText,
+		privateConversationQuestionText,
+		privateConversationDelegationText,
 		"ORCHID-QUESTION-739",
 		"ORCHID-DELEGATION-842",
 	} {

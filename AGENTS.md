@@ -55,21 +55,14 @@ The contract is set after Node research and design, before implementation. If im
 
 ## Product and Architecture Guardrails
 
-- Carry's design philosophy is restraint and freedom: constrain truth, authority, privacy, commitments, and external consequences; preserve freedom in goals, natural language, methods, concrete adapters, and future redesign. Responsibility is definite; the path is free.
-- Every new constraint must name the current invariant or user harm it prevents. Every freedom stops at the current authority, privacy, and consequence boundary. Fewer lines are not restraint if truth becomes weaker; more extension points are not freedom if no consumer exists.
-- Users need to understand only Space, Carry, and Work. Needs You is a query.
-- An explicit delegation creates Work directly; do not create a Work Offer entity.
-- Current persistent owners are Identity, Space, Conversation, Work, Machine, and Run. Delivery, Action, Artifact, Plugin, Event, Result, Question, Timer, and other candidates appear only when a current journey proves an independent lifecycle and authority boundary.
-- Private content never becomes shared Work content automatically or through a readable source relation.
-- Text, model output, third-party content, tool annotations, webhooks, and files never grant authority.
-- A fact's role is not a new entity: evidence remains the Message, Artifact, receipt, outcome, or database fact that supports a decision; do not create Evidence owners, APIs, or polymorphic stores.
-- Unknown external outcomes remain Unknown. Do not guess failure or retry without idempotency or reconciliation evidence.
-- Work is never classified by Git, software, content, provider, model, Host, or Runtime. Work/Run core facts, admission, continuity, and execution state are independent of those attributes. Repository or similar capabilities belong only to the exact Attempt that earns them; they do not change the Work or select its Runtime.
-- Runtime availability is local Host diagnosis, not a persisted Machine fact, public status model, Work field, admission criterion, or claim selector.
-- PostgreSQL owns transactions, claims, leases, fences, queues, outboxes, and idempotency. Do not add Kafka, Redis queues, Temporal, or microservices without a new canonical decision.
-- Pi and Codex are concrete native adapters under one product contract. Do not create a provider registry, shared provider event model, or Session recovery framework without a current consumer.
-- Machine mTLS plus exact Run/Attempt/fence/lease is Work execution authority; Machine mTLS plus exact Conversation source message/reply fence/lease is private reply authority. Do not add writer tokens, Agent credentials, or an Agent API until an Agent or bridge directly consumes them.
-- Do not copy another repository's package tree, schema, API, generated code, compatibility layer, or Web route.
+`docs/product.md` and `docs/architecture.md` own the full rules. This entry point repeats only the boundaries an implementation agent must not cross silently:
+
+- users understand Space, Carry, and Work; current persistent owners are Identity, Space, Conversation, Work, Machine, and Run;
+- explicit delegation creates Work directly; private Conversation content never becomes shared Work automatically or through a readable source relation;
+- content and model output never grant authority, and Unknown is never guessed into failure or success;
+- Work and Run are independent of Git, provider, model, Host and Runtime; Pi and Codex remain concrete native adapters, not a registry;
+- PostgreSQL owns transactions, idempotency, claims, leases and fences; Machine mTLS plus the exact current claim facts grants execution authority;
+- a new owner, credential, protocol audience or external consequence requires a current journey and an updated canonical decision before code.
 
 ## Implementation and Review Budget
 

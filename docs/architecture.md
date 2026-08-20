@@ -430,33 +430,9 @@ protocol/
 - 不建立 common、utils、platform、integration、registry、resource、runtime、orchestrator 或 readmodel；
 - 删除最后一个消费者时同时删除 package、route、query、generated code、test 和文档。
 
-## 14. Promotion contracts
+## 14. Future promotion
 
-未来能力只保存最小退出条件，不在当前架构冻结表、API 或 package。
-
-### Result / Needs You
-
-先尝试用 Work 当前内容和查询表达。只有独立结果确实需要可引用 revision 与 review lifecycle 时才建立 identity。Needs You 始终是查询。
-
-### Future continuation
-
-先实现 Work 的一个明确 `continue_at` 条件。只有多个独立时间约定和 occurrence lifecycle 被证明必要时才建立 Timer identity。
-
-### Channels
-
-第一条渠道 journey 从 provider-native identity、目标 Conversation/Work 和真实 outbound outcome 推导最小事实。不要预建 Connector registry、通用 inbound message 或第二个 provider abstraction。
-
-### Action
-
-第一条真实外部写操作必须有 immutable typed command、真实授权、唯一 submit winner 和 Unknown。它的独立后果生命周期可以赚得 Action identity。
-
-### Artifact
-
-第一份必须长期保存的 bytes 出现后再引入 Artifact 和 Object Storage。Artifact 不因为被作为依据使用而复制成 Evidence。
-
-### Third-party capabilities
-
-第一条 Skill/MCP journey 只选择一种 transport 和一个 fixture。没有真实 credential-bearing consumer 前不建立 marketplace、tool registry 或通用 Plugin runtime。
+当前架构只定义上述六个 owner。未来能力的用户顺序和进入条件由 `docs/implementation.md` 唯一维护；每次进入时重新应用第 3 节的概念准入，不从本文件预建 Result、Timer、Channel、Action、Artifact、Plugin 的表、API、package 或共同框架。Needs You 保持 Work 查询；一个事实被用作依据时仍属于原 owner。
 
 ## 15. 正确性证据
 

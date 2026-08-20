@@ -107,6 +107,37 @@ func TestWorkerLeavesPrivateReplyUnresolvedWhenHostStops(t *testing.T) {
 	}
 }
 
+func TestWorkerContinuesWorkAfterPrivateReplyGenerationFails(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	runs := &recordingRunClient{
+		claims:   []run.Claim{workClaim("run-after-private-failure")},
+		onCommit: cancel,
+	}
+	conversations := &recordingConversationClient{
+		claims: []conversation.ReplyClaim{privateClaim("source-failure")},
+	}
+	executor := &recordingExecutor{
+		replyErr: ErrAgentFailed,
+		update: UnderstandingUpdate{
+			Understanding: "Work continued after the private failure.",
+			NextStep:      "Keep moving.",
+		},
+	}
+
+	if err := testWorker(runs, conversations, executor).Serve(ctx); err != nil {
+		t.Fatalf("serve after private Reply failure: %v", err)
+	}
+	if conversations.commits != 0 {
+		t.Fatalf("failed private Reply commits = %d", conversations.commits)
+	}
+	if runs.commits != 1 {
+		t.Fatalf("Work commits after private Reply failure = %d, want 1", runs.commits)
+	}
+	if want := []string{"conversation", "work"}; !reflect.DeepEqual(executor.order, want) {
+		t.Fatalf("execution order = %#v, want %#v", executor.order, want)
+	}
+}
+
 func TestWorkerLeavesPrivateReplyUnresolvedWhenRenewalFails(t *testing.T) {
 	renewFailure := errors.New("private lease authority lost")
 	conversations := &recordingConversationClient{

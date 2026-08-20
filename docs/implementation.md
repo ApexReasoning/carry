@@ -136,36 +136,36 @@ M4 V1 closure       Node 12
 
 Node 不是 package 或 migration 批次，而是用户结果。默认一到三个工作日；第三天仍不能关闭时应删减或拆分。
 
-## 7. 当前切割：M1 post-close correction
+## 7. 当前切割：Pre-Node5 polish
 
-M1 已完成，但 post-close 审计发现两处会破坏既有承诺的边界遗漏：无界 Work 输入可以产生 Host 永远无法解码的 Run claim；authenticated Work GET 没有统一禁止缓存。用户批准在进入 Node 5 前完成一次 correction/beautification cut，不增加产品概念。
+M1 与 post-close correction 已完成。进入 Node 5 前只做一次不增加产品能力的维护切割，使当前行为、文件职责、测试导航和 canonical 文档一致。
 
 ### 用户结果
 
-合法 Work 无论积累多少消息都可按有界连续 ranges 继续；撤权或 sign-out 后旧 authenticated response 不由缓存返回；Work 列表和消息历史有界分页且显示准确成员名称；有限或长期责任都可由自然语言明确委托。
+一次私人 Reply adapter 失败不会停止 Carry 继续处理其他责任，也不会写入回复或共享 Work。除此之外，M1 用户旅程不变。
 
 ### 必须完成
 
-1. 新 Run 最多固定 32 条、合计 256 KiB Work Message；成功只推进该 range，余量由后续 Run 无遗漏继续；recovery 保持原 range。
-2. Host 严格解码有界 claim，overflow、unknown field 与 trailing JSON fail closed。
-3. Work list 返回最多 50 条轻量 summaries；Work detail 消息页最多 50 条且文本合计最多 256 KiB；exclusive cursor 绑定准确 Space/Work；删除 list N+1。
-4. member 与 Machine credential surfaces 统一 `Cache-Control: no-store`。
-5. Machine 事实与 PKI 归入既有 `internal/machine` owner；Host 只保留本地执行。
-6. User OpenAPI 覆盖现有 Machine enrollment/revocation，并返回当前成员及 Work owner/author display name；CLI member transport收敛到一个窄 User API adapter，Machine mTLS 保持独立。
-7. Web 可以加载更早 Work/消息，只显示数据库证明的等待事实；pending storage runtime-validated 且 read-back verified。
-8. Work/Run 文本在进入 PostgreSQL 前拒绝 invalid UTF-8 与 NUL；Machine route UUID fail closed。
-9. 删除被替代的代码、测试 plumbing 和重复 canonical prose；不削弱现有 authority/privacy evidence。
+1. Reply 生成在 commit 前失败时保留未提交 claim，Host 继续服务；claim、renew、commit 的 authority 或基础设施错误仍然 fail closed。
+2. 并发 Machine 竞争同一 Work 时仍只有一个 Run winner；准确 unresolved-Run 唯一冲突对 loser 表达为无可领取 Work，不泄漏 PostgreSQL constraint error。
+3. Machine certificate、server TLS 与 `pki init` 文件职责和名称准确，不把 PKI 表现成额外产品概念。
+4. E2E 以行为命名，共享 process fixture 有明确 harness owner，不再依赖某个历史 Node 文件。
+5. `docs/product.md` 明确区分当前 M1 合同与未来方向；其余 canonical 文档只保留各自拥有的规则，删除重复解释。
+6. Conversation Web pagination/reconciliation 的纯函数与异步 effect 清楚可测，不增加状态框架。
+7. 仅在官方已有稳定 Node 24 runtime generation 时刷新 pinned GitHub Actions；不为外部 cache 故障增加 workaround。
 
 ### 关闭证据
 
-- 真实 PostgreSQL 证明 count/byte range continuation、cursor isolation、跨 Machine recovery 和 stale writer rejection；
-- HTTP/Host tests 证明 no-store、strict claim decode 与 bounded responses；
-- generated protocol clean，Web/CLI/Product journeys 通过；
-- `make check`、聚焦 review、普通 correction commit、push 与 CI 成功。
+- Host behavior test 证明 Reply adapter failure 不终止 worker、不 commit，并且 Work 继续推进；
+- 并发 claim integration test 证明一个 winner，loser 只得到无可领取 Work；
+- 现有 Machine/source/fence/lease 与 Run/Attempt/fence/lease 证据保持通过；
+- E2E、Web 与文档导航不再使用 Node 名称表达当前行为；
+- public protocol、schema、migration 和六个 owner 不变；
+- `make check`、race、一次聚焦 review、普通 commit、push 与 CI 成功。
 
 ### 明确不做
 
-Node 5、Result/Needs You、native Session recovery、Agent direct tools、新 owner/API audience、provider registry、全局 Web state/router/query framework，以及为该切割新增 compatibility layer。
+Node 5、schema/API/owner 变更、Work/Conversation 通用 claim、execution engine、Go OpenAPI generator、Pi/Codex registry、migration rewrite、全局 Web state/router/query framework，以及只为静态扫描分数改写正确代码。
 
 ## 8. 已完成基线：M0 与 M1
 
