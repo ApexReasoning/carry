@@ -46,17 +46,20 @@ func TestExecutionPromptContainsOnlyAuthorizedWorkContext(t *testing.T) {
 }
 
 func TestParseUnderstandingUpdateRequiresOneExactObject(t *testing.T) {
-	update, err := ParseUnderstandingUpdate([]byte(`{"understanding":"  Finance approved the term.  ","next_step":"  Apply legal wording.  "}`))
+	update, err := ParseUnderstandingUpdate([]byte(`{"understanding":"  Finance approved the term.  ","next_step":"  Apply legal wording.  ","review_required":true}`))
 	if err != nil {
 		t.Fatalf("parse current understanding draft: %v", err)
 	}
-	if update.Understanding != "Finance approved the term." || update.NextStep != "Apply legal wording." {
+	if update.Understanding != "Finance approved the term." ||
+		update.NextStep != "Apply legal wording." ||
+		!update.ReviewRequired {
 		t.Fatalf("normalized update = %#v", update)
 	}
 	invalid := []string{
-		`{"understanding":"Known","next_step":"Continue","authority":"granted"}`,
-		`{"understanding":"Known","next_step":""}`,
-		`{"understanding":"Known","next_step":"Continue"} {}`,
+		`{"understanding":"Known","next_step":"Continue","review_required":false,"authority":"granted"}`,
+		`{"understanding":"Known","next_step":"","review_required":false}`,
+		`{"understanding":"Known","next_step":"Continue"}`,
+		`{"understanding":"Known","next_step":"Continue","review_required":false} {}`,
 		"not json",
 	}
 	for _, data := range invalid {

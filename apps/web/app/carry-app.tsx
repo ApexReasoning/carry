@@ -163,9 +163,11 @@ export function App() {
                 <WorkList
                   works={board.works}
                   hasEarlier={board.hasEarlierWorks}
+                  needsYouOnly={board.needsYouOnly}
                   selectedWorkID={board.details?.work.work_id ?? null}
                   busy={busy}
                   onSelect={(workID) => void board.selectWork(workID)}
+                  onViewChange={(value) => void board.showNeedsYou(value)}
                   onLoadEarlier={() => void board.loadEarlierWorks()}
                 />
                 <WorkDetail
@@ -175,6 +177,7 @@ export function App() {
                   currentMemberID={session.member.user_id}
                   onMessage={board.addMessage}
                   onRetry={board.retryCurrentWork}
+                  onAcceptReview={board.acceptCurrentReview}
                   onLoadEarlierMessages={() => void board.loadEarlierMessages()}
                 />
               </div>

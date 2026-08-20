@@ -17,6 +17,7 @@ export function summaryFromWork(value: Work): WorkSummary {
     creator_display_name: value.creator_display_name,
     has_unapplied_input: value.has_unapplied_input,
     needs_retry: value.needs_retry,
+    needs_review: value.needs_review,
     created_at: value.created_at,
   };
 }

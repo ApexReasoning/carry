@@ -184,6 +184,93 @@ func TestWorkReadCursorsAreBoundedAndExact(t *testing.T) {
 	}
 }
 
+func TestNeedsYouQueryIsExplicitAndOwnerScoped(t *testing.T) {
+	t.Parallel()
+	const spaceID = "2ba3dd27-1b41-453c-8057-91f31a0d13b1"
+	queries := &recordingWorkQueries{page: work.Page{Works: []work.Summary{{
+		WorkID: "3ce2b155-b998-458e-9e5e-f022ca509135", SpaceID: spaceID,
+		Goal: "Prepare renewal", Lifecycle: work.LifecycleOpen, NeedsReview: true,
+	}}}}
+	handler := workTestAPI(t, &recordingWorkCommands{}, queries)
+	request := httptest.NewRequest(http.MethodGet, "/v1/spaces/"+spaceID+"/works?needs_you=true", nil)
+	request.Header.Set("Authorization", "Bearer member-token")
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK || !queries.listCommand.NeedsYou ||
+		!strings.Contains(response.Body.String(), `"needs_review":true`) {
+		t.Fatalf("Needs You response = %d %s; command = %#v", response.Code, response.Body.String(), queries.listCommand)
+	}
+
+	for _, rawQuery := range []string{"needs_you=maybe", "needs_you=true&needs_you=false"} {
+		request = httptest.NewRequest(http.MethodGet, "/v1/spaces/"+spaceID+"/works?"+rawQuery, nil)
+		request.Header.Set("Authorization", "Bearer member-token")
+		response = httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("query %q status = %d, body = %s", rawQuery, response.Code, response.Body.String())
+		}
+	}
+}
+
+func TestWorkDetailBindsCurrentReviewIdentityToCurrentContent(t *testing.T) {
+	t.Parallel()
+	const (
+		spaceID  = "2ba3dd27-1b41-453c-8057-91f31a0d13b1"
+		workID   = "3ce2b155-b998-458e-9e5e-f022ca509135"
+		reviewID = "4f7d55d9-157a-42dc-b339-e415487a1d60"
+	)
+	queries := &recordingWorkQueries{details: work.Details{Work: work.Work{
+		WorkID: workID, SpaceID: spaceID, Goal: "Prepare renewal", Lifecycle: work.LifecycleOpen,
+		Understanding: "The recommendation is ready.", NextStep: "Review the recommendation.",
+		NeedsReview: true, ReviewID: reviewID,
+	}}}
+	handler := workTestAPI(t, &recordingWorkCommands{}, queries)
+	request := httptest.NewRequest(http.MethodGet, "/v1/spaces/"+spaceID+"/works/"+workID, nil)
+	request.Header.Set("Authorization", "Bearer member-token")
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK ||
+		!strings.Contains(response.Body.String(), `"understanding":"The recommendation is ready."`) ||
+		!strings.Contains(response.Body.String(), `"needs_review":true`) ||
+		!strings.Contains(response.Body.String(), `"review_id":"`+reviewID+`"`) {
+		t.Fatalf("reviewable Work response = %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestAcceptWorkReviewUsesAuthenticatedOwnerAndIdempotency(t *testing.T) {
+	t.Parallel()
+	const (
+		spaceID  = "2ba3dd27-1b41-453c-8057-91f31a0d13b1"
+		workID   = "3ce2b155-b998-458e-9e5e-f022ca509135"
+		reviewID = "4f7d55d9-157a-42dc-b339-e415487a1d60"
+	)
+	commands := &recordingWorkCommands{}
+	handler := workTestAPI(t, commands, &recordingWorkQueries{})
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/spaces/"+spaceID+"/works/"+workID+"/reviews/"+reviewID+"/accept",
+		nil,
+	)
+	request.Header.Set("Authorization", "Bearer member-token")
+	request.Header.Set("Idempotency-Key", "accept-renewal-result")
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d; body = %s", response.Code, http.StatusNoContent, response.Body.String())
+	}
+	if commands.accept.WorkID != workID || commands.accept.SpaceID != spaceID ||
+		commands.accept.ReviewID != reviewID || commands.accept.AcceptedBy != "member-9" ||
+		commands.accept.IdempotencyKey != "accept-renewal-result" {
+		t.Fatalf("accept command = %#v", commands.accept)
+	}
+}
+
 func TestWorkStoreCursorErrorsAreBadRequests(t *testing.T) {
 	t.Parallel()
 	const spaceID = "2ba3dd27-1b41-453c-8057-91f31a0d13b1"
@@ -246,6 +333,7 @@ type recordingWorkCommands struct {
 	create  work.CreateCommand
 	append  work.AppendMessageCommand
 	retry   work.RetryCommand
+	accept  work.AcceptReviewCommand
 }
 
 func (s *recordingWorkCommands) CreateWork(_ context.Context, command work.CreateCommand) (work.Work, error) {
@@ -260,6 +348,11 @@ func (s *recordingWorkCommands) AppendWorkMessage(_ context.Context, command wor
 
 func (s *recordingWorkCommands) RequestWorkRetry(_ context.Context, command work.RetryCommand) error {
 	s.retry = command
+	return nil
+}
+
+func (s *recordingWorkCommands) AcceptWorkReview(_ context.Context, command work.AcceptReviewCommand) error {
+	s.accept = command
 	return nil
 }
 

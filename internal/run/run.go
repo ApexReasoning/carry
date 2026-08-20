@@ -60,6 +60,7 @@ type CommitCommand struct {
 	InputEndSeq              int64
 	Understanding            string
 	NextStep                 string
+	ReviewRequired           bool
 }
 
 type FinishCommand struct {

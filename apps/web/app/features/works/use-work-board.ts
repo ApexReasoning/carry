@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import {
+  acceptWorkReview,
   appendWorkMessage,
   createWork,
   listWorks,
@@ -20,6 +21,7 @@ import {
   clearPendingIdentity,
   pendingCreateIdentity,
   pendingMessageIdentity,
+  pendingReviewIdentity,
   pendingRetryIdentity,
 } from "./work-pending";
 
@@ -27,6 +29,7 @@ export function useWorkBoard(member: Member | null) {
   const [spaceID, setSpaceID] = useState<string | null>(null);
   const [works, setWorks] = useState<Array<WorkSummary>>([]);
   const [hasEarlierWorks, setHasEarlierWorks] = useState(false);
+  const [needsYouOnly, setNeedsYouOnly] = useState(false);
   const [details, setDetails] = useState<WorkDetails | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -46,6 +49,7 @@ export function useWorkBoard(member: Member | null) {
         setSpaceID(initialSpaceID);
         setWorks(page.works);
         setHasEarlierWorks(page.has_earlier_works);
+        setNeedsYouOnly(false);
         setDetails(null);
         setError(null);
       } catch (caught) {
@@ -65,6 +69,18 @@ export function useWorkBoard(member: Member | null) {
       setSpaceID(selectedSpaceID);
       setWorks(page.works);
       setHasEarlierWorks(page.has_earlier_works);
+      setNeedsYouOnly(false);
+      setDetails(null);
+    });
+  }
+
+  async function showNeedsYou(value: boolean): Promise<void> {
+    if (!spaceID || value === needsYouOnly) return;
+    await run(async () => {
+      const page = await listWorks(spaceID, undefined, value);
+      setWorks(page.works);
+      setHasEarlierWorks(page.has_earlier_works);
+      setNeedsYouOnly(value);
       setDetails(null);
     });
   }
@@ -74,7 +90,7 @@ export function useWorkBoard(member: Member | null) {
     const cursor = works.at(-1)?.work_id;
     if (!cursor) return;
     await run(async () => {
-      const page = await listWorks(spaceID, cursor);
+      const page = await listWorks(spaceID, cursor, needsYouOnly);
       setWorks((current) => mergeByID(current, page.works, "work_id"));
       setHasEarlierWorks(page.has_earlier_works);
     });
@@ -150,6 +166,54 @@ export function useWorkBoard(member: Member | null) {
     return failure === null;
   }
 
+  async function acceptCurrentReview(): Promise<void> {
+    if (!spaceID || !details || !member) return;
+    const workID = details.work.work_id;
+    const reviewID = details.work.review_id;
+    if (!details.work.needs_review || !reviewID) return;
+    const identity = await pendingReviewIdentity(
+      member.user_id,
+      spaceID,
+      workID,
+      reviewID,
+    ).catch((caught: unknown) => {
+      setError(errorMessage(caught));
+      return null;
+    });
+    if (!identity) return;
+
+    await run(async () => {
+      try {
+        await acceptWorkReview(
+          spaceID,
+          workID,
+          reviewID,
+          identity.idempotencyKey,
+        );
+      } catch (caught) {
+        const reloaded = await loadWork(spaceID, workID);
+        updateDetails(reloaded);
+        if (
+          reloaded.work.needs_review &&
+          reloaded.work.review_id === reviewID
+        ) {
+          throw caught;
+        }
+        clearPendingIdentity(identity);
+        return;
+      }
+
+      const reloaded = await loadWork(spaceID, workID);
+      updateDetails(reloaded);
+      if (reloaded.work.needs_review && reloaded.work.review_id === reviewID) {
+        throw new Error(
+          "The result was not accepted. Reload Carry and review the current result again.",
+        );
+      }
+      clearPendingIdentity(identity);
+    });
+  }
+
   async function retryCurrentWork(): Promise<void> {
     if (!spaceID || !details || !member) return;
     const workID = details.work.work_id;
@@ -187,9 +251,16 @@ export function useWorkBoard(member: Member | null) {
 
   function updateDetails(reloaded: WorkDetails) {
     setDetails((current) => mergeDetails(current, reloaded));
-    setWorks((current) =>
-      upsertSummary(current, summaryFromWork(reloaded.work)),
-    );
+    setWorks((current) => {
+      if (
+        needsYouOnly &&
+        !reloaded.work.needs_review &&
+        !reloaded.work.needs_retry
+      ) {
+        return current.filter((item) => item.work_id !== reloaded.work.work_id);
+      }
+      return upsertSummary(current, summaryFromWork(reloaded.work));
+    });
   }
 
   async function run(operation: () => Promise<void>): Promise<unknown | null> {
@@ -210,15 +281,18 @@ export function useWorkBoard(member: Member | null) {
     spaceID,
     works,
     hasEarlierWorks,
+    needsYouOnly,
     details,
     busy,
     error,
     selectSpace,
+    showNeedsYou,
     loadEarlierWorks,
     selectWork,
     loadEarlierMessages,
     addWork,
     addMessage,
+    acceptCurrentReview,
     retryCurrentWork,
   };
 }

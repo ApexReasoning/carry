@@ -68,7 +68,14 @@ SELECT
         WHERE runs.work_id = work.work_id
           AND runs.state IN ('failed', 'unknown')
           AND runs.retry_requested_at IS NULL
-    ) AS needs_retry
+    ) AS needs_retry,
+    EXISTS (
+        SELECT 1 FROM work_result_checks AS result_check
+        WHERE result_check.work_id = work.work_id
+          AND result_check.understanding_version = work.understanding_version
+          AND result_check.accepted_at IS NULL
+          AND work.applied_input_seq = work.input_head_seq
+    ) AS needs_review
 FROM works AS work
 JOIN carry_users AS owner ON owner.user_id = work.owner_user_id
 JOIN carry_users AS creator ON creator.user_id = work.creator_user_id
@@ -100,11 +107,40 @@ SELECT
         WHERE runs.work_id = work.work_id
           AND runs.state IN ('failed', 'unknown')
           AND runs.retry_requested_at IS NULL
-    ) AS needs_retry
+    ) AS needs_retry,
+    EXISTS (
+        SELECT 1 FROM work_result_checks AS result_check
+        WHERE result_check.work_id = work.work_id
+          AND result_check.understanding_version = work.understanding_version
+          AND result_check.accepted_at IS NULL
+          AND work.applied_input_seq = work.input_head_seq
+    ) AS needs_review
 FROM works AS work
 JOIN carry_users AS owner ON owner.user_id = work.owner_user_id
 JOIN carry_users AS creator ON creator.user_id = work.creator_user_id
-WHERE work.space_id = sqlc.arg(space_id)
+WHERE
+    work.space_id = sqlc.arg(space_id)
+    AND (
+        NOT sqlc.arg(needs_you)::boolean
+        OR (
+            work.owner_user_id = sqlc.arg(user_id)::uuid
+            AND (
+                EXISTS (
+                    SELECT 1 FROM runs
+                    WHERE runs.work_id = work.work_id
+                      AND runs.state IN ('failed', 'unknown')
+                      AND runs.retry_requested_at IS NULL
+                )
+                OR EXISTS (
+                    SELECT 1 FROM work_result_checks AS result_check
+                    WHERE result_check.work_id = work.work_id
+                      AND result_check.understanding_version = work.understanding_version
+                      AND result_check.accepted_at IS NULL
+                      AND work.applied_input_seq = work.input_head_seq
+                )
+            )
+        )
+    )
 ORDER BY work.created_at DESC, work.work_id DESC
 LIMIT 51;
 
@@ -126,12 +162,40 @@ SELECT
         WHERE runs.work_id = work.work_id
           AND runs.state IN ('failed', 'unknown')
           AND runs.retry_requested_at IS NULL
-    ) AS needs_retry
+    ) AS needs_retry,
+    EXISTS (
+        SELECT 1 FROM work_result_checks AS result_check
+        WHERE result_check.work_id = work.work_id
+          AND result_check.understanding_version = work.understanding_version
+          AND result_check.accepted_at IS NULL
+          AND work.applied_input_seq = work.input_head_seq
+    ) AS needs_review
 FROM works AS work
 JOIN carry_users AS owner ON owner.user_id = work.owner_user_id
 JOIN carry_users AS creator ON creator.user_id = work.creator_user_id
 WHERE
     work.space_id = sqlc.arg(space_id)
+    AND (
+        NOT sqlc.arg(needs_you)::boolean
+        OR (
+            work.owner_user_id = sqlc.arg(user_id)::uuid
+            AND (
+                EXISTS (
+                    SELECT 1 FROM runs
+                    WHERE runs.work_id = work.work_id
+                      AND runs.state IN ('failed', 'unknown')
+                      AND runs.retry_requested_at IS NULL
+                )
+                OR EXISTS (
+                    SELECT 1 FROM work_result_checks AS result_check
+                    WHERE result_check.work_id = work.work_id
+                      AND result_check.understanding_version = work.understanding_version
+                      AND result_check.accepted_at IS NULL
+                      AND work.applied_input_seq = work.input_head_seq
+                )
+            )
+        )
+    )
     AND (work.created_at, work.work_id) < (
         sqlc.arg(cursor_created_at)::timestamptz,
         sqlc.arg(cursor_work_id)::uuid
@@ -159,7 +223,23 @@ SELECT
         WHERE runs.work_id = work.work_id
           AND runs.state IN ('failed', 'unknown')
           AND runs.retry_requested_at IS NULL
-    ) AS needs_retry
+    ) AS needs_retry,
+    EXISTS (
+        SELECT 1 FROM work_result_checks AS result_check
+        WHERE result_check.work_id = work.work_id
+          AND result_check.understanding_version = work.understanding_version
+          AND result_check.accepted_at IS NULL
+          AND work.applied_input_seq = work.input_head_seq
+    ) AS needs_review,
+    coalesce((
+        SELECT result_check.review_id::text
+        FROM work_result_checks AS result_check
+        WHERE result_check.work_id = work.work_id
+          AND result_check.understanding_version = work.understanding_version
+          AND result_check.accepted_at IS NULL
+          AND work.applied_input_seq = work.input_head_seq
+        LIMIT 1
+    ), '')::text AS review_id
 FROM works AS work
 JOIN carry_users AS owner ON owner.user_id = work.owner_user_id
 JOIN carry_users AS creator ON creator.user_id = work.creator_user_id
@@ -172,6 +252,41 @@ SELECT work_id, space_id, goal, lifecycle, owner_user_id, creator_user_id,
 FROM works
 WHERE space_id = sqlc.arg(space_id) AND work_id = sqlc.arg(work_id)
 FOR UPDATE;
+
+-- name: FindWorkReviewAcceptanceByIdempotency :one
+SELECT result_check.review_id::text AS review_id, result_check.accept_request_digest
+FROM work_result_checks AS result_check
+JOIN works AS work ON work.work_id = result_check.work_id
+WHERE
+    result_check.work_id = sqlc.arg(work_id)
+    AND work.space_id = sqlc.arg(space_id)
+    AND result_check.accepted_by_user_id = sqlc.arg(accepted_by_user_id)::uuid
+    AND result_check.accept_idempotency_key = sqlc.arg(accept_idempotency_key)::text
+    AND result_check.accepted_at IS NOT NULL;
+
+-- name: LockWorkResultCheck :one
+SELECT
+    understanding_version,
+    content_digest,
+    accepted_at,
+    coalesce(accepted_by_user_id::text, '')::text AS accepted_by_user_id,
+    coalesce(accept_idempotency_key, '')::text AS accept_idempotency_key,
+    accept_request_digest
+FROM work_result_checks
+WHERE work_id = sqlc.arg(work_id) AND review_id = sqlc.arg(review_id)
+FOR UPDATE;
+
+-- name: AcceptWorkResultCheck :execrows
+UPDATE work_result_checks
+SET
+    accepted_by_user_id = sqlc.arg(accepted_by_user_id)::uuid,
+    accept_idempotency_key = sqlc.arg(accept_idempotency_key)::text,
+    accept_request_digest = sqlc.arg(accept_request_digest),
+    accepted_at = clock_timestamp()
+WHERE
+    work_id = sqlc.arg(work_id)
+    AND review_id = sqlc.arg(review_id)
+    AND accepted_at IS NULL;
 
 -- name: FindWorkMessageByIdempotency :one
 SELECT

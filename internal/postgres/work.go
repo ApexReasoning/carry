@@ -82,7 +82,9 @@ func (s *Store) ListWorks(ctx context.Context, command work.ListCommand) (work.P
 
 	var summaries []work.Summary
 	if command.Before == "" {
-		rows, listErr := queries.ListNewestWorks(ctx, command.SpaceID)
+		rows, listErr := queries.ListNewestWorks(ctx, dbsqlc.ListNewestWorksParams{
+			SpaceID: command.SpaceID, UserID: command.UserID, NeedsYou: command.NeedsYou,
+		})
 		if listErr != nil {
 			return work.Page{}, fmt.Errorf("list newest Works: %w", listErr)
 		}
@@ -101,7 +103,8 @@ func (s *Store) ListWorks(ctx context.Context, command work.ListCommand) (work.P
 			return work.Page{}, fmt.Errorf("load Work list cursor: %w", cursorErr)
 		}
 		rows, listErr := queries.ListWorksBefore(ctx, dbsqlc.ListWorksBeforeParams{
-			SpaceID: command.SpaceID, CursorCreatedAt: cursor.CreatedAt, CursorWorkID: cursor.WorkID,
+			SpaceID: command.SpaceID, UserID: command.UserID, NeedsYou: command.NeedsYou,
+			CursorCreatedAt: cursor.CreatedAt, CursorWorkID: cursor.WorkID,
 		})
 		if listErr != nil {
 			return work.Page{}, fmt.Errorf("list Works before cursor: %w", listErr)
@@ -187,6 +190,108 @@ func (s *Store) LoadWork(ctx context.Context, command work.LoadCommand) (work.De
 		return work.Details{}, fmt.Errorf("commit work load: %w", err)
 	}
 	return result, nil
+}
+
+func (s *Store) AcceptWorkReview(ctx context.Context, command work.AcceptReviewCommand) error {
+	if strings.TrimSpace(command.WorkID) == "" || strings.TrimSpace(command.SpaceID) == "" ||
+		strings.TrimSpace(command.ReviewID) == "" || strings.TrimSpace(command.AcceptedBy) == "" {
+		return errors.New("work, space, review, and accepting member are required")
+	}
+	if err := work.ValidateIdempotencyKey(command.IdempotencyKey); err != nil {
+		return err
+	}
+	if _, err := uuid.Parse(command.ReviewID); err != nil {
+		return work.ErrReviewNotCurrent
+	}
+	requestDigest := work.ReviewAcceptanceDigest(command.WorkID, command.ReviewID)
+
+	transaction, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin Work review acceptance: %w", err)
+	}
+	defer func() { _ = transaction.Rollback(context.Background()) }()
+	queries := s.queries.WithTx(transaction)
+	if err := lockActiveWorkMembership(ctx, queries, command.SpaceID, command.AcceptedBy); err != nil {
+		return err
+	}
+
+	existing, err := queries.FindWorkReviewAcceptanceByIdempotency(
+		ctx,
+		dbsqlc.FindWorkReviewAcceptanceByIdempotencyParams{
+			WorkID: command.WorkID, SpaceID: command.SpaceID,
+			AcceptedByUserID: command.AcceptedBy, AcceptIdempotencyKey: command.IdempotencyKey,
+		},
+	)
+	if err == nil {
+		if existing.ReviewID != command.ReviewID || !bytes.Equal(existing.AcceptRequestDigest, requestDigest[:]) {
+			return work.ErrIdempotencyConflict
+		}
+		if err := transaction.Commit(ctx); err != nil {
+			return fmt.Errorf("commit Work review acceptance replay: %w", err)
+		}
+		return nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("load Work review acceptance replay: %w", err)
+	}
+
+	locked, err := queries.LockWork(ctx, dbsqlc.LockWorkParams{
+		SpaceID: command.SpaceID, WorkID: command.WorkID,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return work.ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("lock Work for review acceptance: %w", err)
+	}
+	if locked.OwnerUserID != command.AcceptedBy {
+		return space.ErrForbidden
+	}
+	if locked.Lifecycle != string(work.LifecycleOpen) {
+		return work.ErrNotOpen
+	}
+
+	resultCheck, err := queries.LockWorkResultCheck(ctx, dbsqlc.LockWorkResultCheckParams{
+		WorkID: command.WorkID, ReviewID: command.ReviewID,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return work.ErrReviewNotCurrent
+	}
+	if err != nil {
+		return fmt.Errorf("lock Work result check: %w", err)
+	}
+	if resultCheck.AcceptedAt.Valid {
+		if resultCheck.AcceptedByUserID == command.AcceptedBy &&
+			resultCheck.AcceptIdempotencyKey == command.IdempotencyKey &&
+			bytes.Equal(resultCheck.AcceptRequestDigest, requestDigest[:]) {
+			if err := transaction.Commit(ctx); err != nil {
+				return fmt.Errorf("commit concurrent Work review acceptance replay: %w", err)
+			}
+			return nil
+		}
+		return work.ErrReviewNotCurrent
+	}
+	contentDigest := work.ReviewContentDigest(textValue(locked.Understanding), textValue(locked.NextStep))
+	if resultCheck.UnderstandingVersion != locked.UnderstandingVersion ||
+		locked.AppliedInputSeq != locked.InputHeadSeq ||
+		!bytes.Equal(resultCheck.ContentDigest, contentDigest[:]) {
+		return work.ErrReviewNotCurrent
+	}
+
+	rows, err := queries.AcceptWorkResultCheck(ctx, dbsqlc.AcceptWorkResultCheckParams{
+		AcceptedByUserID: command.AcceptedBy, AcceptIdempotencyKey: command.IdempotencyKey,
+		AcceptRequestDigest: requestDigest[:], WorkID: command.WorkID, ReviewID: command.ReviewID,
+	})
+	if err != nil {
+		return fmt.Errorf("accept Work result check: %w", err)
+	}
+	if rows != 1 {
+		return work.ErrReviewNotCurrent
+	}
+	if err := transaction.Commit(ctx); err != nil {
+		return fmt.Errorf("commit Work review acceptance: %w", err)
+	}
+	return nil
 }
 
 func (s *Store) AppendWorkMessage(ctx context.Context, command work.AppendMessageCommand) (work.Message, error) {
@@ -301,8 +406,10 @@ func workFromIdempotencyRow(row dbsqlc.FindWorkByCreateIdempotencyRow) work.Work
 		OwnerUserID: row.OwnerUserID, OwnerDisplayName: row.OwnerDisplayName,
 		CreatorUserID: row.CreatorUserID, CreatorDisplayName: row.CreatorDisplayName,
 		Understanding: textValue(row.Understanding), NextStep: textValue(row.NextStep),
-		HasUnappliedInput: row.AppliedInputSeq < row.InputHeadSeq, NeedsRetry: row.NeedsRetry,
-		CreatedAt: row.CreatedAt.Time,
+		HasUnappliedInput: row.AppliedInputSeq < row.InputHeadSeq,
+		NeedsRetry:        row.NeedsRetry,
+		NeedsReview:       row.NeedsReview,
+		CreatedAt:         row.CreatedAt.Time,
 	}
 }
 
@@ -313,8 +420,11 @@ func workFromLoadRow(row dbsqlc.LoadWorkRow) work.Work {
 		OwnerUserID: row.OwnerUserID, OwnerDisplayName: row.OwnerDisplayName,
 		CreatorUserID: row.CreatorUserID, CreatorDisplayName: row.CreatorDisplayName,
 		Understanding: textValue(row.Understanding), NextStep: textValue(row.NextStep),
-		HasUnappliedInput: row.AppliedInputSeq < row.InputHeadSeq, NeedsRetry: row.NeedsRetry,
-		CreatedAt: row.CreatedAt.Time,
+		HasUnappliedInput: row.AppliedInputSeq < row.InputHeadSeq,
+		NeedsRetry:        row.NeedsRetry,
+		NeedsReview:       row.NeedsReview,
+		ReviewID:          row.ReviewID,
+		CreatedAt:         row.CreatedAt.Time,
 	}
 }
 
@@ -324,8 +434,10 @@ func summaryFromNewestRow(row dbsqlc.ListNewestWorksRow) work.Summary {
 		Lifecycle:   work.Lifecycle(row.Lifecycle),
 		OwnerUserID: row.OwnerUserID, OwnerDisplayName: row.OwnerDisplayName,
 		CreatorUserID: row.CreatorUserID, CreatorDisplayName: row.CreatorDisplayName,
-		HasUnappliedInput: row.AppliedInputSeq < row.InputHeadSeq, NeedsRetry: row.NeedsRetry,
-		CreatedAt: row.CreatedAt.Time,
+		HasUnappliedInput: row.AppliedInputSeq < row.InputHeadSeq,
+		NeedsRetry:        row.NeedsRetry,
+		NeedsReview:       row.NeedsReview,
+		CreatedAt:         row.CreatedAt.Time,
 	}
 }
 
@@ -335,8 +447,10 @@ func summaryFromBeforeRow(row dbsqlc.ListWorksBeforeRow) work.Summary {
 		Lifecycle:   work.Lifecycle(row.Lifecycle),
 		OwnerUserID: row.OwnerUserID, OwnerDisplayName: row.OwnerDisplayName,
 		CreatorUserID: row.CreatorUserID, CreatorDisplayName: row.CreatorDisplayName,
-		HasUnappliedInput: row.AppliedInputSeq < row.InputHeadSeq, NeedsRetry: row.NeedsRetry,
-		CreatedAt: row.CreatedAt.Time,
+		HasUnappliedInput: row.AppliedInputSeq < row.InputHeadSeq,
+		NeedsRetry:        row.NeedsRetry,
+		NeedsReview:       row.NeedsReview,
+		CreatedAt:         row.CreatedAt.Time,
 	}
 }
 

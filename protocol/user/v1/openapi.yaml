@@ -206,10 +206,13 @@ paths:
       operationId: listWorks
       parameters:
         - $ref: "#/components/parameters/BeforeWork"
+        - $ref: "#/components/parameters/NeedsYou"
       responses:
         "200":
           description: >-
-            Newest or cursor-relative Work summaries visible in the Space
+            Newest or cursor-relative Work summaries visible in the Space;
+            needs_you limits the result to current reviews or explicit retries
+            owned by the authenticated member
           headers:
             Cache-Control:
               $ref: "#/components/headers/NoStore"
@@ -343,6 +346,32 @@ paths:
           $ref: "#/components/responses/Error"
         "409":
           $ref: "#/components/responses/Error"
+  /v1/spaces/{spaceID}/works/{workID}/reviews/{reviewID}/accept:
+    parameters:
+      - $ref: "#/components/parameters/SpaceID"
+      - $ref: "#/components/parameters/WorkID"
+      - $ref: "#/components/parameters/ReviewID"
+    post:
+      operationId: acceptWorkReview
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "204":
+          description: >-
+            Exact current stage result accepted or idempotently replayed
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
   /v1/spaces/{spaceID}/works/{workID}/retry:
     parameters:
       - $ref: "#/components/parameters/SpaceID"
@@ -395,6 +424,13 @@ components:
       schema:
         type: string
         format: uuid
+    ReviewID:
+      name: reviewID
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -431,6 +467,13 @@ components:
       schema:
         type: string
         format: uuid
+    NeedsYou:
+      name: needs_you
+      in: query
+      required: false
+      schema:
+        type: boolean
+        default: false
   responses:
     Error:
       description: Request rejected
@@ -527,6 +570,7 @@ components:
         - next_step
         - has_unapplied_input
         - needs_retry
+        - needs_review
         - created_at
       properties:
         work_id:
@@ -559,6 +603,14 @@ components:
         needs_retry:
           type: boolean
           description: An active member must explicitly request a fresh attempt
+        needs_review:
+          type: boolean
+          description: >-
+            The current stage result awaits acceptance by the Work owner
+        review_id:
+          type: string
+          format: uuid
+          description: Present only with the exact current reviewable result
         created_at:
           type: string
           format: date-time
@@ -576,6 +628,7 @@ components:
         - creator_display_name
         - has_unapplied_input
         - needs_retry
+        - needs_review
         - created_at
       properties:
         work_id:
@@ -604,6 +657,10 @@ components:
         needs_retry:
           type: boolean
           description: An active member must explicitly request a fresh attempt
+        needs_review:
+          type: boolean
+          description: >-
+            The current stage result awaits acceptance by the Work owner
         created_at:
           type: string
           format: date-time

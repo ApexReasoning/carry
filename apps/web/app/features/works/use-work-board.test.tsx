@@ -103,6 +103,78 @@ test("loads bounded earlier Work and message pages without duplicates", async ()
   );
 });
 
+test("accepts the exact Needs You result and reconciles a lost response", async () => {
+  let accepted = false;
+  const acceptanceRequests: Array<Request> = [];
+  const reviewID = "77777777-7777-4777-8777-777777777777";
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request =
+        input instanceof Request ? input : new Request(input, init);
+      const url = new URL(request.url);
+      if (
+        request.method === "GET" &&
+        url.pathname === `/v1/spaces/${spaceID}/works`
+      ) {
+        return json({
+          works:
+            url.searchParams.get("needs_you") === "true" && !accepted
+              ? [
+                  {
+                    ...summary(newestWorkID, "Review recommendation"),
+                    needs_review: true,
+                  },
+                ]
+              : [],
+          has_earlier_works: false,
+        });
+      }
+      if (
+        request.method === "GET" &&
+        url.pathname === `/v1/spaces/${spaceID}/works/${newestWorkID}`
+      ) {
+        return json({
+          work: accepted
+            ? fullWork()
+            : { ...fullWork(), needs_review: true, review_id: reviewID },
+          messages: [],
+          has_earlier_messages: false,
+        });
+      }
+      if (
+        request.method === "POST" &&
+        url.pathname ===
+          `/v1/spaces/${spaceID}/works/${newestWorkID}/reviews/${reviewID}/accept`
+      ) {
+        acceptanceRequests.push(request);
+        accepted = true;
+        throw new TypeError("response lost");
+      }
+      throw new Error(`unexpected request ${request.method} ${url}`);
+    }),
+  );
+
+  const { result } = renderHook(() => useWorkBoard(member));
+  await waitFor(() => expect(result.current.spaceID).toBe(spaceID));
+  expect(result.current.works).toHaveLength(0);
+
+  await act(() => result.current.showNeedsYou(true));
+  expect(result.current.needsYouOnly).toBe(true);
+  expect(result.current.works).toHaveLength(1);
+
+  await act(() => result.current.selectWork(newestWorkID));
+  expect(result.current.details?.work.review_id).toBe(reviewID);
+
+  await act(() => result.current.acceptCurrentReview());
+  expect(result.current.details?.work.needs_review).toBe(false);
+  expect(result.current.works).toHaveLength(0);
+  expect(acceptanceRequests).toHaveLength(1);
+  expect(acceptanceRequests[0]?.headers.get("Idempotency-Key")).toMatch(
+    /^[0-9a-f-]{36}$/,
+  );
+});
+
 function summary(workID: string, goal: string): WorkSummary {
   return {
     work_id: workID,
@@ -115,6 +187,7 @@ function summary(workID: string, goal: string): WorkSummary {
     creator_display_name: "Alex Morgan",
     has_unapplied_input: false,
     needs_retry: false,
+    needs_review: false,
     created_at: "2026-08-20T12:00:00Z",
   };
 }

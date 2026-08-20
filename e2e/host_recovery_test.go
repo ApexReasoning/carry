@@ -330,7 +330,7 @@ case "$prompt" in
     fi
     printf '%s\n' \
       '{"id":"carry-prompt","type":"response","command":"prompt","success":true}' \
-      '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"{\"understanding\":\"Retried only after the member choice.\",\"next_step\":\"Continue the explicitly authorized fresh Run.\"}"}],"stopReason":"stop"}}' \
+      '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"{\"understanding\":\"Retried only after the member choice.\",\"next_step\":\"Continue the explicitly authorized fresh Run.\",\"review_required\":false}"}],"stopReason":"stop"}}' \
       '{"type":"agent_settled"}'
     exit 0
     ;;
@@ -345,7 +345,7 @@ fi
 printf '%s' "$prompt" > "$CARRY_FAKE_PI_SECOND_PROMPT"
 printf '%s\n' \
   '{"id":"carry-prompt","type":"response","command":"prompt","success":true}' \
-  '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"{\"understanding\":\"Recovered after Host interruption.\",\"next_step\":\"Continue from the durable Work context.\"}"}],"stopReason":"stop"}}' \
+  '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"{\"understanding\":\"Recovered after Host interruption.\",\"next_step\":\"Continue from the durable Work context.\",\"review_required\":false}"}],"stopReason":"stop"}}' \
   '{"type":"agent_settled"}'
 `
 	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {

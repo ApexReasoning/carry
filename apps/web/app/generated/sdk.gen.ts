@@ -9,6 +9,9 @@ import type {
 } from "./client";
 import { client } from "./client.gen";
 import type {
+  AcceptWorkReviewData,
+  AcceptWorkReviewErrors,
+  AcceptWorkReviewResponses,
   AppendWorkMessageData,
   AppendWorkMessageErrors,
   AppendWorkMessageResponses,
@@ -47,6 +50,7 @@ import type {
   SendConversationMessageResponses,
 } from "./types.gen";
 import {
+  zAcceptWorkReviewResponse,
   zAppendWorkMessageResponse,
   zCreateBrowserSessionResponse,
   zCreateWorkResponse,
@@ -356,6 +360,32 @@ export const appendWorkMessage = <ThrowOnError extends boolean = false>(
       "Content-Type": "application/json",
       ...options.headers,
     },
+  });
+
+export const acceptWorkReview = <ThrowOnError extends boolean = false>(
+  options: Options<AcceptWorkReviewData, ThrowOnError>,
+): RequestResult<
+  AcceptWorkReviewResponses,
+  AcceptWorkReviewErrors,
+  ThrowOnError
+> =>
+  (options.client ?? client).post<
+    AcceptWorkReviewResponses,
+    AcceptWorkReviewErrors,
+    ThrowOnError
+  >({
+    responseValidator: async (data) =>
+      await zAcceptWorkReviewResponse.parseAsync(data),
+    security: [
+      { scheme: "bearer", type: "http" },
+      {
+        in: "cookie",
+        name: "__Host-carry_session",
+        type: "apiKey",
+      },
+    ],
+    url: "/v1/spaces/{spaceID}/works/{workID}/reviews/{reviewID}/accept",
+    ...options,
   });
 
 export const retryWork = <ThrowOnError extends boolean = false>(

@@ -149,3 +149,15 @@ type WorkMessage struct {
 	RequestDigest  []byte
 	CreatedAt      pgtype.Timestamptz
 }
+
+type WorkResultCheck struct {
+	ReviewID             string
+	WorkID               string
+	UnderstandingVersion int64
+	ContentDigest        []byte
+	RequestedAt          pgtype.Timestamptz
+	AcceptedByUserID     pgtype.UUID
+	AcceptIdempotencyKey *string
+	AcceptRequestDigest  []byte
+	AcceptedAt           pgtype.Timestamptz
+}

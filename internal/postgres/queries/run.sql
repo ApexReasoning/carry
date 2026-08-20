@@ -215,7 +215,7 @@ SELECT lease_expires_at > clock_timestamp()
 FROM run_attempts
 WHERE attempt_id = sqlc.arg(attempt_id);
 
--- name: CommitCurrentUnderstanding :execrows
+-- name: CommitCurrentUnderstanding :one
 UPDATE works
 SET
     understanding = sqlc.arg(understanding),
@@ -227,7 +227,22 @@ WHERE
     AND lifecycle = 'open'
     AND applied_input_seq = sqlc.arg(expected_applied_input_seq)
     AND understanding_version = sqlc.arg(expected_understanding_version)
-    AND input_head_seq >= sqlc.arg(applied_input_seq);
+    AND input_head_seq >= sqlc.arg(applied_input_seq)
+RETURNING understanding_version;
+
+-- name: CreateWorkResultCheck :execrows
+INSERT INTO work_result_checks (
+    review_id,
+    work_id,
+    understanding_version,
+    content_digest
+) VALUES (
+    sqlc.arg(review_id),
+    sqlc.arg(work_id),
+    sqlc.arg(understanding_version),
+    sqlc.arg(content_digest)
+)
+ON CONFLICT (work_id, understanding_version) DO NOTHING;
 
 -- name: SucceedRunAttempt :execrows
 UPDATE run_attempts

@@ -194,6 +194,7 @@ func resetProductJourneyFacts(t *testing.T, databaseURL string) {
 		"conversations",
 		"run_attempts",
 		"runs",
+		"work_result_checks",
 		"work_messages",
 		"works",
 		"machines",
@@ -312,9 +313,10 @@ if [ "${1:-}" = "--version" ]; then
 fi
 IFS= read -r prompt
 printf '%s' "$prompt" > "$CARRY_FAKE_PI_PROMPT"
+review_required="${CARRY_FAKE_PI_REVIEW_REQUIRED:-false}"
 printf '%s\n' \
   '{"id":"carry-prompt","type":"response","command":"prompt","success":true}' \
-  '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"{\"understanding\":\"Finance approved a twelve month term.\",\"next_step\":\"Prepare the renewal recommendation.\"}"}],"stopReason":"stop"}}' \
+  "{\"type\":\"message_end\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"{\\\"understanding\\\":\\\"Finance approved a twelve month term.\\\",\\\"next_step\\\":\\\"Prepare the renewal recommendation.\\\",\\\"review_required\\\":$review_required}\"}],\"stopReason\":\"stop\"}}" \
   '{"type":"agent_settled"}'
 `
 	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {

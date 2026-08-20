@@ -20,7 +20,7 @@ printf '%s\n' "$@" > "$PI_ARGS_FILE"
 IFS= read -r prompt
 printf '%s\n' \
   '{"id":"carry-prompt","type":"response","command":"prompt","success":true}' \
-  '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"{\"understanding\":\"Finance approved the term.\",\"next_step\":\"Apply legal wording.\"}"}],"stopReason":"stop"}}' \
+  '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"{\"understanding\":\"Finance approved the term.\",\"next_step\":\"Apply legal wording.\",\"review_required\":false}"}],"stopReason":"stop"}}' \
   '{"type":"agent_settled"}'
 `)
 	usePiFixture(t, binary)

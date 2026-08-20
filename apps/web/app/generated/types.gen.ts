@@ -57,6 +57,14 @@ export type Work = {
    * An active member must explicitly request a fresh attempt
    */
   needs_retry: boolean;
+  /**
+   * The current stage result awaits acceptance by the Work owner
+   */
+  needs_review: boolean;
+  /**
+   * Present only with the exact current reviewable result
+   */
+  review_id?: string;
   created_at: string;
 };
 
@@ -74,6 +82,10 @@ export type WorkSummary = {
    * An active member must explicitly request a fresh attempt
    */
   needs_retry: boolean;
+  /**
+   * The current stage result awaits acceptance by the Work owner
+   */
+  needs_review: boolean;
   created_at: string;
 };
 
@@ -90,6 +102,8 @@ export type SpaceId = string;
 
 export type WorkId = string;
 
+export type ReviewId = string;
+
 export type IdempotencyKey = string;
 
 export type BeforeConversationMessage = string;
@@ -99,6 +113,8 @@ export type AfterConversationMessage = string;
 export type BeforeWork = string;
 
 export type BeforeWorkMessage = string;
+
+export type NeedsYou = boolean;
 
 export type CreateBrowserSessionData = {
   body?: never;
@@ -367,6 +383,7 @@ export type ListWorksData = {
   };
   query?: {
     before?: string;
+    needs_you?: boolean;
   };
   url: "/v1/spaces/{spaceID}/works";
 };
@@ -390,7 +407,7 @@ export type ListWorksError = ListWorksErrors[keyof ListWorksErrors];
 
 export type ListWorksResponses = {
   /**
-   * Newest or cursor-relative Work summaries visible in the Space
+   * Newest or cursor-relative Work summaries visible in the Space; needs_you limits the result to current reviews or explicit retries owned by the authenticated member
    */
   200: {
     works: Array<WorkSummary>;
@@ -533,6 +550,56 @@ export type AppendWorkMessageResponses = {
 
 export type AppendWorkMessageResponse =
   AppendWorkMessageResponses[keyof AppendWorkMessageResponses];
+
+export type AcceptWorkReviewData = {
+  body?: never;
+  headers: {
+    "Idempotency-Key": string;
+  };
+  path: {
+    spaceID: string;
+    workID: string;
+    reviewID: string;
+  };
+  query?: never;
+  url: "/v1/spaces/{spaceID}/works/{workID}/reviews/{reviewID}/accept";
+};
+
+export type AcceptWorkReviewErrors = {
+  /**
+   * Request rejected
+   */
+  400: ApiError;
+  /**
+   * Request rejected
+   */
+  401: ApiError;
+  /**
+   * Request rejected
+   */
+  403: ApiError;
+  /**
+   * Request rejected
+   */
+  404: ApiError;
+  /**
+   * Request rejected
+   */
+  409: ApiError;
+};
+
+export type AcceptWorkReviewError =
+  AcceptWorkReviewErrors[keyof AcceptWorkReviewErrors];
+
+export type AcceptWorkReviewResponses = {
+  /**
+   * Exact current stage result accepted or idempotently replayed
+   */
+  204: void;
+};
+
+export type AcceptWorkReviewResponse =
+  AcceptWorkReviewResponses[keyof AcceptWorkReviewResponses];
 
 export type RetryWorkData = {
   body?: never;

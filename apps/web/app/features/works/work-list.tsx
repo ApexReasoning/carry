@@ -4,18 +4,22 @@ import { formatWorkDate } from "./work-time";
 type WorkListProps = {
   works: Array<WorkSummary>;
   hasEarlier: boolean;
+  needsYouOnly: boolean;
   selectedWorkID: string | null;
   busy: boolean;
   onSelect: (workID: string) => void;
+  onViewChange: (needsYouOnly: boolean) => void;
   onLoadEarlier: () => void;
 };
 
 export function WorkList({
   works,
   hasEarlier,
+  needsYouOnly,
   selectedWorkID,
   busy,
   onSelect,
+  onViewChange,
   onLoadEarlier,
 }: WorkListProps) {
   return (
@@ -23,14 +27,38 @@ export function WorkList({
       <div className="section-heading">
         <h2 id="work-list-title">Work</h2>
         <span className="work-count">
-          {works.length === 1 && !hasEarlier
-            ? "1 open"
-            : `${works.length}${hasEarlier ? "+" : ""} open`}
+          {needsYouOnly
+            ? `${works.length}${hasEarlier ? "+" : ""} need you`
+            : works.length === 1 && !hasEarlier
+              ? "1 open"
+              : `${works.length}${hasEarlier ? "+" : ""} open`}
         </span>
+      </div>
+      <div className="work-view-switch" role="group" aria-label="Work view">
+        <button
+          type="button"
+          className={!needsYouOnly ? "selected" : undefined}
+          aria-pressed={!needsYouOnly}
+          disabled={busy}
+          onClick={() => onViewChange(false)}
+        >
+          All Work
+        </button>
+        <button
+          type="button"
+          className={needsYouOnly ? "selected" : undefined}
+          aria-pressed={needsYouOnly}
+          disabled={busy}
+          onClick={() => onViewChange(true)}
+        >
+          Needs You
+        </button>
       </div>
       {works.length === 0 ? (
         <p className="empty-copy">
-          No Work yet. Give Carry one clear responsibility above.
+          {needsYouOnly
+            ? "Nothing needs you right now."
+            : "No Work yet. Give Carry one clear responsibility above."}
         </p>
       ) : (
         <ul>
@@ -52,7 +80,11 @@ export function WorkList({
                 <span className="work-goal">{item.goal}</span>
                 <span className="work-meta">
                   <span className="status-dot" aria-hidden="true" />
-                  Open
+                  {item.needs_review
+                    ? "Needs review"
+                    : item.needs_retry
+                      ? "Try again"
+                      : "Open"}
                   <span aria-hidden="true">·</span>
                   {item.owner_display_name}
                   <span aria-hidden="true">·</span>

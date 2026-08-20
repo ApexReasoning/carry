@@ -35,6 +35,7 @@ type commitUnderstandingRequest struct {
 	InputEndSeq              int64  `json:"input_end_seq"`
 	Understanding            string `json:"understanding"`
 	NextStep                 string `json:"next_step"`
+	ReviewRequired           bool   `json:"review_required"`
 }
 
 type finishAttemptRequest struct {
@@ -163,7 +164,8 @@ func (api machineAPI) commitUnderstanding(response http.ResponseWriter, request 
 		MachineID: machineID, RunID: runID,
 		AttemptID: attemptID, Fence: body.Fence,
 		BaseUnderstandingVersion: body.BaseUnderstandingVersion,
-		InputEndSeq:              body.InputEndSeq, Understanding: body.Understanding, NextStep: body.NextStep,
+		InputEndSeq:              body.InputEndSeq, Understanding: body.Understanding,
+		NextStep: body.NextStep, ReviewRequired: body.ReviewRequired,
 	}); err != nil {
 		writeStoreError(response, err)
 		return

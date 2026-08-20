@@ -11,6 +11,41 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const acceptWorkResultCheck = `-- name: AcceptWorkResultCheck :execrows
+UPDATE work_result_checks
+SET
+    accepted_by_user_id = $1::uuid,
+    accept_idempotency_key = $2::text,
+    accept_request_digest = $3,
+    accepted_at = clock_timestamp()
+WHERE
+    work_id = $4
+    AND review_id = $5
+    AND accepted_at IS NULL
+`
+
+type AcceptWorkResultCheckParams struct {
+	AcceptedByUserID     string
+	AcceptIdempotencyKey string
+	AcceptRequestDigest  []byte
+	WorkID               string
+	ReviewID             string
+}
+
+func (q *Queries) AcceptWorkResultCheck(ctx context.Context, arg AcceptWorkResultCheckParams) (int64, error) {
+	result, err := q.db.Exec(ctx, acceptWorkResultCheck,
+		arg.AcceptedByUserID,
+		arg.AcceptIdempotencyKey,
+		arg.AcceptRequestDigest,
+		arg.WorkID,
+		arg.ReviewID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const advanceWorkInputHead = `-- name: AdvanceWorkInputHead :one
 UPDATE works
 SET input_head_seq = input_head_seq + 1
@@ -218,7 +253,14 @@ SELECT
         WHERE runs.work_id = work.work_id
           AND runs.state IN ('failed', 'unknown')
           AND runs.retry_requested_at IS NULL
-    ) AS needs_retry
+    ) AS needs_retry,
+    EXISTS (
+        SELECT 1 FROM work_result_checks AS result_check
+        WHERE result_check.work_id = work.work_id
+          AND result_check.understanding_version = work.understanding_version
+          AND result_check.accepted_at IS NULL
+          AND work.applied_input_seq = work.input_head_seq
+    ) AS needs_review
 FROM works AS work
 JOIN carry_users AS owner ON owner.user_id = work.owner_user_id
 JOIN carry_users AS creator ON creator.user_id = work.creator_user_id
@@ -250,6 +292,7 @@ type FindWorkByCreateIdempotencyRow struct {
 	CreatedAt           pgtype.Timestamptz
 	CreateRequestDigest []byte
 	NeedsRetry          bool
+	NeedsReview         bool
 }
 
 func (q *Queries) FindWorkByCreateIdempotency(ctx context.Context, arg FindWorkByCreateIdempotencyParams) (FindWorkByCreateIdempotencyRow, error) {
@@ -271,6 +314,7 @@ func (q *Queries) FindWorkByCreateIdempotency(ctx context.Context, arg FindWorkB
 		&i.CreatedAt,
 		&i.CreateRequestDigest,
 		&i.NeedsRetry,
+		&i.NeedsReview,
 	)
 	return i, err
 }
@@ -323,6 +367,42 @@ func (q *Queries) FindWorkMessageByIdempotency(ctx context.Context, arg FindWork
 		&i.CreatedAt,
 		&i.RequestDigest,
 	)
+	return i, err
+}
+
+const findWorkReviewAcceptanceByIdempotency = `-- name: FindWorkReviewAcceptanceByIdempotency :one
+SELECT result_check.review_id::text AS review_id, result_check.accept_request_digest
+FROM work_result_checks AS result_check
+JOIN works AS work ON work.work_id = result_check.work_id
+WHERE
+    result_check.work_id = $1
+    AND work.space_id = $2
+    AND result_check.accepted_by_user_id = $3::uuid
+    AND result_check.accept_idempotency_key = $4::text
+    AND result_check.accepted_at IS NOT NULL
+`
+
+type FindWorkReviewAcceptanceByIdempotencyParams struct {
+	WorkID               string
+	SpaceID              string
+	AcceptedByUserID     string
+	AcceptIdempotencyKey string
+}
+
+type FindWorkReviewAcceptanceByIdempotencyRow struct {
+	ReviewID            string
+	AcceptRequestDigest []byte
+}
+
+func (q *Queries) FindWorkReviewAcceptanceByIdempotency(ctx context.Context, arg FindWorkReviewAcceptanceByIdempotencyParams) (FindWorkReviewAcceptanceByIdempotencyRow, error) {
+	row := q.db.QueryRow(ctx, findWorkReviewAcceptanceByIdempotency,
+		arg.WorkID,
+		arg.SpaceID,
+		arg.AcceptedByUserID,
+		arg.AcceptIdempotencyKey,
+	)
+	var i FindWorkReviewAcceptanceByIdempotencyRow
+	err := row.Scan(&i.ReviewID, &i.AcceptRequestDigest)
 	return i, err
 }
 
@@ -411,14 +491,49 @@ SELECT
         WHERE runs.work_id = work.work_id
           AND runs.state IN ('failed', 'unknown')
           AND runs.retry_requested_at IS NULL
-    ) AS needs_retry
+    ) AS needs_retry,
+    EXISTS (
+        SELECT 1 FROM work_result_checks AS result_check
+        WHERE result_check.work_id = work.work_id
+          AND result_check.understanding_version = work.understanding_version
+          AND result_check.accepted_at IS NULL
+          AND work.applied_input_seq = work.input_head_seq
+    ) AS needs_review
 FROM works AS work
 JOIN carry_users AS owner ON owner.user_id = work.owner_user_id
 JOIN carry_users AS creator ON creator.user_id = work.creator_user_id
-WHERE work.space_id = $1
+WHERE
+    work.space_id = $1
+    AND (
+        NOT $2::boolean
+        OR (
+            work.owner_user_id = $3::uuid
+            AND (
+                EXISTS (
+                    SELECT 1 FROM runs
+                    WHERE runs.work_id = work.work_id
+                      AND runs.state IN ('failed', 'unknown')
+                      AND runs.retry_requested_at IS NULL
+                )
+                OR EXISTS (
+                    SELECT 1 FROM work_result_checks AS result_check
+                    WHERE result_check.work_id = work.work_id
+                      AND result_check.understanding_version = work.understanding_version
+                      AND result_check.accepted_at IS NULL
+                      AND work.applied_input_seq = work.input_head_seq
+                )
+            )
+        )
+    )
 ORDER BY work.created_at DESC, work.work_id DESC
 LIMIT 51
 `
+
+type ListNewestWorksParams struct {
+	SpaceID  string
+	NeedsYou bool
+	UserID   string
+}
 
 type ListNewestWorksRow struct {
 	WorkID             string
@@ -433,10 +548,11 @@ type ListNewestWorksRow struct {
 	AppliedInputSeq    int64
 	CreatedAt          pgtype.Timestamptz
 	NeedsRetry         bool
+	NeedsReview        bool
 }
 
-func (q *Queries) ListNewestWorks(ctx context.Context, spaceID string) ([]ListNewestWorksRow, error) {
-	rows, err := q.db.Query(ctx, listNewestWorks, spaceID)
+func (q *Queries) ListNewestWorks(ctx context.Context, arg ListNewestWorksParams) ([]ListNewestWorksRow, error) {
+	rows, err := q.db.Query(ctx, listNewestWorks, arg.SpaceID, arg.NeedsYou, arg.UserID)
 	if err != nil {
 		return nil, err
 	}
@@ -457,6 +573,7 @@ func (q *Queries) ListNewestWorks(ctx context.Context, spaceID string) ([]ListNe
 			&i.AppliedInputSeq,
 			&i.CreatedAt,
 			&i.NeedsRetry,
+			&i.NeedsReview,
 		); err != nil {
 			return nil, err
 		}
@@ -558,15 +675,43 @@ SELECT
         WHERE runs.work_id = work.work_id
           AND runs.state IN ('failed', 'unknown')
           AND runs.retry_requested_at IS NULL
-    ) AS needs_retry
+    ) AS needs_retry,
+    EXISTS (
+        SELECT 1 FROM work_result_checks AS result_check
+        WHERE result_check.work_id = work.work_id
+          AND result_check.understanding_version = work.understanding_version
+          AND result_check.accepted_at IS NULL
+          AND work.applied_input_seq = work.input_head_seq
+    ) AS needs_review
 FROM works AS work
 JOIN carry_users AS owner ON owner.user_id = work.owner_user_id
 JOIN carry_users AS creator ON creator.user_id = work.creator_user_id
 WHERE
     work.space_id = $1
+    AND (
+        NOT $2::boolean
+        OR (
+            work.owner_user_id = $3::uuid
+            AND (
+                EXISTS (
+                    SELECT 1 FROM runs
+                    WHERE runs.work_id = work.work_id
+                      AND runs.state IN ('failed', 'unknown')
+                      AND runs.retry_requested_at IS NULL
+                )
+                OR EXISTS (
+                    SELECT 1 FROM work_result_checks AS result_check
+                    WHERE result_check.work_id = work.work_id
+                      AND result_check.understanding_version = work.understanding_version
+                      AND result_check.accepted_at IS NULL
+                      AND work.applied_input_seq = work.input_head_seq
+                )
+            )
+        )
+    )
     AND (work.created_at, work.work_id) < (
-        $2::timestamptz,
-        $3::uuid
+        $4::timestamptz,
+        $5::uuid
     )
 ORDER BY work.created_at DESC, work.work_id DESC
 LIMIT 51
@@ -574,6 +719,8 @@ LIMIT 51
 
 type ListWorksBeforeParams struct {
 	SpaceID         string
+	NeedsYou        bool
+	UserID          string
 	CursorCreatedAt pgtype.Timestamptz
 	CursorWorkID    string
 }
@@ -591,10 +738,17 @@ type ListWorksBeforeRow struct {
 	AppliedInputSeq    int64
 	CreatedAt          pgtype.Timestamptz
 	NeedsRetry         bool
+	NeedsReview        bool
 }
 
 func (q *Queries) ListWorksBefore(ctx context.Context, arg ListWorksBeforeParams) ([]ListWorksBeforeRow, error) {
-	rows, err := q.db.Query(ctx, listWorksBefore, arg.SpaceID, arg.CursorCreatedAt, arg.CursorWorkID)
+	rows, err := q.db.Query(ctx, listWorksBefore,
+		arg.SpaceID,
+		arg.NeedsYou,
+		arg.UserID,
+		arg.CursorCreatedAt,
+		arg.CursorWorkID,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -615,6 +769,7 @@ func (q *Queries) ListWorksBefore(ctx context.Context, arg ListWorksBeforeParams
 			&i.AppliedInputSeq,
 			&i.CreatedAt,
 			&i.NeedsRetry,
+			&i.NeedsReview,
 		); err != nil {
 			return nil, err
 		}
@@ -646,7 +801,23 @@ SELECT
         WHERE runs.work_id = work.work_id
           AND runs.state IN ('failed', 'unknown')
           AND runs.retry_requested_at IS NULL
-    ) AS needs_retry
+    ) AS needs_retry,
+    EXISTS (
+        SELECT 1 FROM work_result_checks AS result_check
+        WHERE result_check.work_id = work.work_id
+          AND result_check.understanding_version = work.understanding_version
+          AND result_check.accepted_at IS NULL
+          AND work.applied_input_seq = work.input_head_seq
+    ) AS needs_review,
+    coalesce((
+        SELECT result_check.review_id::text
+        FROM work_result_checks AS result_check
+        WHERE result_check.work_id = work.work_id
+          AND result_check.understanding_version = work.understanding_version
+          AND result_check.accepted_at IS NULL
+          AND work.applied_input_seq = work.input_head_seq
+        LIMIT 1
+    ), '')::text AS review_id
 FROM works AS work
 JOIN carry_users AS owner ON owner.user_id = work.owner_user_id
 JOIN carry_users AS creator ON creator.user_id = work.creator_user_id
@@ -674,6 +845,8 @@ type LoadWorkRow struct {
 	NextStep           *string
 	CreatedAt          pgtype.Timestamptz
 	NeedsRetry         bool
+	NeedsReview        bool
+	ReviewID           string
 }
 
 func (q *Queries) LoadWork(ctx context.Context, arg LoadWorkParams) (LoadWorkRow, error) {
@@ -694,6 +867,8 @@ func (q *Queries) LoadWork(ctx context.Context, arg LoadWorkParams) (LoadWorkRow
 		&i.NextStep,
 		&i.CreatedAt,
 		&i.NeedsRetry,
+		&i.NeedsReview,
+		&i.ReviewID,
 	)
 	return i, err
 }
@@ -764,6 +939,47 @@ func (q *Queries) LockWork(ctx context.Context, arg LockWorkParams) (LockWorkRow
 		&i.Understanding,
 		&i.NextStep,
 		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const lockWorkResultCheck = `-- name: LockWorkResultCheck :one
+SELECT
+    understanding_version,
+    content_digest,
+    accepted_at,
+    coalesce(accepted_by_user_id::text, '')::text AS accepted_by_user_id,
+    coalesce(accept_idempotency_key, '')::text AS accept_idempotency_key,
+    accept_request_digest
+FROM work_result_checks
+WHERE work_id = $1 AND review_id = $2
+FOR UPDATE
+`
+
+type LockWorkResultCheckParams struct {
+	WorkID   string
+	ReviewID string
+}
+
+type LockWorkResultCheckRow struct {
+	UnderstandingVersion int64
+	ContentDigest        []byte
+	AcceptedAt           pgtype.Timestamptz
+	AcceptedByUserID     string
+	AcceptIdempotencyKey string
+	AcceptRequestDigest  []byte
+}
+
+func (q *Queries) LockWorkResultCheck(ctx context.Context, arg LockWorkResultCheckParams) (LockWorkResultCheckRow, error) {
+	row := q.db.QueryRow(ctx, lockWorkResultCheck, arg.WorkID, arg.ReviewID)
+	var i LockWorkResultCheckRow
+	err := row.Scan(
+		&i.UnderstandingVersion,
+		&i.ContentDigest,
+		&i.AcceptedAt,
+		&i.AcceptedByUserID,
+		&i.AcceptIdempotencyKey,
+		&i.AcceptRequestDigest,
 	)
 	return i, err
 }

@@ -8,7 +8,7 @@ Carry 是团队可以长期托付工作的 AI 同事。
 
 Carry 不是聊天机器人、任务清单、工作流编辑器、Agent 管理平台或只面向研发团队的自动化工具。它的价值不是完成一次模型调用，而是让一份责任跨越时间、成员、工具、模型和机器后仍然可理解、可纠正、可继续。
 
-除明确标注为未来方向的段落外，本文件描述当前 M1 合同。Nodes 5+ 的顺序和进入条件只由 `docs/implementation.md` 定义；未来方向不是当前 API、状态或用户承诺。
+除明确标注为未来方向的段落外，本文件描述当前 M1 基线与 Node 5 结果检查合同。Nodes 6+ 的顺序和进入条件只由 `docs/implementation.md` 定义；未来方向不是当前 API、状态或用户承诺。
 
 ## 设计哲学：克制与自由
 
@@ -188,12 +188,15 @@ M1 的正式生命周期只有 `Open`。`Paused`、`Closed` 与 `Reopen` 属于�
 
 ### 当前结果表达
 
-当前结果直接表达在 Work 的 understanding、next step 和 Messages 中，不存在独立 Result。成员显式 `Try again` 只是允许一次 fresh Run，不改变 Work 生命周期。
+当前结果直接表达在 Work 的 understanding、next step 和 Messages 中，不存在独立 Result。Carry 将一次准确覆盖当前输入的重要阶段结果标记为需要检查时，当前负责人可以在 Web 的 Needs You 查询中打开同一响应里的准确内容并接受它。接受只确认这版阶段结果已经检查，不关闭 Work、不自动开始下一次推进，也不授予外部权限。
 
-## 未来产品方向（当前 M1 未实现）
+Review identity 是绑定内部 understanding version 与内容 digest 的不透明并发事实，不是成员需要管理的新对象，也不提供结果历史浏览。新 Work Message 会使尚未接受的旧检查立即过时；成员通过现有 Message 提交纠正。Needs You 只查询当前负责人拥有的准确待检查结果或明确 `Try again` 选择，不从普通进度、未应用输入、Run 活动或内部恢复推断。
 
-- Needs You 仍应是从 Work 派生的个人查询，不是新对象；
-- 只有独立结果确实需要可引用版本及接受、修改或撤回生命周期时，才考虑 Result identity；
+成员显式 `Try again` 只是允许一次 fresh Run，不改变 Work 生命周期。
+
+## 未来产品方向（当前尚未实现）
+
+- 只有独立结果确实需要历史正文、独立引用及接受、修改或撤回生命周期时，才考虑 Result identity；
 - 第一条未来继续优先是 Work 的一个明确时间条件，不预建 Timer；
 - Pause、Close、Reopen、负责人转交、渠道、第三方能力和外部 Action 按 `docs/implementation.md` 的后续 journey 逐条重新设计。
 
@@ -272,16 +275,18 @@ Carry 第一阶段明确不做：
 
 ## 产品语言
 
-当前 M1 推荐：
+当前推荐：
 
 ```text
 Carry 已收到这份责任
 你补充的信息尚未应用
 等待 Carry 回复
+这个阶段结果需要你检查
+你已接受这个阶段结果；Work 仍保持开放
 Carry 没有形成可确认的更新；由你选择是否重新推进
 ```
 
-只有后续 journey 建立了独立的人类等待、时间、结果检查或外部 outcome 事实后，才使用“等待 Alice”“将在下周一继续”“当前结果”“需要你的决定”或“结果尚不确定”。没有独立活动事实时不说“正在推进”。
+当前只在准确 Work result check 或 terminal retry 事实成立时使用 Needs You。只有后续 journey 建立了独立的人类等待、时间或外部 outcome 事实后，才使用“等待 Alice”“将在下周一继续”或“结果尚不确定”。没有独立活动事实时不说“正在推进”。
 
 避免：
 

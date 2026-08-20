@@ -5,6 +5,8 @@ package e2e
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,7 +15,7 @@ import (
 	"time"
 )
 
-func TestHostAdvancesWorkThroughNativeExecutionContract(t *testing.T) {
+func TestOwnerReviewsResultProducedThroughNativeExecution(t *testing.T) {
 	databaseURL := os.Getenv("CARRY_TEST_DATABASE_URL")
 	if databaseURL == "" {
 		t.Fatal("CARRY_TEST_DATABASE_URL is required")
@@ -95,6 +97,7 @@ func TestHostAdvancesWorkThroughNativeExecutionContract(t *testing.T) {
 	hostEnvironment := append(clientEnvironment,
 		"PATH="+binDirectory,
 		"CARRY_FAKE_PI_PROMPT="+promptPath,
+		"CARRY_FAKE_PI_REVIEW_REQUIRED=true",
 	)
 	hostCtx, cancelHost := context.WithCancel(t.Context())
 	hostLog := &lockedBuffer{}
@@ -127,6 +130,107 @@ func TestHostAdvancesWorkThroughNativeExecutionContract(t *testing.T) {
 				if strings.Contains(string(prompt), forbidden) {
 					t.Fatalf("Agent prompt leaked authority field %s: %s", forbidden, prompt)
 				}
+			}
+
+			caCertificate, err := os.ReadFile(filepath.Join(pkiDirectory, "ca.pem"))
+			if err != nil {
+				t.Fatalf("read test CA: %v", err)
+			}
+			client, err := testHTTPClient(caCertificate)
+			if err != nil {
+				t.Fatalf("build test HTTP client: %v", err)
+			}
+			memberRequest := func(method string, path string, idempotencyKey string) (int, []byte) {
+				t.Helper()
+				request, err := http.NewRequestWithContext(t.Context(), method, serverURL+path, nil)
+				if err != nil {
+					t.Fatalf("build member request: %v", err)
+				}
+				request.Header.Set("Authorization", "Bearer "+bootstrap.UserToken)
+				if idempotencyKey != "" {
+					request.Header.Set("Idempotency-Key", idempotencyKey)
+				}
+				response, err := client.Do(request)
+				if err != nil {
+					t.Fatalf("send member request: %v", err)
+				}
+				defer response.Body.Close()
+				body, err := io.ReadAll(response.Body)
+				if err != nil {
+					t.Fatalf("read member response: %v", err)
+				}
+				return response.StatusCode, body
+			}
+
+			status, body := memberRequest(
+				http.MethodGet,
+				"/v1/spaces/"+bootstrap.SpaceID+"/works?needs_you=true",
+				"",
+			)
+			var needsYou struct {
+				Works []struct {
+					WorkID      string `json:"work_id"`
+					NeedsReview bool   `json:"needs_review"`
+				} `json:"works"`
+			}
+			if status != http.StatusOK || json.Unmarshal(body, &needsYou) != nil ||
+				len(needsYou.Works) != 1 || needsYou.Works[0].WorkID != workID ||
+				!needsYou.Works[0].NeedsReview {
+				t.Fatalf("Needs You response = %d %s", status, body)
+			}
+
+			status, body = memberRequest(
+				http.MethodGet,
+				"/v1/spaces/"+bootstrap.SpaceID+"/works/"+workID,
+				"",
+			)
+			var details struct {
+				Work struct {
+					Lifecycle     string `json:"lifecycle"`
+					Understanding string `json:"understanding"`
+					ReviewID      string `json:"review_id"`
+					NeedsReview   bool   `json:"needs_review"`
+				} `json:"work"`
+			}
+			if status != http.StatusOK || json.Unmarshal(body, &details) != nil ||
+				!details.Work.NeedsReview || details.Work.ReviewID == "" ||
+				details.Work.Understanding != "Finance approved a twelve month term." {
+				t.Fatalf("reviewable Work response = %d %s", status, body)
+			}
+
+			status, body = memberRequest(
+				http.MethodPost,
+				"/v1/spaces/"+bootstrap.SpaceID+"/works/"+workID+
+					"/reviews/"+details.Work.ReviewID+"/accept",
+				"accept-native-result",
+			)
+			if status != http.StatusNoContent {
+				t.Fatalf("accept result response = %d %s", status, body)
+			}
+
+			status, body = memberRequest(
+				http.MethodGet,
+				"/v1/spaces/"+bootstrap.SpaceID+"/works/"+workID,
+				"",
+			)
+			var accepted struct {
+				Work struct {
+					Lifecycle   string `json:"lifecycle"`
+					NeedsReview bool   `json:"needs_review"`
+				} `json:"work"`
+			}
+			if status != http.StatusOK || json.Unmarshal(body, &accepted) != nil ||
+				accepted.Work.NeedsReview || accepted.Work.Lifecycle != "open" {
+				t.Fatalf("accepted Work response = %d %s", status, body)
+			}
+
+			status, body = memberRequest(
+				http.MethodGet,
+				"/v1/spaces/"+bootstrap.SpaceID+"/works?needs_you=true",
+				"",
+			)
+			if status != http.StatusOK || json.Unmarshal(body, &needsYou) != nil || len(needsYou.Works) != 0 {
+				t.Fatalf("settled Needs You response = %d %s", status, body)
 			}
 			return
 		}

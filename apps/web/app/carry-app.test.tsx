@@ -852,6 +852,7 @@ function work(id = workID, goal = "Review customer renewals") {
     understanding: "",
     has_unapplied_input: true,
     needs_retry: false,
+    needs_review: false,
     next_step: "",
     created_at: "2026-08-19T00:00:00+08:00",
   };

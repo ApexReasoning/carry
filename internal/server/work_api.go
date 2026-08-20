@@ -16,6 +16,7 @@ type WorkCommands interface {
 	CreateWork(context.Context, work.CreateCommand) (work.Work, error)
 	AppendWorkMessage(context.Context, work.AppendMessageCommand) (work.Message, error)
 	RequestWorkRetry(context.Context, work.RetryCommand) error
+	AcceptWorkReview(context.Context, work.AcceptReviewCommand) error
 }
 
 // WorkQueries loads bounded Work facts under current Space membership.
@@ -48,6 +49,7 @@ type workSummaryWire struct {
 	CreatorDisplayName string         `json:"creator_display_name"`
 	HasUnappliedInput  bool           `json:"has_unapplied_input"`
 	NeedsRetry         bool           `json:"needs_retry"`
+	NeedsReview        bool           `json:"needs_review"`
 	CreatedAt          time.Time      `json:"created_at"`
 }
 
@@ -64,6 +66,8 @@ type workWire struct {
 	NextStep           string         `json:"next_step"`
 	HasUnappliedInput  bool           `json:"has_unapplied_input"`
 	NeedsRetry         bool           `json:"needs_retry"`
+	NeedsReview        bool           `json:"needs_review"`
+	ReviewID           string         `json:"review_id,omitempty"`
 	CreatedAt          time.Time      `json:"created_at"`
 }
 
@@ -82,6 +86,7 @@ func (api workAPI) mount(router chi.Router) {
 	router.Get("/spaces/{spaceID}/works/{workID}", api.load)
 	router.Post("/spaces/{spaceID}/works/{workID}/messages", api.appendMessage)
 	router.Post("/spaces/{spaceID}/works/{workID}/retry", api.retry)
+	router.Post("/spaces/{spaceID}/works/{workID}/reviews/{reviewID}/accept", api.acceptReview)
 }
 
 func (api workAPI) create(response http.ResponseWriter, request *http.Request) {
@@ -125,8 +130,12 @@ func (api workAPI) list(response http.ResponseWriter, request *http.Request) {
 	if !ok {
 		return
 	}
+	needsYou, ok := queryBoolean(response, request, "needs_you")
+	if !ok {
+		return
+	}
 	page, err := api.queries.ListWorks(request.Context(), work.ListCommand{
-		UserID: user.UserID, SpaceID: spaceID, Before: before,
+		UserID: user.UserID, SpaceID: spaceID, Before: before, NeedsYou: needsYou,
 	})
 	if err != nil {
 		writeStoreError(response, err)
@@ -209,6 +218,37 @@ func (api workAPI) appendMessage(response http.ResponseWriter, request *http.Req
 	writeJSON(response, http.StatusOK, messageToWire(message))
 }
 
+func (api workAPI) acceptReview(response http.ResponseWriter, request *http.Request) {
+	user, ok := currentMember(response, request)
+	if !ok {
+		return
+	}
+	spaceID, ok := pathUUID(response, request, "spaceID")
+	if !ok {
+		return
+	}
+	workID, ok := pathUUID(response, request, "workID")
+	if !ok {
+		return
+	}
+	reviewID, ok := pathUUID(response, request, "reviewID")
+	if !ok {
+		return
+	}
+	idempotencyKey, ok := requireIdempotencyKey(response, request)
+	if !ok {
+		return
+	}
+	if err := api.commands.AcceptWorkReview(request.Context(), work.AcceptReviewCommand{
+		WorkID: workID, SpaceID: spaceID, ReviewID: reviewID,
+		AcceptedBy: user.UserID, IdempotencyKey: idempotencyKey,
+	}); err != nil {
+		writeStoreError(response, err)
+		return
+	}
+	response.WriteHeader(http.StatusNoContent)
+}
+
 func (api workAPI) retry(response http.ResponseWriter, request *http.Request) {
 	user, ok := currentMember(response, request)
 	if !ok {
@@ -244,6 +284,18 @@ func pathUUID(response http.ResponseWriter, request *http.Request, name string) 
 	return value, true
 }
 
+func queryBoolean(response http.ResponseWriter, request *http.Request, name string) (bool, bool) {
+	values, present := request.URL.Query()[name]
+	if !present {
+		return false, true
+	}
+	if len(values) != 1 || (values[0] != "true" && values[0] != "false") {
+		writeAPIError(response, http.StatusBadRequest, name+" query is invalid")
+		return false, false
+	}
+	return values[0] == "true", true
+}
+
 func requireIdempotencyKey(response http.ResponseWriter, request *http.Request) (string, bool) {
 	key := strings.TrimSpace(request.Header.Get("Idempotency-Key"))
 	if key == "" {
@@ -258,7 +310,8 @@ func summaryToWire(value work.Summary) workSummaryWire {
 		WorkID: value.WorkID, SpaceID: value.SpaceID, Goal: value.Goal, Lifecycle: value.Lifecycle,
 		OwnerUserID: value.OwnerUserID, OwnerDisplayName: value.OwnerDisplayName,
 		CreatorUserID: value.CreatorUserID, CreatorDisplayName: value.CreatorDisplayName,
-		HasUnappliedInput: value.HasUnappliedInput, NeedsRetry: value.NeedsRetry, CreatedAt: value.CreatedAt,
+		HasUnappliedInput: value.HasUnappliedInput, NeedsRetry: value.NeedsRetry,
+		NeedsReview: value.NeedsReview, CreatedAt: value.CreatedAt,
 	}
 }
 
@@ -268,7 +321,8 @@ func workToWire(value work.Work) workWire {
 		OwnerUserID: value.OwnerUserID, OwnerDisplayName: value.OwnerDisplayName,
 		CreatorUserID: value.CreatorUserID, CreatorDisplayName: value.CreatorDisplayName,
 		Understanding: value.Understanding, NextStep: value.NextStep,
-		HasUnappliedInput: value.HasUnappliedInput, NeedsRetry: value.NeedsRetry, CreatedAt: value.CreatedAt,
+		HasUnappliedInput: value.HasUnappliedInput, NeedsRetry: value.NeedsRetry,
+		NeedsReview: value.NeedsReview, ReviewID: value.ReviewID, CreatedAt: value.CreatedAt,
 	}
 }
 

@@ -161,9 +161,11 @@ func (c *machineHTTP) Commit(ctx context.Context, claim run.Claim, update hostdo
 		InputEndSeq              int64  `json:"input_end_seq"`
 		Understanding            string `json:"understanding"`
 		NextStep                 string `json:"next_step"`
+		ReviewRequired           bool   `json:"review_required"`
 	}{
 		Fence: claim.Fence, BaseUnderstandingVersion: claim.BaseUnderstandingVersion,
-		InputEndSeq: claim.InputEndSeq, Understanding: update.Understanding, NextStep: update.NextStep,
+		InputEndSeq: claim.InputEndSeq, Understanding: update.Understanding,
+		NextStep: update.NextStep, ReviewRequired: update.ReviewRequired,
 	})
 	if err != nil {
 		return err

@@ -131,7 +131,7 @@ func TestMachineCommitBindsCertificateIdentity(t *testing.T) {
 	request := httptest.NewRequest(
 		http.MethodPost,
 		"/v1/host/runs/"+runID+"/attempts/"+attemptID+"/understanding",
-		bytes.NewBufferString(`{"fence":4,"base_understanding_version":2,"input_end_seq":5,"understanding":"Known","next_step":"Continue"}`),
+		bytes.NewBufferString(`{"fence":4,"base_understanding_version":2,"input_end_seq":5,"understanding":"Known","next_step":"Continue","review_required":true}`),
 	)
 	request.TLS = verifiedMachineTLS(machineCertificate)
 	response := httptest.NewRecorder()
@@ -143,7 +143,7 @@ func TestMachineCommitBindsCertificateIdentity(t *testing.T) {
 		t.Fatalf("status = %d, want %d; body = %s", response.Code, http.StatusNoContent, response.Body.String())
 	}
 	if runs.commit.MachineID != "machine-19" || runs.commit.RunID != runID ||
-		runs.commit.BaseUnderstandingVersion != 2 {
+		runs.commit.BaseUnderstandingVersion != 2 || !runs.commit.ReviewRequired {
 		t.Fatalf("commit = %#v", runs.commit)
 	}
 	assertNoStore(t, response)
@@ -377,6 +377,10 @@ func (unavailableWorkCommands) AppendWorkMessage(context.Context, work.AppendMes
 }
 
 func (unavailableWorkCommands) RequestWorkRetry(context.Context, work.RetryCommand) error {
+	return errors.New("not implemented")
+}
+
+func (unavailableWorkCommands) AcceptWorkReview(context.Context, work.AcceptReviewCommand) error {
 	return errors.New("not implemented")
 }
 

@@ -6,10 +6,11 @@ const uuidPattern =
 type PendingMutations = Record<string, string>;
 
 type MutationCommand = {
-  operation: "create" | "message" | "retry";
+  operation: "create" | "message" | "retry" | "accept-review";
   memberID: string;
   spaceID: string;
   workID?: string;
+  reviewID?: string;
 };
 
 type MutationIdentity = {
@@ -43,6 +44,18 @@ export async function pendingRetryIdentity(
   workID: string,
 ): Promise<MutationIdentity> {
   return pendingIdentity({ operation: "retry", memberID, spaceID, workID }, "");
+}
+
+export async function pendingReviewIdentity(
+  memberID: string,
+  spaceID: string,
+  workID: string,
+  reviewID: string,
+): Promise<MutationIdentity> {
+  return pendingIdentity(
+    { operation: "accept-review", memberID, spaceID, workID, reviewID },
+    "",
+  );
 }
 
 export function clearPendingIdentity(identity: MutationIdentity): void {

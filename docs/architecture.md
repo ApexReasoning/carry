@@ -96,7 +96,7 @@ PostgreSQL 拥有事务、唯一 winner、lease、fence、幂等和恢复裁决�
 | --- | --- | --- |
 | Identity | 成员认证、User token、Browser Session | User API、Web、CLI |
 | Space | Membership、Machine enrollment 权限 | User API、Host enrollment |
-| Work | 目标、负责人、消息、当前理解 | 成员、执行路径 |
+| Work | 目标、负责人、消息、当前理解、阶段结果检查与接受事实 | 成员、执行路径 |
 | Conversation | 成员与 Carry 的私人消息、reply claim、private-side Work consequence | 准确成员、受限 Machine claim |
 | Machine | 独立执行身份、证书、撤销 | Host API |
 | Run | 一次固定 Work 推进及其 Attempts | Host API、Host worker |
@@ -156,9 +156,10 @@ Work 是连续性的事实源。它保存：
 - 按顺序追加的 Work Messages；
 - 当前 understanding 与 next step；
 - 内部输入进度和 understanding version；
+- 绑定准确 understanding version 与内容 digest 的阶段结果检查及幂等接受事实；
 - 创建幂等事实。
 
-内部进度字段用于准确区分“消息已记录”和“已经反映到当前理解”，但不进入 User API。
+内部 input sequence 与 understanding version 用于准确区分“消息已记录”和“已经反映到当前理解”，但不进入 User API。User API 只公开当前派生的 `needs_review` 与同一 Work detail 响应中的 opaque review identity。
 
 ### 6.1 输入
 
@@ -180,6 +181,10 @@ Work 保留内部 `understanding_version` 作为 CAS，不把 version 提升成�
 
 Work 查询还可以派生 `needs_retry`：存在一个尚未被成员明确允许重新推进的 terminal Failed/Unknown Run。它不是新的 Work lifecycle，也不公开 terminal outcome、Run identity 或 retry generation。
 
+Agent `Execute` strict output 包含 `understanding`、`next_step` 与 `review_required`。最后一个字段只能解释当前输出是否是需要负责人检查的重要阶段结果；它不能提供 actor、owner、version、review identity、lifecycle 或 authority。只有该 Run 的 fixed input end 在同一 Work lock 下仍等于当前 input head 时，`review_required` 才能创建 Work-owned result check。较旧 bounded Run 可以提交其准确前缀理解，但不能让已经遗漏新输入的结果进入 Needs You。
+
+当前 result check 不保存结果正文；正文仍是 Work 当前 understanding/next step。记录只绑定内部 version、canonical content digest、opaque review identity，以及可空的接受 actor、idempotency identity、request digest 和时间。Work Message 前进 input head 或后续 understanding version 会让旧 check 不再 current，不需要破坏历史接受证据，也不建立 Result owner。
+
 提交时 PostgreSQL 原子检查：
 
 - Work 仍可执行；
@@ -188,7 +193,11 @@ Work 查询还可以派生 `needs_retry`：存在一个尚未被成员明确允�
 - base understanding version 没有变化；
 - 提交覆盖固定输入上限。
 
-成功后同一事务更新 Work 当前理解、推进 applied input、终结 Attempt 与 Run。
+成功后同一事务更新 Work 当前理解、推进 applied input、按上述 current-head 条件创建 result check，并终结 Attempt 与 Run。
+
+负责人接受 result check 时，PostgreSQL 在一个事务中锁定 active Membership、Work 与 exact check，验证 actor 是当前 owner、Work 仍为 Open、version/digest 仍匹配且没有未应用输入，再记录幂等接受。准确 committed replay 可以在当前 active Membership 下先按 actor、idempotency identity 与 request digest 恢复；不同请求冲突，revoked member fail closed。接受不修改 Work lifecycle、不创建新输入、不启动 Run，也不产生外部 authority。
+
+Needs You 是直接查询：只返回当前成员负责且存在 current pending result check 或 `needs_retry` 的 Work。普通 progress、unapplied input、active/succeeded Run、Attempt recovery、lease 或自然语言 next step 都不能使 Work 进入该查询；不建立 Attention、NeedsYou table、异步 read model 或新 owner。
 
 ## 7. Conversation
 

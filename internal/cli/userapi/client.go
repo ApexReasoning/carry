@@ -53,6 +53,8 @@ type Work struct {
 	NextStep           string    `json:"next_step"`
 	HasUnappliedInput  bool      `json:"has_unapplied_input"`
 	NeedsRetry         bool      `json:"needs_retry"`
+	NeedsReview        bool      `json:"needs_review"`
+	ReviewID           string    `json:"review_id"`
 	CreatedAt          time.Time `json:"created_at"`
 }
 
@@ -67,6 +69,7 @@ type WorkSummary struct {
 	CreatorDisplayName string    `json:"creator_display_name"`
 	HasUnappliedInput  bool      `json:"has_unapplied_input"`
 	NeedsRetry         bool      `json:"needs_retry"`
+	NeedsReview        bool      `json:"needs_review"`
 	CreatedAt          time.Time `json:"created_at"`
 }
 

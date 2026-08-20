@@ -46,7 +46,8 @@ func writeStoreError(response http.ResponseWriter, err error) {
 	case errors.Is(err, machine.ErrIdempotencyConflict), errors.Is(err, work.ErrIdempotencyConflict),
 		errors.Is(err, conversation.ErrIdempotencyConflict), errors.Is(err, conversation.ErrReplyPending),
 		errors.Is(err, conversation.ErrReplyConflict),
-		errors.Is(err, work.ErrNotOpen), errors.Is(err, work.ErrRetryNotNeeded):
+		errors.Is(err, work.ErrNotOpen), errors.Is(err, work.ErrRetryNotNeeded),
+		errors.Is(err, work.ErrReviewNotCurrent):
 		writeAPIError(response, http.StatusConflict, err.Error())
 	case errors.Is(err, run.ErrInvalidUpdate), errors.Is(err, run.ErrInvalidOutcome), errors.Is(err, machine.ErrInvalidEnrollment), errors.Is(err, work.ErrInvalidGoal),
 		errors.Is(err, work.ErrInvalidMessage), errors.Is(err, work.ErrInvalidIdempotency), errors.Is(err, work.ErrInvalidCursor),

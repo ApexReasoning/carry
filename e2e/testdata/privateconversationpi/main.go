@@ -40,8 +40,9 @@ type strictReply struct {
 }
 
 type strictUnderstanding struct {
-	Understanding string `json:"understanding"`
-	NextStep      string `json:"next_step"`
+	Understanding  string `json:"understanding"`
+	NextStep       string `json:"next_step"`
+	ReviewRequired bool   `json:"review_required"`
 }
 
 func main() {

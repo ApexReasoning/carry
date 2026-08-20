@@ -206,17 +206,31 @@ func (s *Store) CommitWorkUnderstanding(ctx context.Context, command run.CommitC
 		return run.ErrStaleAttempt
 	}
 
-	rows, err := queries.CommitCurrentUnderstanding(ctx, dbsqlc.CommitCurrentUnderstandingParams{
+	understandingVersion, err := queries.CommitCurrentUnderstanding(ctx, dbsqlc.CommitCurrentUnderstandingParams{
 		Understanding: &understanding, NextStep: &nextStep,
 		AppliedInputSeq: locked.InputEndSeq, WorkID: locked.WorkID,
 		ExpectedAppliedInputSeq:      locked.InputStartSeq - 1,
 		ExpectedUnderstandingVersion: locked.BaseUnderstandingVersion,
 	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return run.ErrStaleAttempt
+	}
 	if err != nil {
 		return fmt.Errorf("commit Work understanding: %w", err)
 	}
-	if rows != 1 {
-		return run.ErrStaleAttempt
+	if command.ReviewRequired && locked.InputEndSeq == locked.InputHeadSeq {
+		digest := work.ReviewContentDigest(understanding, nextStep)
+		reviewID := uuid.NewString()
+		rows, createErr := queries.CreateWorkResultCheck(ctx, dbsqlc.CreateWorkResultCheckParams{
+			ReviewID: reviewID, WorkID: locked.WorkID,
+			UnderstandingVersion: understandingVersion, ContentDigest: digest[:],
+		})
+		if createErr != nil {
+			return fmt.Errorf("create Work result check: %w", createErr)
+		}
+		if rows != 1 {
+			return run.ErrStaleAttempt
+		}
 	}
 	attempts, err := queries.SucceedRunAttempt(ctx, command.AttemptID)
 	if err != nil {

@@ -136,38 +136,43 @@ M4 V1 closure       Node 12
 
 Node 不是 package 或 migration 批次，而是用户结果。默认一到三个工作日；第三天仍不能关闭时应删减或拆分。
 
-## 7. 当前切割：Pre-Node5 polish
+## 7. 已完成切割：Node 5 — 结果检查与 Needs You
 
-M1 与 post-close correction 已完成。进入 Node 5 前只做一次不增加产品能力的维护切割，使当前行为、文件职责、测试导航和 canonical 文档一致。
+M1、进入前 polish 与 Node 5 已关闭。当前停止在 Node 5，等待明确决定后才进入 Node 6。Node 5 让当前 Work owner 检查 Carry 的重要阶段结果，并通过个人 Needs You 查询只看到必须由自己处理的 Work。
 
 ### 用户结果
 
-一次私人 Reply adapter 失败不会停止 Carry 继续处理其他责任，也不会写入回复或共享 Work。除此之外，M1 用户旅程不变。
+Carry 形成一个重要阶段结果时，当前 Work owner 可以从 Needs You 打开准确当前内容并接受它。接受只确认这一阶段结果已经检查，不关闭 Work，也不自动开始下一次推进。成员需要修改时继续使用现有 Work Message。
 
-### 必须完成
+Needs You 当前只包含两类 Work：准确当前结果等待 owner 检查；或 terminal Failed/Unknown 等待 owner 决定是否 `Try again`。普通进度、未应用输入、Run/Attempt 活动、lease recovery 和自然语言 next step 不进入该查询。
 
-1. Reply 生成在 commit 前失败时保留未提交 claim，Host 继续服务；claim、renew、commit 的 authority 或基础设施错误仍然 fail closed。
-2. 并发 Machine 竞争同一 Work 时仍只有一个 Run winner；准确 unresolved-Run 唯一冲突对 loser 表达为无可领取 Work，不泄漏 PostgreSQL constraint error。
-3. Machine certificate、server TLS 与 `pki init` 文件职责和名称准确，不把 PKI 表现成额外产品概念。
-4. E2E 以行为命名，共享 process fixture 有明确 harness owner，不再依赖某个历史 Node 文件。
-5. `docs/product.md` 明确区分当前 M1 合同与未来方向；其余 canonical 文档只保留各自拥有的规则，删除重复解释。
-6. Conversation Web pagination/reconciliation 的纯函数与异步 effect 清楚可测，不增加状态框架。
-7. 仅在官方已有稳定 Node 24 runtime generation 时刷新 pinned GitHub Actions；不为外部 cache 故障增加 workaround。
+### 事实与 authority
+
+1. Result 仍是 Work 当前 `understanding` 与 `next_step`，不建立 Result owner、结果正文副本或历史浏览。
+2. Agent strict output 增加 `review_required` boolean。它只能解释当前输出是否是重要阶段结果，不能提供 actor、owner、version、review identity、lifecycle 或 authority。
+3. 成功 Run commit 只在 `review_required` 且本次固定 input range 覆盖事务内当前 input head 时，原子创建一条 Work-owned review fact；较旧 Run 可以正常提交其理解，但不能要求成员检查已经遗漏新输入的结果。
+4. Review fact 绑定准确 Work、内部 understanding version 与 canonical content digest。User API 不公开数值 version；opaque review identity 只与 Work detail 的当前内容一起返回。
+5. Work Message 前进 input head 后，旧 review 通过 currentness 条件立即失效，不需要破坏性改写 review history。
+6. 首次接受在一个 PostgreSQL transaction 中验证 active Membership、当前 Work owner、Open Work、exact review、current version/digest 和没有未应用输入。接受记录 actor、request idempotency 与时间，不改变 lifecycle，也不创建输入或外部授权。
+7. 准确已提交接受可以先按 actor、idempotency identity 与 request digest 恢复 response-loss replay；新接受仍要求当前 authority，revoked member 始终 fail closed。
+8. Needs You 直接查询 Work/Run/review 当前事实，不建立 Attention、NeedsYou package、表或异步索引。
 
 ### 关闭证据
 
-- Host behavior test 证明 Reply adapter failure 不终止 worker、不 commit，并且 Work 继续推进；
-- 并发 claim integration test 证明一个 winner，loser 只得到无可领取 Work；
-- 现有 Machine/source/fence/lease 与 Run/Attempt/fence/lease 证据保持通过；
-- E2E、Web 与文档导航不再使用 Node 名称表达当前行为；
-- public protocol、schema、migration 和六个 owner 不变；
-- `make check`、race、一次聚焦 review、普通 commit、push 与 CI 成功。
+- Pi 与 Codex 都严格产生 `understanding`、`next_step` 和 `review_required`，未知字段与缺失字段失败；
+- 有更新输入时，旧 fixed-range Run 的成功提交不产生 review；
+- current review 与 Work detail 内容准确绑定，较新消息后旧接受失败；
+- owner 接受幂等且 concurrent acceptance 一个 winner，非 owner、former member 与跨 Space actor 被拒绝；
+- 接受后 Work 仍是 Open，没有自动 Run 或外部后果；
+- Needs You 只返回当前 owner 的 pending review 或 `needs_retry`，不返回普通 progress/recovery；
+- Web 完成 Needs You → 打开 Work → 接受当前阶段结果的公开旅程，并对 response loss 使用同一 identity + reload 收敛；
+- focused checks、`make check`、race、一次聚焦 review、普通 commit、push 与 CI 成功。
 
 ### 明确不做
 
-Node 5、schema/API/owner 变更、Work/Conversation 通用 claim、execution engine、Go OpenAPI generator、Pi/Codex registry、migration rewrite、全局 Web state/router/query framework，以及只为静态扫描分数改写正确代码。
+独立 Result/Attention/Question/Decision owner，结果历史正文、accept-and-continue、reject/challenge/withdraw、CLI 交互式 review、Node 6 lifecycle/transfer、Node 7 continuation、Action/Artifact/capability、Agent credential/API、provider registry、全局 Web state/query framework或 migration rewrite。
 
-## 8. 已完成基线：M0 与 M1
+## 8. 已完成基线：M0、M1 与 Node 5
 
 详细 Node 关闭记录属于 Git/PR 历史；当前稳定行为由 Product、Architecture、协议和测试定义。
 
@@ -176,10 +181,13 @@ Node 5、schema/API/owner 变更、Work/Conversation 通用 claim、execution en
 - **Node 2 — Native execution parity:** Pi/Codex 保留原生 adapter，只共享 Carry-owned Execute/Reply 合同；strict output 只有经 Machine fenced commit 才能修改 owner facts；核心不保存 provider/runtime/model/session。
 - **Node 3 — Host interruption recovery:** expired Attempt 永不复活；新 Machine/Attempt 增加 fence 并取得相同 fixed Run range；旧 Machine renew/commit/finish 均失败；Failed/Unknown 只由成员幂等 `Try again` 开启 fresh Run。
 - **Node 4 — Private Conversation:** 每个 `(Space, member)` 一个私人 Conversation、一个 outstanding turn；User API 与 Agent context 有界；exact Machine claim/fence/lease 才能读 fixed context；reply-once commit 可原子创建至多一份 Work，但 Work 不保存私人 source、digest 或 transcript；Browser 只保存随机 request key并 fail-closed sign-out。
+- **Node 5 — Result review and Needs You:** Agent 只解释 `review_required`；PostgreSQL 仅为覆盖 current input head 的准确 Work 内容创建 result check；Needs You 查询当前 owner 的待检查结果或 explicit retry；幂等接受绑定 exact version/digest，不关闭 Work、不自动继续，也不产生外部 authority。
 
-M1 基线明确不包含 native Session recovery、Agent credential/API、provider routing、Work Offer、queued private turns、retention lifecycle 或 Work/Conversation target union。
+当前基线明确不包含 native Session recovery、Agent credential/API、provider routing、Work Offer、queued private turns、retention lifecycle、Work/Conversation target union、独立 Result/Attention owner、结果历史正文或 accept-and-continue。
 
 ## 13. Node 5：结果检查与 Needs You
+
+状态：complete。
 
 ### 用户结果
 

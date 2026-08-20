@@ -70,7 +70,7 @@ IFS= read -r prompt
 if printf '%s' "$prompt" | grep -q 'Conversation context'; then
   result='{\"reply\":\"I will prepare the onboarding comparison and keep you posted.\",\"delegation_goal\":\"Prepare the onboarding comparison\"}'
 else
-  result='{\"understanding\":\"Support evidence makes the three options comparable.\",\"next_step\":\"Ask the owner to choose an option.\"}'
+  result='{\"understanding\":\"Support evidence makes the three options comparable.\",\"next_step\":\"Ask the owner to choose an option.\",\"review_required\":false}'
 fi
 printf '%s\n' \
   '{"id":"carry-prompt","type":"response","command":"prompt","success":true}' \
@@ -88,7 +88,7 @@ IFS= read -r turn_start
 if printf '%s' "$turn_start" | grep -q 'Conversation context'; then
   result='{\"reply\":\"I will prepare the onboarding comparison and keep you posted.\",\"delegation_goal\":\"Prepare the onboarding comparison\"}'
 else
-  result='{\"understanding\":\"Support evidence makes the three options comparable.\",\"next_step\":\"Ask the owner to choose an option.\"}'
+  result='{\"understanding\":\"Support evidence makes the three options comparable.\",\"next_step\":\"Ask the owner to choose an option.\",\"review_required\":false}'
 fi
 printf '%s\n' \
   '{"id":3,"result":{"turn":{"id":"turn-conformance","status":"inProgress","items":[]}}}' \

@@ -4,6 +4,7 @@ import {
   clearPendingIdentity,
   pendingCreateIdentity,
   pendingMessageIdentity,
+  pendingReviewIdentity,
   pendingRetryIdentity,
 } from "./work-pending";
 
@@ -44,6 +45,33 @@ test("persists separate content-free identities for pending Work mutations", asy
   expect(stored).not.toContain("Review customer renewals");
   expect(stored).not.toContain("The renewal date is 30 September");
   expect(Object.keys(JSON.parse(stored) as object)).toHaveLength(2);
+});
+
+test("binds a pending review identity to the exact review without storing content", async () => {
+  const first = await pendingReviewIdentity(
+    "member-1",
+    "space-1",
+    "work-1",
+    "11111111-1111-4111-8111-111111111111",
+  );
+  const replayed = await pendingReviewIdentity(
+    "member-1",
+    "space-1",
+    "work-1",
+    "11111111-1111-4111-8111-111111111111",
+  );
+  const nextReview = await pendingReviewIdentity(
+    "member-1",
+    "space-1",
+    "work-1",
+    "22222222-2222-4222-8222-222222222222",
+  );
+
+  expect(replayed).toEqual(first);
+  expect(nextReview.idempotencyKey).not.toBe(first.idempotencyKey);
+  const stored = window.sessionStorage.getItem(storageKey) ?? "";
+  expect(stored).not.toContain("11111111-1111-4111-8111-111111111111");
+  expect(stored).not.toContain("22222222-2222-4222-8222-222222222222");
 });
 
 test("retains one retry identity until its exact request is reconciled", async () => {

@@ -31,7 +31,7 @@ printf '{"id":2,"result":{"thread":{"id":"thread-1","ephemeral":true,"cwd":"%s",
 IFS= read -r turn_start
 printf '%s\n' \
   '{"id":3,"result":{"turn":{"id":"turn-1","status":"inProgress","items":[]}}}' \
-  '{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","completedAtMs":1,"item":{"id":"message-1","type":"agentMessage","phase":"final_answer","text":"{\"understanding\":\"Finance approved the term.\",\"next_step\":\"Apply legal wording.\"}"}}}' \
+  '{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","completedAtMs":1,"item":{"id":"message-1","type":"agentMessage","phase":"final_answer","text":"{\"understanding\":\"Finance approved the term.\",\"next_step\":\"Apply legal wording.\",\"review_required\":false}"}}}' \
   '{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","status":"completed","items":[]}}}'
 `)
 	useCodexFixture(t, binary)
@@ -157,7 +157,7 @@ printf '{"id":2,"result":{"thread":{"id":"thread-2","ephemeral":true,"cwd":"%s",
 IFS= read -r turn_start
 printf '%s\n' \
   '{"id":3,"result":{"turn":{"id":"turn-2","status":"inProgress","items":[]}}}' \
-  '{"method":"item/agentMessage/delta","params":{"threadId":"thread-2","turnId":"turn-2","itemId":"message-2","delta":"{\"understanding\":\"The options are now comparable.\",\"next_step\":\"Ask the owner to choose.\"}"}}' \
+  '{"method":"item/agentMessage/delta","params":{"threadId":"thread-2","turnId":"turn-2","itemId":"message-2","delta":"{\"understanding\":\"The options are now comparable.\",\"next_step\":\"Ask the owner to choose.\",\"review_required\":true}"}}' \
   '{"method":"thread/status/changed","params":{"threadId":"thread-2","status":{"type":"idle"}}}'
 IFS= read -r thread_read
 printf '%s\n' '{"id":4,"result":{"thread":{"turns":[{"id":"turn-2","status":"completed","items":[]}]}}}'
@@ -193,7 +193,7 @@ printf '{"id":2,"result":{"thread":{"id":"thread-3","ephemeral":true,"cwd":"%s",
 IFS= read -r turn_start
 printf '%s\n' \
   '{"id":3,"result":{"turn":{"id":"turn-3","status":"inProgress","items":[]}}}' \
-  '{"method":"item/agentMessage/delta","params":{"threadId":"thread-3","turnId":"turn-3","itemId":"message-3","delta":"{\"understanding\":\"Unconfirmed\",\"next_step\":\"Wait\"}"}}' \
+  '{"method":"item/agentMessage/delta","params":{"threadId":"thread-3","turnId":"turn-3","itemId":"message-3","delta":"{\"understanding\":\"Unconfirmed\",\"next_step\":\"Wait\",\"review_required\":false}"}}' \
   '{"method":"thread/status/changed","params":{"threadId":"thread-3","status":{"type":"idle"}}}'
 IFS= read -r thread_read
 printf '%s\n' '{"id":4,"result":{"thread":{"turns":[{"id":"turn-3","status":"RECONCILED_STATUS","items":[]}]}}}'
@@ -220,7 +220,7 @@ printf '%s\n' \
   '{"id":3,"result":{"turn":{"id":"turn-idle","status":"inProgress","items":[]}}}' \
   '{"method":"thread/status/changed","params":{"threadId":"thread-idle","status":{"type":"idle"}}}'
 IFS= read -r thread_read
-printf '%s\n' '{"id":4,"result":{"thread":{"turns":[{"id":"turn-idle","status":"completed","items":[{"id":"message-idle","type":"agentMessage","phase":"final_answer","text":"{\"understanding\":\"The idle turn is complete.\",\"next_step\":\"Continue from durable Work.\"}"}]}]}}}'
+printf '%s\n' '{"id":4,"result":{"thread":{"turns":[{"id":"turn-idle","status":"completed","items":[{"id":"message-idle","type":"agentMessage","phase":"final_answer","text":"{\"understanding\":\"The idle turn is complete.\",\"next_step\":\"Continue from durable Work.\",\"review_required\":false}"}]}]}}}'
 `)
 	useCodexFixture(t, binary)
 	draft, err := New().Execute(context.Background(), host.ExecutionRequest{Goal: "Confirm idle reconciliation"})

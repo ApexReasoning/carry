@@ -562,6 +562,29 @@ textarea::placeholder {
   font-size: 0.75rem;
   color: var(--muted);
 }
+.work-view-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.4rem;
+  padding: 0.6rem 1.25rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--paper-sunken);
+}
+.work-view-switch button {
+  padding: 0.45rem 0.7rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-small);
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 750;
+}
+.work-view-switch button:hover:not(:disabled),
+.work-view-switch button.selected {
+  border-color: var(--line);
+  background: var(--paper);
+  color: var(--ink);
+}
 .work-list ul {
   margin: 0;
   padding: 0;
@@ -662,8 +685,32 @@ textarea::placeholder {
   font-weight: 600;
 }
 
-/* Current understanding */
+/* Result review and current understanding */
 
+.result-review {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 2.25rem;
+  padding: 1.25rem;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-small);
+  background: var(--accent-tint);
+}
+.result-review h3,
+.result-review p {
+  margin: 0;
+}
+.result-review h3 {
+  font-size: 1rem;
+}
+.result-review p {
+  max-width: 60ch;
+  color: var(--accent-deep);
+  line-height: 1.55;
+}
+.result-review .primary-button {
+  justify-self: start;
+}
 .current-understanding {
   margin-top: 2.25rem;
   padding: 1.25rem;

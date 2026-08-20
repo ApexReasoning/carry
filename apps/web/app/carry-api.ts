@@ -1,5 +1,6 @@
 import { client } from "./generated/client.gen";
 import {
+  acceptWorkReview as acceptWorkReviewRequest,
   appendWorkMessage as appendWorkMessageRequest,
   createBrowserSession,
   createWork as createWorkRequest,
@@ -112,11 +113,15 @@ export async function sendConversationMessage(
 export async function listWorks(
   spaceID: string,
   before?: string,
+  needsYou = false,
 ): Promise<WorkPage> {
   const result = await listWorksRequest({
     ...sameOrigin,
     path: { spaceID },
-    query: before ? { before } : undefined,
+    query:
+      before || needsYou
+        ? { before, needs_you: needsYou || undefined }
+        : undefined,
   });
   return requireData(result.data, result.response, result.error, "List Work");
 }
@@ -151,6 +156,20 @@ export async function loadWork(
     query: beforeMessage ? { before: beforeMessage } : undefined,
   });
   return requireData(result.data, result.response, result.error, "Load Work");
+}
+
+export async function acceptWorkReview(
+  spaceID: string,
+  workID: string,
+  reviewID: string,
+  idempotencyKey: string,
+): Promise<void> {
+  const result = await acceptWorkReviewRequest({
+    ...sameOrigin,
+    headers: { "Idempotency-Key": idempotencyKey },
+    path: { spaceID, workID, reviewID },
+  });
+  requireMutationSuccess(result.response, result.error, "Accept Work result");
 }
 
 export async function retryWork(

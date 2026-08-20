@@ -46,6 +46,8 @@ export const zWork = z.object({
   next_step: z.string(),
   has_unapplied_input: z.boolean(),
   needs_retry: z.boolean(),
+  needs_review: z.boolean(),
+  review_id: z.uuid().optional(),
   created_at: z.iso.datetime({ offset: true }),
 });
 
@@ -60,6 +62,7 @@ export const zWorkSummary = z.object({
   creator_display_name: z.string(),
   has_unapplied_input: z.boolean(),
   needs_retry: z.boolean(),
+  needs_review: z.boolean(),
   created_at: z.iso.datetime({ offset: true }),
 });
 
@@ -76,6 +79,8 @@ export const zSpaceId = z.uuid();
 
 export const zWorkId = z.uuid();
 
+export const zReviewId = z.uuid();
+
 export const zIdempotencyKey = z.string().min(1).max(255);
 
 export const zBeforeConversationMessage = z.uuid();
@@ -85,6 +90,8 @@ export const zAfterConversationMessage = z.uuid();
 export const zBeforeWork = z.uuid();
 
 export const zBeforeWorkMessage = z.uuid();
+
+export const zNeedsYou = z.boolean().default(false);
 
 /**
  * Browser session created
@@ -167,10 +174,11 @@ export const zListWorksPath = z.object({
 
 export const zListWorksQuery = z.object({
   before: z.uuid().optional(),
+  needs_you: z.boolean().optional().default(false),
 });
 
 /**
- * Newest or cursor-relative Work summaries visible in the Space
+ * Newest or cursor-relative Work summaries visible in the Space; needs_you limits the result to current reviews or explicit retries owned by the authenticated member
  */
 export const zListWorksResponse = z.object({
   works: z.array(zWorkSummary).max(50),
@@ -229,6 +237,21 @@ export const zAppendWorkMessagePath = z.object({
  * Appended or idempotently replayed Work Message
  */
 export const zAppendWorkMessageResponse = zWorkMessage;
+
+export const zAcceptWorkReviewHeaders = z.object({
+  "Idempotency-Key": z.string().min(1).max(255),
+});
+
+export const zAcceptWorkReviewPath = z.object({
+  spaceID: z.uuid(),
+  workID: z.uuid(),
+  reviewID: z.uuid(),
+});
+
+/**
+ * Exact current stage result accepted or idempotently replayed
+ */
+export const zAcceptWorkReviewResponse = z.void();
 
 export const zRetryWorkHeaders = z.object({
   "Idempotency-Key": z.string().min(1).max(255),

@@ -11,7 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const commitCurrentUnderstanding = `-- name: CommitCurrentUnderstanding :execrows
+const commitCurrentUnderstanding = `-- name: CommitCurrentUnderstanding :one
 UPDATE works
 SET
     understanding = $1,
@@ -24,6 +24,7 @@ WHERE
     AND applied_input_seq = $5
     AND understanding_version = $6
     AND input_head_seq >= $3
+RETURNING understanding_version
 `
 
 type CommitCurrentUnderstandingParams struct {
@@ -36,7 +37,7 @@ type CommitCurrentUnderstandingParams struct {
 }
 
 func (q *Queries) CommitCurrentUnderstanding(ctx context.Context, arg CommitCurrentUnderstandingParams) (int64, error) {
-	result, err := q.db.Exec(ctx, commitCurrentUnderstanding,
+	row := q.db.QueryRow(ctx, commitCurrentUnderstanding,
 		arg.Understanding,
 		arg.NextStep,
 		arg.AppliedInputSeq,
@@ -44,10 +45,9 @@ func (q *Queries) CommitCurrentUnderstanding(ctx context.Context, arg CommitCurr
 		arg.ExpectedAppliedInputSeq,
 		arg.ExpectedUnderstandingVersion,
 	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
+	var understanding_version int64
+	err := row.Scan(&understanding_version)
+	return understanding_version, err
 }
 
 const createRun = `-- name: CreateRun :one
@@ -126,6 +126,41 @@ func (q *Queries) CreateRunAttempt(ctx context.Context, arg CreateRunAttemptPara
 	var lease_expires_at pgtype.Timestamptz
 	err := row.Scan(&lease_expires_at)
 	return lease_expires_at, err
+}
+
+const createWorkResultCheck = `-- name: CreateWorkResultCheck :execrows
+INSERT INTO work_result_checks (
+    review_id,
+    work_id,
+    understanding_version,
+    content_digest
+) VALUES (
+    $1,
+    $2,
+    $3,
+    $4
+)
+ON CONFLICT (work_id, understanding_version) DO NOTHING
+`
+
+type CreateWorkResultCheckParams struct {
+	ReviewID             string
+	WorkID               string
+	UnderstandingVersion int64
+	ContentDigest        []byte
+}
+
+func (q *Queries) CreateWorkResultCheck(ctx context.Context, arg CreateWorkResultCheckParams) (int64, error) {
+	result, err := q.db.Exec(ctx, createWorkResultCheck,
+		arg.ReviewID,
+		arg.WorkID,
+		arg.UnderstandingVersion,
+		arg.ContentDigest,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const expireRunAttempt = `-- name: ExpireRunAttempt :execrows

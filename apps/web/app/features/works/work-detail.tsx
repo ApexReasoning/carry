@@ -10,6 +10,7 @@ type WorkDetailProps = {
   currentMemberID: string;
   onMessage: (text: string) => Promise<boolean>;
   onRetry: () => Promise<void>;
+  onAcceptReview: () => Promise<void>;
   onLoadEarlierMessages: () => void;
 };
 
@@ -19,6 +20,7 @@ export function WorkDetail({
   currentMemberID,
   onMessage,
   onRetry,
+  onAcceptReview,
   onLoadEarlierMessages,
 }: WorkDetailProps) {
   const [text, setText] = useState("");
@@ -84,6 +86,36 @@ export function WorkDetail({
           >
             {busy ? "Trying again…" : "Try again"}
           </button>
+        </section>
+      ) : null}
+
+      {details.work.needs_review ? (
+        <section className="result-review" aria-live="polite">
+          <h3>
+            {details.work.owner_user_id === currentMemberID
+              ? "Review this result"
+              : "Result awaiting review"}
+          </h3>
+          {details.work.owner_user_id === currentMemberID ? (
+            <>
+              <p>
+                Carry marked this as an important stage result. Accepting it
+                confirms your review; the Work stays open.
+              </p>
+              {details.work.review_id ? (
+                <button
+                  className="primary-button"
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void onAcceptReview()}
+                >
+                  {busy ? "Accepting…" : "Accept this result"}
+                </button>
+              ) : null}
+            </>
+          ) : (
+            <p>Waiting for the responsible member to review this result.</p>
+          )}
         </section>
       ) : null}
 
