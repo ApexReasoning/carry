@@ -10,9 +10,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/ApexReasoning/carry/internal/agent/reference"
 	"github.com/ApexReasoning/carry/internal/conversation"
 	"github.com/ApexReasoning/carry/internal/host"
 )
@@ -219,6 +221,39 @@ printf '%s\n' '{"method":"turn/completed","params":{"threadId":"thread-failure",
 	}
 }
 
+func TestCodexRejectsEarlyReferenceToolCall(t *testing.T) {
+	var catalogRequests atomic.Int32
+	referenceServer := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		catalogRequests.Add(1)
+		_, _ = response.Write([]byte("unexpected"))
+	}))
+	defer referenceServer.Close()
+	binary := writeCodexFixture(t, `
+IFS= read -r initialize
+printf '%s\n' '{"id":1,"result":{"userAgent":"fixture"}}'
+IFS= read -r initialized
+IFS= read -r thread_start
+printf '{"id":2,"result":{"thread":{"id":"thread-early","ephemeral":true,"cwd":"%s","gitInfo":null},"runtimeWorkspaceRoots":["%s"],"instructionSources":[],"approvalPolicy":"never","sandbox":{"type":"readOnly","networkAccess":false}}}\n' "$PWD" "$PWD"
+IFS= read -r turn_start
+printf '%s\n' \
+  '{"id":10,"method":"item/tool/call","params":{"threadId":"thread-early","turnId":"turn-early","callId":"call-early","namespace":null,"tool":"lookup_reference","arguments":{"key":"renewal"}}}' \
+  '{"id":3,"result":{"turn":{"id":"turn-early","status":"inProgress","items":[]}}}' \
+  '{"method":"item/completed","params":{"threadId":"thread-early","turnId":"turn-early","item":{"id":"message-early","type":"agentMessage","phase":"final_answer","text":"{\"understanding\":\"Fabricated success.\",\"next_step\":\"Commit it.\"}"}}}' \
+  '{"method":"turn/completed","params":{"threadId":"thread-early","turn":{"id":"turn-early","status":"completed","items":[]}}}'
+`)
+	useCodexFixture(t, binary)
+	_, err := NewWithReferenceBaseURL(referenceServer.URL).Execute(
+		context.Background(),
+		host.ExecutionRequest{Goal: "Use the catalog"},
+	)
+	if !errors.Is(err, host.ErrAgentOutcomeLost) {
+		t.Fatalf("early Codex tool call = %v, want outcome lost", err)
+	}
+	if got := catalogRequests.Load(); got != 0 {
+		t.Fatalf("early Codex tool call reached catalog %d times", got)
+	}
+}
+
 func TestCodexRejectsMalformedReferenceToolCall(t *testing.T) {
 	var output bytes.Buffer
 	client := newAppServerClient(&output, strings.NewReader(""), func(context.Context, string) (string, error) {
@@ -240,6 +275,49 @@ func TestCodexRejectsMalformedReferenceToolCall(t *testing.T) {
 	}
 	if json.Unmarshal(output.Bytes(), &response) != nil || response.Result.Success {
 		t.Fatalf("malformed Codex tool response = %s", output.Bytes())
+	}
+}
+
+func TestCodexRejectsDuplicateReferenceCallID(t *testing.T) {
+	var output bytes.Buffer
+	catalogRequests := 0
+	client := newAppServerClient(&output, strings.NewReader(""), func(context.Context, string) (string, error) {
+		catalogRequests++
+		return "reference", nil
+	})
+	message := envelope{
+		ID:     json.RawMessage("10"),
+		Params: json.RawMessage(`{"threadId":"thread","turnId":"turn","callId":"call","namespace":null,"tool":"lookup_reference","arguments":{"key":"renewal"}}`),
+	}
+	if err := client.answerReferenceTool(context.Background(), message, "thread", "turn"); err != nil {
+		t.Fatalf("answer first tool call: %v", err)
+	}
+	message.ID = json.RawMessage("11")
+	if err := client.answerReferenceTool(context.Background(), message, "thread", "turn"); err != nil {
+		t.Fatalf("answer duplicate tool call: %v", err)
+	}
+	if catalogRequests != 1 || !client.referenceFailure {
+		t.Fatalf("duplicate call requests=%d failure=%t", catalogRequests, client.referenceFailure)
+	}
+}
+
+func TestCodexRejectsMalformedReferenceUnicode(t *testing.T) {
+	invalidUTF8 := append([]byte(`{"key":"`), 0xff)
+	invalidUTF8 = append(invalidUTF8, []byte(`"}`)...)
+	for name, arguments := range map[string][]byte{
+		"invalid utf8":        invalidUTF8,
+		"lone high surrogate": []byte(`{"key":"\uD800"}`),
+		"lone low surrogate":  []byte(`{"key":"\uDC00"}`),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := decodeReferenceArguments(arguments); !errors.Is(err, reference.ErrInvalidKey) {
+				t.Fatalf("decode malformed Unicode = %v, want invalid key", err)
+			}
+		})
+	}
+	key, err := decodeReferenceArguments([]byte(`{"key":"\uD83D\uDE00"}`))
+	if err != nil || key != "😀" {
+		t.Fatalf("decode valid surrogate pair = %q, %v", key, err)
 	}
 }
 

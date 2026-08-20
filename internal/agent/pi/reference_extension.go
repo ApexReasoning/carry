@@ -95,6 +95,17 @@ async function lookupReference(key: string, signal?: AbortSignal): Promise<strin
     signal?.removeEventListener("abort", cancel);
   }
 }
+
+function createReferenceLookup() {
+  const seenCallIDs = new Set<string>();
+  return async (toolCallId: string, key: string, signal?: AbortSignal): Promise<string> => {
+    if (toolCallId.length === 0 || seenCallIDs.has(toolCallId)) {
+      throw new Error("lookup_reference call ID is invalid or duplicated");
+    }
+    seenCallIDs.add(toolCallId);
+    return lookupReference(key, signal);
+  };
+}
 `
 
 const referenceExtensionSource = `import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -105,6 +116,7 @@ const MAX_RESPONSE_BYTES = 64 * 1024;
 const REQUEST_TIMEOUT_MS = 5_000;
 ` + referenceTransportSource + `
 export default function carryReferenceExtension(pi: ExtensionAPI) {
+  const executeReferenceLookup = createReferenceLookup();
   pi.registerTool({
     name: "lookup_reference",
     label: "Lookup Reference",
@@ -118,8 +130,8 @@ export default function carryReferenceExtension(pi: ExtensionAPI) {
     parameters: Type.Object({
       key: Type.String({ minLength: 1, maxLength: 1024 }),
     }),
-    async execute(_toolCallId: string, params: { key: string }, signal?: AbortSignal) {
-      const text = await lookupReference(params.key, signal);
+    async execute(toolCallId: string, params: { key: string }, signal?: AbortSignal) {
+      const text = await executeReferenceLookup(toolCallId, params.key, signal);
       return { content: [{ type: "text", text }], details: {} };
     },
   });

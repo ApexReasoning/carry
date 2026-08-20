@@ -48,6 +48,7 @@ type resultState struct {
 	finalMessage         assistantMessage
 	referenceEnabled     bool
 	activeReferenceCalls map[string]struct{}
+	seenReferenceCalls   map[string]struct{}
 	referenceFailure     bool
 }
 
@@ -57,6 +58,7 @@ func awaitText(ctx context.Context, stdout io.Reader, referenceEnabled bool) ([]
 	state := resultState{
 		referenceEnabled:     referenceEnabled,
 		activeReferenceCalls: make(map[string]struct{}),
+		seenReferenceCalls:   make(map[string]struct{}),
 	}
 	for scanner.Scan() {
 		var record envelope
@@ -101,15 +103,18 @@ func (state *resultState) accept(record envelope) ([]byte, bool, error) {
 			state.finalMessage = message
 		}
 	case "tool_execution_start":
-		if !state.referenceEnabled || record.ToolName != "lookup_reference" || record.ToolCallID == "" {
+		if !state.promptAccepted || !state.referenceEnabled ||
+			record.ToolName != "lookup_reference" || record.ToolCallID == "" {
 			return nil, false, fmt.Errorf("%w: invalid Pi tool execution start", host.ErrAgentOutcomeLost)
 		}
-		if _, duplicate := state.activeReferenceCalls[record.ToolCallID]; duplicate {
+		if _, duplicate := state.seenReferenceCalls[record.ToolCallID]; duplicate {
 			return nil, false, fmt.Errorf("%w: duplicate Pi tool execution start", host.ErrAgentOutcomeLost)
 		}
+		state.seenReferenceCalls[record.ToolCallID] = struct{}{}
 		state.activeReferenceCalls[record.ToolCallID] = struct{}{}
 	case "tool_execution_end":
-		if !state.referenceEnabled || record.ToolName != "lookup_reference" || record.ToolCallID == "" || record.IsError == nil {
+		if !state.promptAccepted || !state.referenceEnabled ||
+			record.ToolName != "lookup_reference" || record.ToolCallID == "" || record.IsError == nil {
 			return nil, false, fmt.Errorf("%w: invalid Pi tool execution end", host.ErrAgentOutcomeLost)
 		}
 		if _, started := state.activeReferenceCalls[record.ToolCallID]; !started {

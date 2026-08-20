@@ -137,6 +137,31 @@ func TestLookupUsesOneHTTPAttempt(t *testing.T) {
 	}
 }
 
+func TestLookupUsesHTTP1AgainstHTTP2CapableCatalog(t *testing.T) {
+	protocol := make(chan int, 1)
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		protocol <- request.ProtoMajor
+		_, _ = io.WriteString(response, "reference")
+	}))
+	server.EnableHTTP2 = true
+	server.StartTLS()
+	defer server.Close()
+
+	client, err := New(server.URL)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	transport := client.http.Transport.(*http.Transport)
+	serverTransport := server.Client().Transport.(*http.Transport)
+	transport.TLSClientConfig = serverTransport.TLSClientConfig.Clone()
+	if _, err := client.Lookup(context.Background(), "key"); err != nil {
+		t.Fatalf("Lookup: %v", err)
+	}
+	if got := <-protocol; got != 1 {
+		t.Fatalf("HTTP protocol major = %d, want 1 to prevent HTTP/2 replay", got)
+	}
+}
+
 func TestLookupHasTransportTimeout(t *testing.T) {
 	started := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, request *http.Request) {

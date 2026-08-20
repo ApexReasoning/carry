@@ -26,10 +26,11 @@ const (
 )
 
 type appServerClient struct {
-	stdin            io.Writer
-	scanner          *bufio.Scanner
-	lookupReference  func(context.Context, string) (string, error)
-	referenceFailure bool
+	stdin              io.Writer
+	scanner            *bufio.Scanner
+	lookupReference    func(context.Context, string) (string, error)
+	seenReferenceCalls map[string]struct{}
+	referenceFailure   bool
 }
 
 func newAppServerClient(
@@ -39,7 +40,12 @@ func newAppServerClient(
 ) *appServerClient {
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 64*1024), maxProtocolLineBytes)
-	return &appServerClient{stdin: stdin, scanner: scanner, lookupReference: lookupReference}
+	return &appServerClient{
+		stdin:              stdin,
+		scanner:            scanner,
+		lookupReference:    lookupReference,
+		seenReferenceCalls: make(map[string]struct{}),
+	}
 }
 
 type envelope struct {
@@ -197,6 +203,9 @@ func (client *appServerClient) readResponse(ctx context.Context, expectedID int)
 		var message envelope
 		if err := json.Unmarshal(client.scanner.Bytes(), &message); err != nil {
 			return nil, fmt.Errorf("%w: decode Codex app-server response", host.ErrAgentOutcomeLost)
+		}
+		if message.Method == "item/tool/call" {
+			return nil, fmt.Errorf("%w: Codex sent lookup_reference before turn start completed", host.ErrAgentOutcomeLost)
 		}
 		responseID, ok := numericID(message.ID)
 		if !ok || responseID != expectedID {

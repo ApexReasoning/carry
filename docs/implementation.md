@@ -136,36 +136,28 @@ M4 V1 closure       Node 12
 
 Node 不是 package 或 migration 批次，而是用户结果。默认一到三个工作日；第三天仍不能关闭时应删减或拆分。
 
-## 7. 当前切割：Pre-Node5 polish
+## 7. 当前切割：Node 10 isolated read-only capability
 
-M1 与 post-close correction 已完成。进入 Node 5 前只做一次不增加产品能力的维护切割，使当前行为、文件职责、测试导航和 canonical 文档一致。
+M1 与 Pre-Node5 correction 已完成。根据当前明确决定，本切割直接在稳定 M1 基线上增加 Node 10 的固定只读 Reference Catalog，不实现或暗示 Nodes 5–9 已完成，也不提前带入它们的 Result、Responsibility、Timer 或 channel journey。Milestone 状态仍按各 Node 自己的关闭证据计算。
 
 ### 用户结果
 
-一次私人 Reply adapter 失败不会停止 Carry 继续处理其他责任，也不会写入回复或共享 Work。除此之外，M1 用户旅程不变。
+一个 Work 需要 operator 已授权的 Reference Catalog 时，当前 Pi 或 Codex Attempt 可以用 key 读取一段有界参考文本；成员不选择 provider、tool server、MCP、Plugin 或 transport。准确行为与边界由本文件第 18 节的 Node 10 contract 拥有。
 
-### 必须完成
+### 当前范围
 
-1. Reply 生成在 commit 前失败时保留未提交 claim，Host 继续服务；claim、renew、commit 的 authority 或基础设施错误仍然 fail closed。
-2. 并发 Machine 竞争同一 Work 时仍只有一个 Run winner；准确 unresolved-Run 唯一冲突对 loser 表达为无可领取 Work，不泄漏 PostgreSQL constraint error。
-3. Machine certificate、server TLS 与 `pki init` 文件职责和名称准确，不把 PKI 表现成额外产品概念。
-4. E2E 以行为命名，共享 process fixture 有明确 harness owner，不再依赖某个历史 Node 文件。
-5. `docs/product.md` 明确区分当前 M1 合同与未来方向；其余 canonical 文档只保留各自拥有的规则，删除重复解释。
-6. Conversation Web pagination/reconciliation 的纯函数与异步 effect 清楚可测，不增加状态框架。
-7. 仅在官方已有稳定 Node 24 runtime generation 时刷新 pinned GitHub Actions；不为外部 cache 故障增加 workaround。
+- 只增加一个不持久化的 `lookup_reference(key)` 和固定 HTTPS transport；
+- 只在 Work Execute 中启用，私人 Reply 不获得该能力；
+- 不改变六个持久 owner、User API、schema、migration、Work/Run identity 或 commit authority；
+- Pre-Node5 correction 与 Nodes 0–4 保持已完成基线，Nodes 5–9 仍是未来进入顺序。
 
 ### 关闭证据
 
-- Host behavior test 证明 Reply adapter failure 不终止 worker、不 commit，并且 Work 继续推进；
-- 并发 claim integration test 证明一个 winner，loser 只得到无可领取 Work；
-- 现有 Machine/source/fence/lease 与 Run/Attempt/fence/lease 证据保持通过；
-- E2E、Web 与文档导航不再使用 Node 名称表达当前行为；
-- public protocol、schema、migration 和六个 owner 不变；
-- `make check`、race、一次聚焦 review、普通 commit、push 与 CI 成功。
+以第 18 节列出的 adapter、transport、failure、authority 与完整 repository checks 为准；review 不得借 Node 10 扩张 Nodes 5–9 的范围。
 
 ### 明确不做
 
-Node 5、schema/API/owner 变更、Work/Conversation 通用 claim、execution engine、Go OpenAPI generator、Pi/Codex registry、migration rewrite、全局 Web state/router/query framework，以及只为静态扫描分数改写正确代码。
+Node 5–9 journey、schema/API/owner 变更、Artifact、credential broker、Plugin、MCP、tool/provider registry、provider routing、migration rewrite或外部写 Action。
 
 ## 8. 已完成基线：M0 与 M1
 

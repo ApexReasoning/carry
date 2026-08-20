@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"unicode/utf8"
 
 	"github.com/ApexReasoning/carry/internal/agent/reference"
 	"github.com/ApexReasoning/carry/internal/host"
@@ -61,6 +62,11 @@ func (client *appServerClient) answerReferenceTool(
 		client.referenceFailure = true
 		return client.sendDynamicToolResponse(requestID, false, "lookup_reference request was invalid")
 	}
+	if _, duplicate := client.seenReferenceCalls[call.CallID]; duplicate {
+		client.referenceFailure = true
+		return client.sendDynamicToolResponse(requestID, false, "lookup_reference call was duplicated")
+	}
+	client.seenReferenceCalls[call.CallID] = struct{}{}
 	key, err := decodeReferenceArguments(call.Arguments)
 	if err != nil {
 		client.referenceFailure = true
@@ -108,7 +114,7 @@ func decodeDynamicToolCall(data []byte) (dynamicToolCall, error) {
 
 func decodeReferenceArguments(data []byte) (string, error) {
 	var arguments struct {
-		Key string `json:"key"`
+		Key json.RawMessage `json:"key"`
 	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
@@ -118,8 +124,73 @@ func decodeReferenceArguments(data []byte) (string, error) {
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return "", errors.New("lookup_reference arguments contain trailing data")
 	}
-	if len(arguments.Key) == 0 || len(arguments.Key) > reference.MaxKeyBytes {
+	if !validReferenceJSONString(arguments.Key) {
 		return "", reference.ErrInvalidKey
 	}
-	return arguments.Key, nil
+	var key string
+	if err := json.Unmarshal(arguments.Key, &key); err != nil ||
+		len(key) == 0 || len(key) > reference.MaxKeyBytes {
+		return "", reference.ErrInvalidKey
+	}
+	return key, nil
+}
+
+func validReferenceJSONString(data []byte) bool {
+	if !utf8.Valid(data) || len(data) < 2 || data[0] != '"' || data[len(data)-1] != '"' {
+		return false
+	}
+	for index := 1; index < len(data)-1; index++ {
+		if data[index] != '\\' {
+			continue
+		}
+		if index+1 >= len(data)-1 {
+			return false
+		}
+		if data[index+1] != 'u' {
+			index++
+			continue
+		}
+		code, ok := hexadecimalCodeUnit(data[index+2:])
+		if !ok {
+			return false
+		}
+		if code >= 0xD800 && code <= 0xDBFF {
+			next := index + 6
+			if next+6 > len(data)-1 || data[next] != '\\' || data[next+1] != 'u' {
+				return false
+			}
+			low, validLow := hexadecimalCodeUnit(data[next+2:])
+			if !validLow || low < 0xDC00 || low > 0xDFFF {
+				return false
+			}
+			index = next + 5
+			continue
+		}
+		if code >= 0xDC00 && code <= 0xDFFF {
+			return false
+		}
+		index += 5
+	}
+	return true
+}
+
+func hexadecimalCodeUnit(data []byte) (uint16, bool) {
+	if len(data) < 4 {
+		return 0, false
+	}
+	var value uint16
+	for _, character := range data[:4] {
+		value <<= 4
+		switch {
+		case character >= '0' && character <= '9':
+			value += uint16(character - '0')
+		case character >= 'a' && character <= 'f':
+			value += uint16(character-'a') + 10
+		case character >= 'A' && character <= 'F':
+			value += uint16(character-'A') + 10
+		default:
+			return 0, false
+		}
+	}
+	return value, true
 }

@@ -3,6 +3,7 @@ package reference
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -41,10 +42,12 @@ func New(baseURL string) (*Client, error) {
 		return nil, err
 	}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
-	// Go may transparently retry an idempotent GET only after a reused
-	// connection fails. A fresh connection per lookup keeps this transport to
-	// the single catalog attempt promised by the product contract.
+	// Go can transparently replay idempotent requests on reused HTTP/1.1
+	// connections and retry HTTP/2 streams. Fresh HTTP/1.1 connections keep
+	// this transport to the single catalog attempt promised by the contract.
 	transport.DisableKeepAlives = true
+	transport.ForceAttemptHTTP2 = false
+	transport.TLSNextProto = map[string]func(string, *tls.Conn) http.RoundTripper{}
 	return &Client{
 		baseURL: parsed,
 		http: &http.Client{

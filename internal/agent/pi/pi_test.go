@@ -114,6 +114,25 @@ func TestPiReferenceTransportEnforcesRuntimeBounds(t *testing.T) {
 		}
 	})
 
+	t.Run("duplicate call ID", func(t *testing.T) {
+		var requests atomic.Int32
+		server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+			requests.Add(1)
+			_, _ = response.Write([]byte("reference"))
+		}))
+		defer server.Close()
+		output, err := runPiReferenceTransport(t, server.URL, time.Second, `
+const executeReferenceLookup = createReferenceLookup();
+console.log(await executeReferenceLookup("call-1", "key"));
+try { await executeReferenceLookup("call-1", "key"); console.log("unexpected success"); }
+catch (error) { console.log(error.message); }
+console.log(await executeReferenceLookup("call-2", "key"));
+`)
+		if err != nil || output != "reference\nlookup_reference call ID is invalid or duplicated\nreference" || requests.Load() != 2 {
+			t.Fatalf("Pi duplicate output=%q requests=%d error=%v", output, requests.Load(), err)
+		}
+	})
+
 	for name, handler := range map[string]http.HandlerFunc{
 		"redirect": func(response http.ResponseWriter, request *http.Request) {
 			http.Redirect(response, request, "/other", http.StatusFound)
@@ -219,6 +238,19 @@ printf '%s\n' \
 
 func TestPiRejectsMalformedReferenceSettlement(t *testing.T) {
 	for name, records := range map[string]string{
+		"before prompt acceptance": strings.Join([]string{
+			`{"type":"tool_execution_start","toolCallId":"call-1","toolName":"lookup_reference"}`,
+			`{"type":"tool_execution_end","toolCallId":"call-1","toolName":"lookup_reference","isError":false}`,
+			`{"id":"carry-prompt","type":"response","command":"prompt","success":true}`,
+			`{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"{\"understanding\":\"Fabricated\",\"next_step\":\"Commit\"}"}],"stopReason":"stop"}}`,
+			`{"type":"agent_settled"}`,
+		}, "\n"),
+		"duplicate call ID": strings.Join([]string{
+			`{"id":"carry-prompt","type":"response","command":"prompt","success":true}`,
+			`{"type":"tool_execution_start","toolCallId":"call-1","toolName":"lookup_reference"}`,
+			`{"type":"tool_execution_end","toolCallId":"call-1","toolName":"lookup_reference","isError":false}`,
+			`{"type":"tool_execution_start","toolCallId":"call-1","toolName":"lookup_reference"}`,
+		}, "\n"),
 		"missing isError": strings.Join([]string{
 			`{"id":"carry-prompt","type":"response","command":"prompt","success":true}`,
 			`{"type":"tool_execution_start","toolCallId":"call-1","toolName":"lookup_reference"}`,

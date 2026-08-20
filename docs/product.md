@@ -8,7 +8,7 @@ Carry 是团队可以长期托付工作的 AI 同事。
 
 Carry 不是聊天机器人、任务清单、工作流编辑器、Agent 管理平台或只面向研发团队的自动化工具。它的价值不是完成一次模型调用，而是让一份责任跨越时间、成员、工具、模型和机器后仍然可理解、可纠正、可继续。
 
-除明确标注为未来方向的段落外，本文件描述当前 M1 合同。Nodes 5+ 的顺序和进入条件只由 `docs/implementation.md` 定义；未来方向不是当前 API、状态或用户承诺。
+除明确标注为未来方向的段落外，本文件描述当前 M1 合同，以及“外部世界与 Artifact”一节中已经单独赚得的 Node 10 固定只读 Reference Catalog。Nodes 5–9 与 11+ 的顺序和进入条件只由 `docs/implementation.md` 定义；Node 10 不暗示这些 journey 已完成，未来方向也不是当前 API、状态或用户承诺。
 
 ## 设计哲学：克制与自由
 
@@ -190,12 +190,12 @@ M1 的正式生命周期只有 `Open`。`Paused`、`Closed` 与 `Reopen` 属于�
 
 当前结果直接表达在 Work 的 understanding、next step 和 Messages 中，不存在独立 Result。成员显式 `Try again` 只是允许一次 fresh Run，不改变 Work 生命周期。
 
-## 未来产品方向（当前 M1 未实现）
+## 未来产品方向（除 Node 10 只读例外外当前未实现）
 
 - Needs You 仍应是从 Work 派生的个人查询，不是新对象；
 - 只有独立结果确实需要可引用版本及接受、修改或撤回生命周期时，才考虑 Result identity；
 - 第一条未来继续优先是 Work 的一个明确时间条件，不预建 Timer；
-- Pause、Close、Reopen、负责人转交、渠道、第三方能力和外部 Action 按 `docs/implementation.md` 的后续 journey 逐条重新设计。
+- Pause、Close、Reopen、负责人转交、渠道、超出 Node 10 固定只读 Reference Catalog 的第三方能力和外部 Action，按 `docs/implementation.md` 的后续 journey 逐条重新设计。
 
 ## 私人对话
 
