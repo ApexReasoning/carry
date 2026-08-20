@@ -102,6 +102,8 @@ test("replays an unknown verification exactly before loading the User", async ()
         }
         return new Response(null, { status: 204 });
       }
+      if (request.method === "GET" && path === "/v1/invitations")
+        return json({ invitations: [], reauthentication_required: false });
       throw new Error(`unexpected request: ${request.method} ${path}`);
     }),
   );
@@ -157,6 +159,8 @@ test("explicit resend creates a new challenge and only its newest code succeeds"
         sessionEstablished = true;
         return new Response(null, { status: 204 });
       }
+      if (request.method === "GET" && path === "/v1/invitations")
+        return json({ invitations: [], reauthentication_required: false });
       throw new Error(`unexpected request: ${request.method} ${path}`);
     }),
   );
@@ -220,6 +224,8 @@ test("a committed logout with a lost response reconciles from current User 401",
         revoked = true;
         throw new TypeError("logout response lost after commit");
       }
+      if (request.method === "GET" && path === "/v1/invitations")
+        return json({ invitations: [], reauthentication_required: false });
       throw new Error(`unexpected request: ${request.method} ${path}`);
     }),
   );
@@ -288,6 +294,8 @@ test("first-Space unknown replays exactly then routes a concurrent other Space",
       if (request.method === "GET" && path.endsWith("/works")) {
         return json({ works: [], has_earlier_works: false });
       }
+      if (request.method === "GET" && path === "/v1/invitations")
+        return json({ invitations: [], reauthentication_required: false });
       throw new Error(`unexpected request: ${request.method} ${path}`);
     }),
   );
@@ -327,6 +335,8 @@ function mockUnauthenticatedEmail(
       }
       const response = await additional(request, path);
       if (response) return response;
+      if (request.method === "GET" && path === "/v1/invitations")
+        return json({ invitations: [], reauthentication_required: false });
       throw new Error(`unexpected request: ${request.method} ${path}`);
     }),
   );

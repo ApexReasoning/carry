@@ -879,6 +879,198 @@ paths:
           $ref: "#/components/responses/Error"
         "409":
           $ref: "#/components/responses/Error"
+  /v1/spaces/{spaceID}/members:
+    parameters:
+      - $ref: "#/components/parameters/SpaceID"
+    get:
+      operationId: listSpaceMembers
+      security:
+        - browserSession: []
+      responses:
+        "200":
+          description: Current active Space members
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [members]
+                properties:
+                  members:
+                    type: array
+                    maxItems: 100
+                    items:
+                      $ref: "#/components/schemas/SpaceMember"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+  /v1/spaces/{spaceID}/invitations:
+    parameters:
+      - $ref: "#/components/parameters/SpaceID"
+    get:
+      operationId: listManagedInvitations
+      security:
+        - browserSession: []
+      responses:
+        "200":
+          description: Current pending invitations visible to a manager
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [invitations]
+                properties:
+                  invitations:
+                    type: array
+                    maxItems: 50
+                    items:
+                      $ref: "#/components/schemas/ManagedInvitation"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+    post:
+      operationId: issueSpaceInvitation
+      security:
+        - browserSession: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [email, can_manage_members, can_enroll_machines]
+              properties:
+                email:
+                  type: string
+                  format: email
+                  maxLength: 254
+                can_manage_members:
+                  type: boolean
+                  default: false
+                can_enroll_machines:
+                  type: boolean
+                  default: false
+      responses:
+        "201":
+          description: Invitation and initial submission prepared and observed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ManagedInvitation"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+  /v1/spaces/{spaceID}/invitations/{invitationID}/resend:
+    parameters:
+      - $ref: "#/components/parameters/SpaceID"
+      - $ref: "#/components/parameters/InvitationID"
+    post:
+      operationId: resendSpaceInvitation
+      security:
+        - browserSession: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Exact resend submission result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ManagedInvitation"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "429":
+          $ref: "#/components/responses/Error"
+  /v1/spaces/{spaceID}/invitations/{invitationID}/revoke:
+    parameters:
+      - $ref: "#/components/parameters/SpaceID"
+      - $ref: "#/components/parameters/InvitationID"
+    post:
+      operationId: revokeSpaceInvitation
+      security:
+        - browserSession: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "204":
+          description: Invitation revoked or exactly replayed
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+  /v1/invitations:
+    get:
+      operationId: listInvitationInbox
+      security:
+        - browserSession: []
+      responses:
+        "200":
+          description: Invitations for the current User's exact Email method
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvitationInbox"
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/invitations/{invitationID}/accept:
+    parameters:
+      - $ref: "#/components/parameters/InvitationID"
+    post:
+      operationId: acceptSpaceInvitation
+      security:
+        - browserSession: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [display_name]
+              properties:
+                display_name:
+                  type: string
+                  maxLength: 255
+      responses:
+        "200":
+          description: Exact Membership consequence
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AcceptedInvitation"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "428":
+          $ref: "#/components/responses/Error"
 components:
   headers:
     NoStore:
@@ -921,6 +1113,13 @@ components:
         maxLength: 255
     SpaceID:
       name: spaceID
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    InvitationID:
+      name: invitationID
       in: path
       required: true
       schema:
@@ -1054,6 +1253,148 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Membership"
+    SpaceMember:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          user_id,
+          display_name,
+          can_manage_members,
+          can_enroll_machines,
+          joined_at,
+        ]
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        display_name:
+          type: string
+        can_manage_members:
+          type: boolean
+        can_enroll_machines:
+          type: boolean
+        joined_at:
+          type: string
+          format: date-time
+    InvitationSubmission:
+      type: object
+      additionalProperties: false
+      required: [state]
+      properties:
+        state:
+          type: string
+          enum: [prepared, accepted, rejected, unknown]
+    ManagedInvitation:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          invitation_id,
+          space_id,
+          recipient_email,
+          can_manage_members,
+          can_enroll_machines,
+          created_at,
+          expires_at,
+          submission,
+        ]
+      properties:
+        invitation_id:
+          type: string
+          format: uuid
+        space_id:
+          type: string
+          format: uuid
+        recipient_email:
+          type: string
+          format: email
+        can_manage_members:
+          type: boolean
+        can_enroll_machines:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        submission:
+          $ref: "#/components/schemas/InvitationSubmission"
+    RecipientInvitation:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          invitation_id,
+          space_id,
+          space_name,
+          inviter_display_name,
+          can_manage_members,
+          can_enroll_machines,
+          created_at,
+          expires_at,
+        ]
+      properties:
+        invitation_id:
+          type: string
+          format: uuid
+        space_id:
+          type: string
+          format: uuid
+        space_name:
+          type: string
+        inviter_display_name:
+          type: string
+        can_manage_members:
+          type: boolean
+        can_enroll_machines:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+    InvitationInbox:
+      type: object
+      additionalProperties: false
+      required: [invitations, reauthentication_required]
+      properties:
+        invitations:
+          type: array
+          maxItems: 50
+          items:
+            $ref: "#/components/schemas/RecipientInvitation"
+        reauthentication_required:
+          type: boolean
+    AcceptedInvitation:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          invitation_id,
+          space_id,
+          space_name,
+          can_manage_members,
+          can_enroll_machines,
+          already_member,
+        ]
+      properties:
+        invitation_id:
+          type: string
+          format: uuid
+        space_id:
+          type: string
+          format: uuid
+        space_name:
+          type: string
+        can_manage_members:
+          type: boolean
+        can_enroll_machines:
+          type: boolean
+        already_member:
+          type: boolean
     MachineEnrollment:
       type: object
       additionalProperties: false

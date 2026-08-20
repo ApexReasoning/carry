@@ -182,6 +182,43 @@ type Space struct {
 	CreateRequestDigest  []byte
 }
 
+type SpaceInvitation struct {
+	InvitationID         string
+	SpaceID              string
+	RecipientEmail       string
+	InviterUserID        string
+	CanManageMembers     bool
+	CanEnrollMachines    bool
+	IssueIdempotencyKey  string
+	IssueRequestDigest   []byte
+	CreatedAt            pgtype.Timestamptz
+	ExpiresAt            pgtype.Timestamptz
+	AcceptedByUserID     pgtype.UUID
+	AcceptedAt           pgtype.Timestamptz
+	AcceptResult         *string
+	AcceptIdempotencyKey *string
+	AcceptRequestDigest  []byte
+	RevokedByUserID      pgtype.UUID
+	RevokedAt            pgtype.Timestamptz
+	RevokeIdempotencyKey *string
+	RevokeRequestDigest  []byte
+}
+
+type SpaceInvitationSubmission struct {
+	SubmissionID           string
+	InvitationID           string
+	RequestedByUserID      string
+	IdempotencyKey         string
+	RequestDigest          []byte
+	RecipientEmail         string
+	PayloadDigest          []byte
+	ProviderIdempotencyKey string
+	State                  string
+	ProviderMessageID      *string
+	CreatedAt              pgtype.Timestamptz
+	RecordedAt             pgtype.Timestamptz
+}
+
 type SpaceMembership struct {
 	SpaceID           string
 	UserID            string

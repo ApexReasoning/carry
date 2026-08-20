@@ -7,6 +7,8 @@ package dbsqlc
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const getMachineEnrollmentPermission = `-- name: GetMachineEnrollmentPermission :one
@@ -29,6 +31,51 @@ func (q *Queries) GetMachineEnrollmentPermission(ctx context.Context, arg GetMac
 	var can_enroll_machines bool
 	err := row.Scan(&can_enroll_machines)
 	return can_enroll_machines, err
+}
+
+const listActiveSpaceMembers = `-- name: ListActiveSpaceMembers :many
+SELECT m.user_id, u.display_name, m.can_manage_members,
+    m.can_enroll_machines, m.created_at AS joined_at
+FROM space_memberships AS m
+INNER JOIN carry_users AS u ON u.user_id = m.user_id
+WHERE m.space_id = $1
+    AND m.revoked_at IS NULL
+ORDER BY m.created_at, m.user_id
+LIMIT 100
+`
+
+type ListActiveSpaceMembersRow struct {
+	UserID            string
+	DisplayName       *string
+	CanManageMembers  bool
+	CanEnrollMachines bool
+	JoinedAt          pgtype.Timestamptz
+}
+
+func (q *Queries) ListActiveSpaceMembers(ctx context.Context, spaceID string) ([]ListActiveSpaceMembersRow, error) {
+	rows, err := q.db.Query(ctx, listActiveSpaceMembers, spaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListActiveSpaceMembersRow
+	for rows.Next() {
+		var i ListActiveSpaceMembersRow
+		if err := rows.Scan(
+			&i.UserID,
+			&i.DisplayName,
+			&i.CanManageMembers,
+			&i.CanEnrollMachines,
+			&i.JoinedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listMemberships = `-- name: ListMemberships :many

@@ -41,6 +41,8 @@ func TestMigrateCreatesCurrentFactsAndRejectsUnearnedWorkLifecycle(t *testing.T)
 		"google_identities",
 		"github_identities",
 		"external_login_transactions",
+		"space_invitations",
+		"space_invitation_submissions",
 	} {
 		var exists bool
 		if err := pool.QueryRow(ctx, `select to_regclass('public.' || $1) is not null`, table).Scan(&exists); err != nil {

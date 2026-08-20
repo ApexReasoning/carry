@@ -31,6 +31,54 @@ export type User = {
   spaces: Array<Membership>;
 };
 
+export type SpaceMember = {
+  user_id: string;
+  display_name: string;
+  can_manage_members: boolean;
+  can_enroll_machines: boolean;
+  joined_at: string;
+};
+
+export type InvitationSubmission = {
+  state: "prepared" | "accepted" | "rejected" | "unknown";
+};
+
+export type ManagedInvitation = {
+  invitation_id: string;
+  space_id: string;
+  recipient_email: string;
+  can_manage_members: boolean;
+  can_enroll_machines: boolean;
+  created_at: string;
+  expires_at: string;
+  submission: InvitationSubmission;
+};
+
+export type RecipientInvitation = {
+  invitation_id: string;
+  space_id: string;
+  space_name: string;
+  inviter_display_name: string;
+  can_manage_members: boolean;
+  can_enroll_machines: boolean;
+  created_at: string;
+  expires_at: string;
+};
+
+export type InvitationInbox = {
+  invitations: Array<RecipientInvitation>;
+  reauthentication_required: boolean;
+};
+
+export type AcceptedInvitation = {
+  invitation_id: string;
+  space_id: string;
+  space_name: string;
+  can_manage_members: boolean;
+  can_enroll_machines: boolean;
+  already_member: boolean;
+};
+
 export type MachineEnrollment = {
   machine_id: string;
   space_id: string;
@@ -116,6 +164,8 @@ export type OAuthCode = string;
 export type OAuthError = string;
 
 export type SpaceId = string;
+
+export type InvitationId = string;
 
 export type WorkId = string;
 
@@ -1229,3 +1279,292 @@ export type RetryWorkResponses = {
 };
 
 export type RetryWorkResponse = RetryWorkResponses[keyof RetryWorkResponses];
+
+export type ListSpaceMembersData = {
+  body?: never;
+  path: {
+    spaceID: string;
+  };
+  query?: never;
+  url: "/v1/spaces/{spaceID}/members";
+};
+
+export type ListSpaceMembersErrors = {
+  /**
+   * Request rejected
+   */
+  401: ApiError;
+  /**
+   * Request rejected
+   */
+  403: ApiError;
+};
+
+export type ListSpaceMembersError =
+  ListSpaceMembersErrors[keyof ListSpaceMembersErrors];
+
+export type ListSpaceMembersResponses = {
+  /**
+   * Current active Space members
+   */
+  200: {
+    members: Array<SpaceMember>;
+  };
+};
+
+export type ListSpaceMembersResponse =
+  ListSpaceMembersResponses[keyof ListSpaceMembersResponses];
+
+export type ListManagedInvitationsData = {
+  body?: never;
+  path: {
+    spaceID: string;
+  };
+  query?: never;
+  url: "/v1/spaces/{spaceID}/invitations";
+};
+
+export type ListManagedInvitationsErrors = {
+  /**
+   * Request rejected
+   */
+  401: ApiError;
+  /**
+   * Request rejected
+   */
+  403: ApiError;
+};
+
+export type ListManagedInvitationsError =
+  ListManagedInvitationsErrors[keyof ListManagedInvitationsErrors];
+
+export type ListManagedInvitationsResponses = {
+  /**
+   * Current pending invitations visible to a manager
+   */
+  200: {
+    invitations: Array<ManagedInvitation>;
+  };
+};
+
+export type ListManagedInvitationsResponse =
+  ListManagedInvitationsResponses[keyof ListManagedInvitationsResponses];
+
+export type IssueSpaceInvitationData = {
+  body: {
+    email: string;
+    can_manage_members: boolean;
+    can_enroll_machines: boolean;
+  };
+  headers: {
+    "Idempotency-Key": string;
+  };
+  path: {
+    spaceID: string;
+  };
+  query?: never;
+  url: "/v1/spaces/{spaceID}/invitations";
+};
+
+export type IssueSpaceInvitationErrors = {
+  /**
+   * Request rejected
+   */
+  400: ApiError;
+  /**
+   * Request rejected
+   */
+  401: ApiError;
+  /**
+   * Request rejected
+   */
+  403: ApiError;
+  /**
+   * Request rejected
+   */
+  409: ApiError;
+};
+
+export type IssueSpaceInvitationError =
+  IssueSpaceInvitationErrors[keyof IssueSpaceInvitationErrors];
+
+export type IssueSpaceInvitationResponses = {
+  /**
+   * Invitation and initial submission prepared and observed
+   */
+  201: ManagedInvitation;
+};
+
+export type IssueSpaceInvitationResponse =
+  IssueSpaceInvitationResponses[keyof IssueSpaceInvitationResponses];
+
+export type ResendSpaceInvitationData = {
+  body?: never;
+  headers: {
+    "Idempotency-Key": string;
+  };
+  path: {
+    spaceID: string;
+    invitationID: string;
+  };
+  query?: never;
+  url: "/v1/spaces/{spaceID}/invitations/{invitationID}/resend";
+};
+
+export type ResendSpaceInvitationErrors = {
+  /**
+   * Request rejected
+   */
+  401: ApiError;
+  /**
+   * Request rejected
+   */
+  403: ApiError;
+  /**
+   * Request rejected
+   */
+  404: ApiError;
+  /**
+   * Request rejected
+   */
+  409: ApiError;
+  /**
+   * Request rejected
+   */
+  429: ApiError;
+};
+
+export type ResendSpaceInvitationError =
+  ResendSpaceInvitationErrors[keyof ResendSpaceInvitationErrors];
+
+export type ResendSpaceInvitationResponses = {
+  /**
+   * Exact resend submission result
+   */
+  200: ManagedInvitation;
+};
+
+export type ResendSpaceInvitationResponse =
+  ResendSpaceInvitationResponses[keyof ResendSpaceInvitationResponses];
+
+export type RevokeSpaceInvitationData = {
+  body?: never;
+  headers: {
+    "Idempotency-Key": string;
+  };
+  path: {
+    spaceID: string;
+    invitationID: string;
+  };
+  query?: never;
+  url: "/v1/spaces/{spaceID}/invitations/{invitationID}/revoke";
+};
+
+export type RevokeSpaceInvitationErrors = {
+  /**
+   * Request rejected
+   */
+  401: ApiError;
+  /**
+   * Request rejected
+   */
+  403: ApiError;
+  /**
+   * Request rejected
+   */
+  404: ApiError;
+  /**
+   * Request rejected
+   */
+  409: ApiError;
+};
+
+export type RevokeSpaceInvitationError =
+  RevokeSpaceInvitationErrors[keyof RevokeSpaceInvitationErrors];
+
+export type RevokeSpaceInvitationResponses = {
+  /**
+   * Invitation revoked or exactly replayed
+   */
+  204: void;
+};
+
+export type RevokeSpaceInvitationResponse =
+  RevokeSpaceInvitationResponses[keyof RevokeSpaceInvitationResponses];
+
+export type ListInvitationInboxData = {
+  body?: never;
+  path?: never;
+  query?: never;
+  url: "/v1/invitations";
+};
+
+export type ListInvitationInboxErrors = {
+  /**
+   * Request rejected
+   */
+  401: ApiError;
+};
+
+export type ListInvitationInboxError =
+  ListInvitationInboxErrors[keyof ListInvitationInboxErrors];
+
+export type ListInvitationInboxResponses = {
+  /**
+   * Invitations for the current User's exact Email method
+   */
+  200: InvitationInbox;
+};
+
+export type ListInvitationInboxResponse =
+  ListInvitationInboxResponses[keyof ListInvitationInboxResponses];
+
+export type AcceptSpaceInvitationData = {
+  body: {
+    display_name: string;
+  };
+  headers: {
+    "Idempotency-Key": string;
+  };
+  path: {
+    invitationID: string;
+  };
+  query?: never;
+  url: "/v1/invitations/{invitationID}/accept";
+};
+
+export type AcceptSpaceInvitationErrors = {
+  /**
+   * Request rejected
+   */
+  400: ApiError;
+  /**
+   * Request rejected
+   */
+  401: ApiError;
+  /**
+   * Request rejected
+   */
+  404: ApiError;
+  /**
+   * Request rejected
+   */
+  409: ApiError;
+  /**
+   * Request rejected
+   */
+  428: ApiError;
+};
+
+export type AcceptSpaceInvitationError =
+  AcceptSpaceInvitationErrors[keyof AcceptSpaceInvitationErrors];
+
+export type AcceptSpaceInvitationResponses = {
+  /**
+   * Exact Membership consequence
+   */
+  200: AcceptedInvitation;
+};
+
+export type AcceptSpaceInvitationResponse =
+  AcceptSpaceInvitationResponses[keyof AcceptSpaceInvitationResponses];

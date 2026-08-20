@@ -37,6 +37,10 @@ func (origin ExternalOrigin) CallbackURL(provider identity.ExternalLoginProvider
 	return origin.value + "/v1/auth/" + provider.String() + "/callback"
 }
 
+func (origin ExternalOrigin) InvitationsURL() string {
+	return origin.value + "/invitations"
+}
+
 func (origin ExternalOrigin) matches(request *http.Request) bool {
 	return request.Host == origin.host
 }

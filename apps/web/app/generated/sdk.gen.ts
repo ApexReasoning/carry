@@ -9,6 +9,9 @@ import type {
 } from "./client";
 import { client } from "./client.gen";
 import type {
+  AcceptSpaceInvitationData,
+  AcceptSpaceInvitationErrors,
+  AcceptSpaceInvitationResponses,
   AcceptWorkReviewData,
   AcceptWorkReviewErrors,
   AcceptWorkReviewResponses,
@@ -28,9 +31,21 @@ import type {
   EnrollMachineData,
   EnrollMachineErrors,
   EnrollMachineResponses,
+  IssueSpaceInvitationData,
+  IssueSpaceInvitationErrors,
+  IssueSpaceInvitationResponses,
   ListConversationMessagesData,
   ListConversationMessagesErrors,
   ListConversationMessagesResponses,
+  ListInvitationInboxData,
+  ListInvitationInboxErrors,
+  ListInvitationInboxResponses,
+  ListManagedInvitationsData,
+  ListManagedInvitationsErrors,
+  ListManagedInvitationsResponses,
+  ListSpaceMembersData,
+  ListSpaceMembersErrors,
+  ListSpaceMembersResponses,
   ListWorksData,
   ListWorksErrors,
   ListWorksResponses,
@@ -52,6 +67,9 @@ import type {
   RequestEmailReauthenticationCodeData,
   RequestEmailReauthenticationCodeErrors,
   RequestEmailReauthenticationCodeResponses,
+  ResendSpaceInvitationData,
+  ResendSpaceInvitationErrors,
+  ResendSpaceInvitationResponses,
   RetryWorkData,
   RetryWorkErrors,
   RetryWorkResponses,
@@ -61,6 +79,9 @@ import type {
   RevokeMachineData,
   RevokeMachineErrors,
   RevokeMachineResponses,
+  RevokeSpaceInvitationData,
+  RevokeSpaceInvitationErrors,
+  RevokeSpaceInvitationResponses,
   SendConversationMessageData,
   SendConversationMessageErrors,
   SendConversationMessageResponses,
@@ -90,12 +111,17 @@ import type {
   VerifyEmailReauthenticationCodeResponses,
 } from "./types.gen";
 import {
+  zAcceptSpaceInvitationResponse,
   zAcceptWorkReviewResponse,
   zAppendWorkMessageResponse,
   zCreateFirstSpaceResponse,
   zCreateWorkResponse,
   zEnrollMachineResponse,
+  zIssueSpaceInvitationResponse,
   zListConversationMessagesResponse,
+  zListInvitationInboxResponse,
+  zListManagedInvitationsResponse,
+  zListSpaceMembersResponse,
   zListWorksResponse,
   zLoadCurrentUserResponse,
   zLoadIdentityMethodsResponse,
@@ -103,9 +129,11 @@ import {
   zRequestEmailCodeResponse,
   zRequestEmailLinkCodeResponse,
   zRequestEmailReauthenticationCodeResponse,
+  zResendSpaceInvitationResponse,
   zRetryWorkResponse,
   zRevokeCurrentBrowserSessionResponse,
   zRevokeMachineResponse,
+  zRevokeSpaceInvitationResponse,
   zSendConversationMessageResponse,
   zUnlinkIdentityMethodResponse,
   zVerifyEmailCodeResponse,
@@ -796,4 +824,187 @@ export const retryWork = <ThrowOnError extends boolean = false>(
     ],
     url: "/v1/spaces/{spaceID}/works/{workID}/retry",
     ...options,
+  });
+
+export const listSpaceMembers = <ThrowOnError extends boolean = false>(
+  options: Options<ListSpaceMembersData, ThrowOnError>,
+): RequestResult<
+  ListSpaceMembersResponses,
+  ListSpaceMembersErrors,
+  ThrowOnError
+> =>
+  (options.client ?? client).get<
+    ListSpaceMembersResponses,
+    ListSpaceMembersErrors,
+    ThrowOnError
+  >({
+    responseValidator: async (data) =>
+      await zListSpaceMembersResponse.parseAsync(data),
+    security: [
+      {
+        in: "cookie",
+        name: "__Host-carry_session",
+        type: "apiKey",
+      },
+    ],
+    url: "/v1/spaces/{spaceID}/members",
+    ...options,
+  });
+
+export const listManagedInvitations = <ThrowOnError extends boolean = false>(
+  options: Options<ListManagedInvitationsData, ThrowOnError>,
+): RequestResult<
+  ListManagedInvitationsResponses,
+  ListManagedInvitationsErrors,
+  ThrowOnError
+> =>
+  (options.client ?? client).get<
+    ListManagedInvitationsResponses,
+    ListManagedInvitationsErrors,
+    ThrowOnError
+  >({
+    responseValidator: async (data) =>
+      await zListManagedInvitationsResponse.parseAsync(data),
+    security: [
+      {
+        in: "cookie",
+        name: "__Host-carry_session",
+        type: "apiKey",
+      },
+    ],
+    url: "/v1/spaces/{spaceID}/invitations",
+    ...options,
+  });
+
+export const issueSpaceInvitation = <ThrowOnError extends boolean = false>(
+  options: Options<IssueSpaceInvitationData, ThrowOnError>,
+): RequestResult<
+  IssueSpaceInvitationResponses,
+  IssueSpaceInvitationErrors,
+  ThrowOnError
+> =>
+  (options.client ?? client).post<
+    IssueSpaceInvitationResponses,
+    IssueSpaceInvitationErrors,
+    ThrowOnError
+  >({
+    responseValidator: async (data) =>
+      await zIssueSpaceInvitationResponse.parseAsync(data),
+    security: [
+      {
+        in: "cookie",
+        name: "__Host-carry_session",
+        type: "apiKey",
+      },
+    ],
+    url: "/v1/spaces/{spaceID}/invitations",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+
+export const resendSpaceInvitation = <ThrowOnError extends boolean = false>(
+  options: Options<ResendSpaceInvitationData, ThrowOnError>,
+): RequestResult<
+  ResendSpaceInvitationResponses,
+  ResendSpaceInvitationErrors,
+  ThrowOnError
+> =>
+  (options.client ?? client).post<
+    ResendSpaceInvitationResponses,
+    ResendSpaceInvitationErrors,
+    ThrowOnError
+  >({
+    responseValidator: async (data) =>
+      await zResendSpaceInvitationResponse.parseAsync(data),
+    security: [
+      {
+        in: "cookie",
+        name: "__Host-carry_session",
+        type: "apiKey",
+      },
+    ],
+    url: "/v1/spaces/{spaceID}/invitations/{invitationID}/resend",
+    ...options,
+  });
+
+export const revokeSpaceInvitation = <ThrowOnError extends boolean = false>(
+  options: Options<RevokeSpaceInvitationData, ThrowOnError>,
+): RequestResult<
+  RevokeSpaceInvitationResponses,
+  RevokeSpaceInvitationErrors,
+  ThrowOnError
+> =>
+  (options.client ?? client).post<
+    RevokeSpaceInvitationResponses,
+    RevokeSpaceInvitationErrors,
+    ThrowOnError
+  >({
+    responseValidator: async (data) =>
+      await zRevokeSpaceInvitationResponse.parseAsync(data),
+    security: [
+      {
+        in: "cookie",
+        name: "__Host-carry_session",
+        type: "apiKey",
+      },
+    ],
+    url: "/v1/spaces/{spaceID}/invitations/{invitationID}/revoke",
+    ...options,
+  });
+
+export const listInvitationInbox = <ThrowOnError extends boolean = false>(
+  options?: Options<ListInvitationInboxData, ThrowOnError>,
+): RequestResult<
+  ListInvitationInboxResponses,
+  ListInvitationInboxErrors,
+  ThrowOnError
+> =>
+  (options?.client ?? client).get<
+    ListInvitationInboxResponses,
+    ListInvitationInboxErrors,
+    ThrowOnError
+  >({
+    responseValidator: async (data) =>
+      await zListInvitationInboxResponse.parseAsync(data),
+    security: [
+      {
+        in: "cookie",
+        name: "__Host-carry_session",
+        type: "apiKey",
+      },
+    ],
+    url: "/v1/invitations",
+    ...options,
+  });
+
+export const acceptSpaceInvitation = <ThrowOnError extends boolean = false>(
+  options: Options<AcceptSpaceInvitationData, ThrowOnError>,
+): RequestResult<
+  AcceptSpaceInvitationResponses,
+  AcceptSpaceInvitationErrors,
+  ThrowOnError
+> =>
+  (options.client ?? client).post<
+    AcceptSpaceInvitationResponses,
+    AcceptSpaceInvitationErrors,
+    ThrowOnError
+  >({
+    responseValidator: async (data) =>
+      await zAcceptSpaceInvitationResponse.parseAsync(data),
+    security: [
+      {
+        in: "cookie",
+        name: "__Host-carry_session",
+        type: "apiKey",
+      },
+    ],
+    url: "/v1/invitations/{invitationID}/accept",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
   });

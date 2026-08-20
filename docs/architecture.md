@@ -95,7 +95,7 @@ PostgreSQL 拥有事务、唯一 winner、lease、fence、幂等和恢复裁决�
 | Owner | 持久事实 | 当前消费者 |
 | --- | --- | --- |
 | Identity | User、邮箱/Google/GitHub proof、短期 proof 事务、显式登录方式变更、User token、Browser Session | User API、Web、CLI |
-| Space | Membership、Machine enrollment 权限 | User API、Host enrollment |
+| Space | Membership、准确邮箱邀请、邀请 submission outcome、Machine enrollment 权限 | User API、Host enrollment |
 | Work | 目标、负责人、消息、当前理解、阶段结果检查与接受事实 | 成员、执行路径 |
 | Conversation | 成员与 Carry 的私人消息、reply claim、private-side Work consequence | 准确成员、受限 Machine claim |
 | Machine | 独立执行身份、证书、撤销 | Host API |
@@ -139,7 +139,17 @@ Email challenge 以相同 closed purpose 固定目标：reauthenticate 不接收
 
 现有 User token 与 operator bootstrap 只为已发布 CLI 的过渡消费者保留到 Node 11。Browser 不再接受 token exchange；User token 和 Browser Session 都不能作为 Machine credential。
 
-### 5.2 Machine
+### 5.2 Space invitation 与 Membership admission
+
+Space invitation 是 Space-owned、只为建立一份准确 Membership 服务的内部事实，不是新的顶层 owner 或 bearer credential。邀请固定 canonical recipient email、Space、inviter、七天 database-time expiry 与现有 `can_manage_members`、`can_enroll_machines` 两个 booleans；没有 role、permission registry、secondary email、public preview 或 pending User。Issue transaction 锁定当前 actor Membership、要求 `can_manage_members`，并禁止授予 actor 当前不持有的 authority。
+
+邀请邮件只包含 canonical HTTPS external origin 下固定 `/invitations` 路径。Identity 当前 `email_identities` mapping 决定邀请 projection；Google/GitHub profile email 永远不参与。Acceptance 要求 active Browser Session 的 `identity_proof_method = email` 且 `identity_proved_at` 在数据库时间十分钟内，并在同一 transaction 重读 exact email ownership、invitation、Space 与 Membership。查看邀请、authentication、email linking 或 reauthentication 都不调用 acceptance。首次 User 缺少 display name 时，accept command 必须提供显式名字并与 Membership consequence 原子提交；provider profile 不填充名字。
+
+Issue 原子建立 invitation 与首个 immutable prepared submission；Resend 只为同一 pending invitation 建立新的 submission，六十秒 cooldown，不修改 expiry、recipient 或 grants。Concrete Resend I/O 在 transaction 外。submission 的 `prepared`、`accepted`、`rejected`、`unknown` 只描述 provider submission；Unknown 不猜测，也不盲目产生新 consequence。每个 issue、resend、revoke、accept command 都绑定 actor-scoped idempotency identity 与 canonical request digest。
+
+Acceptance、revoke 与 concurrent accepts 由 invitation row lock 和 conditional write 裁决一个 winner。already-active Membership 不被 invitation grants 覆盖；invitation 仍以准确 already-member acceptance result 终结。Committed replay 只在同一 actor、same digest 且 resulting Membership 仍 active 时返回原结果；后续 removal 不被 replay resurrect。成员移除、权限编辑、removed Membership reactivation 与 invitation reminder 属于后续 Node。
+
+### 5.3 Machine
 
 `carry host enroll` 由已登录成员发起。服务端在同一事务中验证 Membership 与 enrollment 权限，并签发独立 Machine certificate。
 
@@ -149,7 +159,7 @@ Machine 只保存 durable identity、Space、显示名、证书 serial、enrollm
 
 Space-enrolled Machine 是该 Space 的受信 Carry 执行基础设施。除了共享 Work，它可以在 exact Conversation reply claim、current fence 和 unexpired database-time lease 下读取生成一条私人回复所需的有界上下文。这个 authority 不提供通用 Conversation list/read，不跨 Space，不在成员 Membership 失效后继续，也不能把私人文本写入日志、Work 或 provider Session。要求连 Space 管理者控制的 Host 都无法读取私人内容，需要成员专属执行信任或端到端加密，是另一条尚未进入的旅程。
 
-### 5.3 Host 与本地 executor
+### 5.4 Host 与本地 executor
 
 Host 启动时在本地只读 Diagnose Pi 和 Codex，并选择一个可用的 concrete executor。选择发生在 claim 前并在 worker 生命周期内保持稳定；claim 后不切换 provider 或自动 fallback。
 
@@ -355,6 +365,8 @@ User API 只表达成员旅程：
 - 追加 Work Message；
 - 查询当前成员的 Needs You Work，并接受准确当前阶段结果；
 - 对需要成员选择的 Work 显式请求重新推进；
+- 以 Browser Session 管理准确 Space 的成员邀请，查看当前 pending invitations，并显式 resend/revoke；
+- 按当前 User 的准确 Email method 查询邀请，在 recent Email proof 后显式 accept；
 - enrollment/revocation Machine。
 
 所有 credential-bearing User API 与 Host API 响应统一 `Cache-Control: no-store`。Work list 使用 Work UUID 作为 exclusive cursor，每页最多 50 条 summary；Work detail 的消息页使用 Message UUID cursor，同时最多 50 条且消息文本合计最多 256 KiB。cursor 必须属于准确 Space/Work。User API 返回 Identity 当前 display name 作为读取时 projection，不把名字复制成 Work 持久事实。
@@ -382,6 +394,9 @@ Web 使用 `protocol/user/v1/openapi.yaml` 生成 client。CLI 与 Web 不复制
 | 重新确认已有登录方式 | exact purpose-bound proof、exact User/session、旧 session revoke、recent replacement Session、completion |
 | 关联登录方式 | target User/recent session、fresh candidate proof、stable identity ownership、concrete mapping、全旧 session revoke、replacement Session、completion |
 | 移除登录方式 | exact User/recent session、concrete mappings、至少一种保留、command replay、全旧 session revoke、replacement Session |
+| 创建成员邀请 | actor Membership/authority attenuation、exact recipient/Space/grants、七天 expiry、issue replay、首个 prepared submission |
+| Resend/Revoke 邀请 | current manager authority、exact invitation、cooldown/terminal state、command replay、immutable submission 或 revoke fact |
+| 接受成员邀请 | active User/session、recent Email proof、exact email ownership、invitation/expiry、Membership、display name、accept replay |
 | 创建 Work | Membership、目标、首任负责人、幂等身份、初始待应用状态 |
 | 追加 Work Message | Membership、Work lock、连续输入顺序、真实作者、幂等 |
 | 追加 private Conversation message | Membership、Conversation lock、请求重放、单一 outstanding turn、连续顺序、reply claim |
@@ -413,6 +428,8 @@ external_login_transactions
 identity_method_unlinks
 spaces
 space_memberships
+space_invitations
+space_invitation_submissions
 user_tokens
 browser_sessions
 machines
@@ -517,6 +534,9 @@ protocol/
 - Email/Google/GitHub reauthenticate 只接受 exact current User 的既有方式；link 要求 recent current proof 与 fresh candidate proof，occupied identity 不 merge；
 - link/unlink 撤销全部旧 sessions并只签发一个 replacement；concurrent final-method removals 只允许一个 winner，response loss exact replay 不重复 mutation 或 resurrect revoked replacement；
 - 相同邮箱或相同字面 subject 的未关联 email/Google/GitHub identity 保持不同 User，且不能产生 Membership；
+- invitation 只投影给 exact Email owner；accept 要求 recent Email proof，provider profile email 与 authentication/linking 单独不能创建 Membership；
+- invitation issue/resend/revoke/accept 的 exact replay、expiry、wrong email、already-member、accept/accept 与 accept/revoke race 都由真实 PostgreSQL 直接证明；
+- invitation submission 区分 Accepted/Rejected/Unknown，固定 `/invitations` 邮件不含 credential 或 authority；
 - provider code/token/ID token 不进入数据库、Carry cookie、clean redirect URL 或 browser storage；
 - credential-bearing response 都是 `no-store`；
 - PostgreSQL focused tests 使用真实隔离数据库，缺失数据库不是 pass。

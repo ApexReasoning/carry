@@ -45,6 +45,8 @@ test("reopens Settings for a method callback failure", async () => {
       if (request.method === "GET" && path === `/v1/spaces/${spaceID}/works`) {
         return json({ works: [], has_earlier_works: false });
       }
+      if (request.method === "GET" && path === "/v1/invitations")
+        return json({ invitations: [], reauthentication_required: false });
       throw new Error(`unexpected request: ${request.method} ${path}`);
     }),
   );
@@ -88,6 +90,8 @@ test("retries the exact email request after its response is lost", async () => {
           202,
         );
       }
+      if (request.method === "GET" && path === "/v1/invitations")
+        return json({ invitations: [], reauthentication_required: false });
       throw new Error(`unexpected request: ${request.method} ${path}`);
     }),
   );
@@ -171,6 +175,8 @@ test("verifies email and explicitly creates the first Space after response loss"
       if (request.method === "GET" && path === `/v1/spaces/${spaceID}/works`) {
         return json({ works: [], has_earlier_works: false });
       }
+      if (request.method === "GET" && path === "/v1/invitations")
+        return json({ invitations: [], reauthentication_required: false });
       throw new Error(`unexpected request: ${request.method} ${path}`);
     }),
   );
@@ -279,6 +285,8 @@ test("returns an email User to existing durable Work without storing credentials
           has_earlier_messages: false,
         });
       }
+      if (request.method === "GET" && path === "/v1/invitations")
+        return json({ invitations: [], reauthentication_required: false });
       throw new Error(`unexpected request: ${request.method} ${path}`);
     }),
   );
@@ -383,6 +391,8 @@ test("clears a message draft when the member selects another Work", async () => 
           has_earlier_messages: false,
         });
       }
+      if (request.method === "GET" && path === "/v1/invitations")
+        return json({ invitations: [], reauthentication_required: false });
       throw new Error(`unexpected request: ${request.method} ${path}`);
     }),
   );
@@ -476,6 +486,8 @@ test("reuses the same Work identity after a create response is lost", async () =
           has_earlier_messages: false,
         });
       }
+      if (request.method === "GET" && path === "/v1/invitations")
+        return json({ invitations: [], reauthentication_required: false });
       throw new Error(`unexpected request: ${request.method} ${path}`);
     }),
   );
@@ -564,6 +576,8 @@ test("reuses a pending Work identity after remount", async () => {
           has_earlier_messages: false,
         });
       }
+      if (request.method === "GET" && path === "/v1/invitations")
+        return json({ invitations: [], reauthentication_required: false });
       throw new Error(`unexpected request: ${request.method} ${path}`);
     }),
   );
@@ -642,6 +656,8 @@ test("requires an explicit Space choice when several are available", async () =>
         workLists.push(path);
         return json({ works: [], has_earlier_works: false });
       }
+      if (request.method === "GET" && path === "/v1/invitations")
+        return json({ invitations: [], reauthentication_required: false });
       throw new Error(`unexpected request: ${request.method} ${path}`);
     }),
   );
@@ -693,6 +709,8 @@ test("keeps Work hidden across an unconfirmed sign-out reload", async () => {
         if (!finishSignOut) throw new TypeError("response lost");
         return new Response(null, { status: 204 });
       }
+      if (request.method === "GET" && path === "/v1/invitations")
+        return json({ invitations: [], reauthentication_required: false });
       throw new Error(`unexpected request: ${request.method} ${path}`);
     }),
   );
@@ -773,6 +791,8 @@ test("falls back from a failed URL latch without reopening Work", async () => {
         if (!finishSignOut) throw new TypeError("response lost");
         return new Response(null, { status: 204 });
       }
+      if (request.method === "GET" && path === "/v1/invitations")
+        return json({ invitations: [], reauthentication_required: false });
       throw new Error(`unexpected request: ${request.method} ${path}`);
     }),
   );
@@ -860,6 +880,8 @@ test("reconciles a lost Work retry response by reloading the Work", async () => 
         retryRequested = true;
         throw new TypeError("response lost");
       }
+      if (request.method === "GET" && path === "/v1/invitations")
+        return json({ invitations: [], reauthentication_required: false });
       throw new Error(`unexpected request: ${request.method} ${path}`);
     }),
   );
@@ -931,6 +953,8 @@ test("reconciles an old retry identity before authorizing a later terminal Run",
         if (retryKeys.length === 3) needsRetry = false;
         return new Response(null, { status: 204 });
       }
+      if (request.method === "GET" && path === "/v1/invitations")
+        return json({ invitations: [], reauthentication_required: false });
       throw new Error(`unexpected request: ${request.method} ${path}`);
     }),
   );
@@ -1017,6 +1041,8 @@ test("opens shared Work from a private Carry reply without copying private text"
           has_earlier_messages: false,
         });
       }
+      if (request.method === "GET" && path === "/v1/invitations")
+        return json({ invitations: [], reauthentication_required: false });
       throw new Error(`unexpected request: ${request.method} ${path}`);
     }),
   );

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/ApexReasoning/carry/internal/identity"
+	"github.com/ApexReasoning/carry/internal/space"
 )
 
 var (
@@ -76,35 +77,103 @@ func (sender *resendCodeSender) SubmitEmailCode(
 	if err != nil || subtle.ConstantTimeCompare(actualDigest[:], expectedDigest[:]) != 1 {
 		return identity.EmailSubmission{State: identity.EmailSubmissionRejected}
 	}
+	observed := sender.submit(ctx, message.IdempotencyKey, body)
+	switch observed.state {
+	case resendAccepted:
+		return identity.EmailSubmission{State: identity.EmailSubmissionAccepted, ProviderMessageID: observed.providerMessageID}
+	case resendRejected:
+		return identity.EmailSubmission{State: identity.EmailSubmissionRejected}
+	default:
+		return identity.EmailSubmission{State: identity.EmailSubmissionUnknown}
+	}
+}
+
+func (sender *resendCodeSender) invitationPayload(message space.InvitationMessage) ([]byte, error) {
+	return json.Marshal(struct {
+		From    string   `json:"from"`
+		To      []string `json:"to"`
+		Subject string   `json:"subject"`
+		Text    string   `json:"text"`
+	}{
+		From: sender.from, To: []string{message.Recipient}, Subject: "You have a Carry Space invitation",
+		Text: space.InvitationMessageText(message.DestinationURL),
+	})
+}
+
+func (sender *resendCodeSender) InvitationPayloadDigest(message space.InvitationMessage) ([sha256.Size]byte, error) {
+	body, err := sender.invitationPayload(message)
+	if err != nil {
+		return [sha256.Size]byte{}, err
+	}
+	canonical := append([]byte(message.IdempotencyKey+"\x00"), body...)
+	return sha256.Sum256(canonical), nil
+}
+
+func (sender *resendCodeSender) SubmitInvitation(
+	ctx context.Context,
+	message space.InvitationMessage,
+	expectedDigest [sha256.Size]byte,
+) space.InvitationSubmission {
+	body, err := sender.invitationPayload(message)
+	if err != nil {
+		return space.InvitationSubmission{State: space.InvitationSubmissionRejected}
+	}
+	actualDigest, err := sender.InvitationPayloadDigest(message)
+	if err != nil || subtle.ConstantTimeCompare(actualDigest[:], expectedDigest[:]) != 1 {
+		return space.InvitationSubmission{State: space.InvitationSubmissionRejected}
+	}
+	observed := sender.submit(ctx, message.IdempotencyKey, body)
+	switch observed.state {
+	case resendAccepted:
+		return space.InvitationSubmission{State: space.InvitationSubmissionAccepted, ProviderMessageID: observed.providerMessageID}
+	case resendRejected:
+		return space.InvitationSubmission{State: space.InvitationSubmissionRejected}
+	default:
+		return space.InvitationSubmission{State: space.InvitationSubmissionUnknown}
+	}
+}
+
+type resendState uint8
+
+const (
+	resendUnknown resendState = iota
+	resendAccepted
+	resendRejected
+)
+
+type resendObservation struct {
+	state             resendState
+	providerMessageID string
+}
+
+func (sender *resendCodeSender) submit(ctx context.Context, idempotencyKey string, body []byte) resendObservation {
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, sender.baseURL+"/emails", bytes.NewReader(body))
 	if err != nil {
-		return identity.EmailSubmission{State: identity.EmailSubmissionRejected}
+		return resendObservation{state: resendRejected}
 	}
 	request.Header.Set("Authorization", "Bearer "+sender.apiKey)
 	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Idempotency-Key", message.IdempotencyKey)
+	request.Header.Set("Idempotency-Key", idempotencyKey)
 	response, err := sender.client.Do(request)
 	if err != nil {
-		return identity.EmailSubmission{State: identity.EmailSubmissionUnknown}
+		return resendObservation{state: resendUnknown}
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
 		if definitiveResendRejection(response.StatusCode) {
-			return identity.EmailSubmission{State: identity.EmailSubmissionRejected}
+			return resendObservation{state: resendRejected}
 		}
-		return identity.EmailSubmission{State: identity.EmailSubmissionUnknown}
+		return resendObservation{state: resendUnknown}
 	}
 	var accepted struct {
 		ID string `json:"id"`
 	}
 	decoder := json.NewDecoder(io.LimitReader(response.Body, 64<<10))
 	if err := decoder.Decode(&accepted); err != nil || strings.TrimSpace(accepted.ID) == "" {
-		return identity.EmailSubmission{State: identity.EmailSubmissionUnknown}
+		return resendObservation{state: resendUnknown}
 	}
-	return identity.EmailSubmission{
-		State: identity.EmailSubmissionAccepted, ProviderMessageID: strings.TrimSpace(accepted.ID),
-	}
+	return resendObservation{state: resendAccepted, providerMessageID: strings.TrimSpace(accepted.ID)}
 }
 
 func (sender *resendCodeSender) payload(message identity.EmailCodeMessage) ([]byte, error) {

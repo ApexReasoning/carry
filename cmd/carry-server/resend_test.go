@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/ApexReasoning/carry/internal/identity"
+	"github.com/ApexReasoning/carry/internal/space"
 )
 
 func TestResendCodeSenderKeepsExactRecipientPayloadAndIdempotencyKey(t *testing.T) {
@@ -50,6 +52,71 @@ func TestResendCodeSenderKeepsExactRecipientPayloadAndIdempotencyKey(t *testing.
 	}
 	if len(keys) != 2 || keys[0] != keys[1] || string(payloads[0]) != string(payloads[1]) {
 		t.Fatalf("keys = %#v, payloads equal = %t", keys, string(payloads[0]) == string(payloads[1]))
+	}
+}
+
+func TestResendInvitationUsesFixedRouteWithoutAuthorityOrCredential(t *testing.T) {
+	t.Parallel()
+	var body struct {
+		To      []string `json:"to"`
+		Subject string   `json:"subject"`
+		Text    string   `json:"text"`
+	}
+	var key string
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		key = request.Header.Get("Idempotency-Key")
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatalf("decode invitation: %v", err)
+		}
+		_, _ = response.Write([]byte(`{"id":"invitation-message-1"}`))
+	}))
+	defer server.Close()
+	sender, err := newResendCodeSender(server.URL, "restricted-key", "Carry <login@example.com>")
+	if err != nil {
+		t.Fatalf("create sender: %v", err)
+	}
+	message := space.InvitationMessage{
+		Recipient: "teammate@example.com", DestinationURL: "https://carry.example/invitations",
+		IdempotencyKey: "space-invitation/one",
+	}
+	digest, err := sender.InvitationPayloadDigest(message)
+	if err != nil {
+		t.Fatalf("digest invitation: %v", err)
+	}
+	observed := sender.SubmitInvitation(context.Background(), message, digest)
+	if observed.State != space.InvitationSubmissionAccepted || observed.ProviderMessageID != "invitation-message-1" {
+		t.Fatalf("submission = %#v", observed)
+	}
+	if key != message.IdempotencyKey || len(body.To) != 1 || body.To[0] != message.Recipient {
+		t.Fatalf("key = %q, to = %#v", key, body.To)
+	}
+	if body.Subject != "You have a Carry Space invitation" || body.Text != space.InvitationMessageText(message.DestinationURL) {
+		t.Fatalf("subject/text = %q / %q", body.Subject, body.Text)
+	}
+	for _, forbidden := range []string{"teammate@example.com", "space_id", "session", "credential", "otp"} {
+		if strings.Contains(message.DestinationURL, forbidden) {
+			t.Fatalf("destination contains %q", forbidden)
+		}
+	}
+}
+
+func TestResendInvitationRejectsChangedSenderBeforeHTTP(t *testing.T) {
+	t.Parallel()
+	var calls int
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls++ }))
+	defer server.Close()
+	original, _ := newResendCodeSender(server.URL, "restricted-key", "Carry <first@example.com>")
+	changed, _ := newResendCodeSender(server.URL, "restricted-key", "Carry <second@example.com>")
+	message := space.InvitationMessage{Recipient: "person@example.com", DestinationURL: "https://carry.example/invitations", IdempotencyKey: "space-invitation/exact"}
+	digest, err := original.InvitationPayloadDigest(message)
+	if err != nil {
+		t.Fatalf("digest original invitation: %v", err)
+	}
+	if result := changed.SubmitInvitation(context.Background(), message, digest); result.State != space.InvitationSubmissionRejected {
+		t.Fatalf("changed sender result = %#v", result)
+	}
+	if calls != 0 {
+		t.Fatalf("HTTP calls = %d, want 0", calls)
 	}
 }
 

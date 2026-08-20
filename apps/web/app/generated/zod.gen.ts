@@ -29,6 +29,54 @@ export const zUser = z.object({
   spaces: z.array(zMembership),
 });
 
+export const zSpaceMember = z.object({
+  user_id: z.uuid(),
+  display_name: z.string(),
+  can_manage_members: z.boolean(),
+  can_enroll_machines: z.boolean(),
+  joined_at: z.iso.datetime({ offset: true }),
+});
+
+export const zInvitationSubmission = z.object({
+  state: z.enum(["prepared", "accepted", "rejected", "unknown"]),
+});
+
+export const zManagedInvitation = z.object({
+  invitation_id: z.uuid(),
+  space_id: z.uuid(),
+  recipient_email: z.email(),
+  can_manage_members: z.boolean(),
+  can_enroll_machines: z.boolean(),
+  created_at: z.iso.datetime({ offset: true }),
+  expires_at: z.iso.datetime({ offset: true }),
+  submission: zInvitationSubmission,
+});
+
+export const zRecipientInvitation = z.object({
+  invitation_id: z.uuid(),
+  space_id: z.uuid(),
+  space_name: z.string(),
+  inviter_display_name: z.string(),
+  can_manage_members: z.boolean(),
+  can_enroll_machines: z.boolean(),
+  created_at: z.iso.datetime({ offset: true }),
+  expires_at: z.iso.datetime({ offset: true }),
+});
+
+export const zInvitationInbox = z.object({
+  invitations: z.array(zRecipientInvitation).max(50),
+  reauthentication_required: z.boolean(),
+});
+
+export const zAcceptedInvitation = z.object({
+  invitation_id: z.uuid(),
+  space_id: z.uuid(),
+  space_name: z.string(),
+  can_manage_members: z.boolean(),
+  can_enroll_machines: z.boolean(),
+  already_member: z.boolean(),
+});
+
 export const zMachineEnrollment = z.object({
   machine_id: z.uuid(),
   space_id: z.uuid(),
@@ -93,6 +141,8 @@ export const zOAuthCode = z.string().min(1).max(4096);
 export const zOAuthError = z.string().min(1).max(255);
 
 export const zSpaceId = z.uuid();
+
+export const zInvitationId = z.uuid();
 
 export const zWorkId = z.uuid();
 
@@ -414,3 +464,94 @@ export const zRetryWorkPath = z.object({
  * Work retry requested or idempotently replayed
  */
 export const zRetryWorkResponse = z.void();
+
+export const zListSpaceMembersPath = z.object({
+  spaceID: z.uuid(),
+});
+
+/**
+ * Current active Space members
+ */
+export const zListSpaceMembersResponse = z.object({
+  members: z.array(zSpaceMember).max(100),
+});
+
+export const zListManagedInvitationsPath = z.object({
+  spaceID: z.uuid(),
+});
+
+/**
+ * Current pending invitations visible to a manager
+ */
+export const zListManagedInvitationsResponse = z.object({
+  invitations: z.array(zManagedInvitation).max(50),
+});
+
+export const zIssueSpaceInvitationBody = z.object({
+  email: z.email().max(254),
+  can_manage_members: z.boolean().default(false),
+  can_enroll_machines: z.boolean().default(false),
+});
+
+export const zIssueSpaceInvitationHeaders = z.object({
+  "Idempotency-Key": z.string().min(1).max(255),
+});
+
+export const zIssueSpaceInvitationPath = z.object({
+  spaceID: z.uuid(),
+});
+
+/**
+ * Invitation and initial submission prepared and observed
+ */
+export const zIssueSpaceInvitationResponse = zManagedInvitation;
+
+export const zResendSpaceInvitationHeaders = z.object({
+  "Idempotency-Key": z.string().min(1).max(255),
+});
+
+export const zResendSpaceInvitationPath = z.object({
+  spaceID: z.uuid(),
+  invitationID: z.uuid(),
+});
+
+/**
+ * Exact resend submission result
+ */
+export const zResendSpaceInvitationResponse = zManagedInvitation;
+
+export const zRevokeSpaceInvitationHeaders = z.object({
+  "Idempotency-Key": z.string().min(1).max(255),
+});
+
+export const zRevokeSpaceInvitationPath = z.object({
+  spaceID: z.uuid(),
+  invitationID: z.uuid(),
+});
+
+/**
+ * Invitation revoked or exactly replayed
+ */
+export const zRevokeSpaceInvitationResponse = z.void();
+
+/**
+ * Invitations for the current User's exact Email method
+ */
+export const zListInvitationInboxResponse = zInvitationInbox;
+
+export const zAcceptSpaceInvitationBody = z.object({
+  display_name: z.string().max(255),
+});
+
+export const zAcceptSpaceInvitationHeaders = z.object({
+  "Idempotency-Key": z.string().min(1).max(255),
+});
+
+export const zAcceptSpaceInvitationPath = z.object({
+  invitationID: z.uuid(),
+});
+
+/**
+ * Exact Membership consequence
+ */
+export const zAcceptSpaceInvitationResponse = zAcceptedInvitation;

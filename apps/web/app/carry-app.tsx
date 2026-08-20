@@ -3,6 +3,8 @@ import { useState } from "react";
 import { ConversationPanel } from "./features/conversation/conversation-panel";
 import { FirstSpace } from "./features/user-session/first-space";
 import { IdentityMethodSettings } from "./features/user-session/identity-methods";
+import { InvitationInboxView } from "./features/user-session/invitation-inbox";
+import { MemberSettings } from "./features/user-session/member-settings";
 import { useUserSession } from "./features/user-session/use-user-session";
 import { UserEntry } from "./features/user-session/user-entry";
 import { CreateWorkForm } from "./features/works/create-work-form";
@@ -11,7 +13,9 @@ import { WorkDetail } from "./features/works/work-detail";
 import { WorkList } from "./features/works/work-list";
 
 export function App() {
-  const [settingsOpen, setSettingsOpen] = useState(hasIdentityChangeStatus);
+  const [settingsPanel, setSettingsPanel] = useState<
+    "identity" | "members" | null
+  >(hasIdentityChangeStatus() ? "identity" : null);
   const session = useUserSession();
   const board = useWorkBoard(session.user);
   const busy = session.busy || board.busy;
@@ -86,6 +90,16 @@ export function App() {
       />
     );
   }
+  if (session.phase === "invitations" && session.user && session.inbox) {
+    return (
+      <InvitationInboxView
+        user={session.user}
+        initialInbox={session.inbox}
+        onChanged={session.refresh}
+        onSkip={session.skipInvitations}
+      />
+    );
+  }
   if (session.phase === "first-space") {
     return (
       <FirstSpace
@@ -140,7 +154,9 @@ export function App() {
           <button
             className="ghost-button"
             type="button"
-            onClick={() => setSettingsOpen((open) => !open)}
+            onClick={() =>
+              setSettingsPanel((panel) => (panel ? null : "identity"))
+            }
             disabled={busy}
           >
             Settings
@@ -157,8 +173,42 @@ export function App() {
       </header>
 
       <main className="workspace">
-        {settingsOpen ? (
-          <IdentityMethodSettings onClose={() => setSettingsOpen(false)} />
+        {settingsPanel ? (
+          <>
+            <nav
+              className="identity-method-actions"
+              aria-label="Settings sections"
+            >
+              <button
+                className="ghost-button"
+                type="button"
+                onClick={() => setSettingsPanel("identity")}
+              >
+                Sign-in methods
+              </button>
+              {currentSpace ? (
+                <button
+                  className="ghost-button"
+                  type="button"
+                  onClick={() => setSettingsPanel("members")}
+                >
+                  Members
+                </button>
+              ) : null}
+            </nav>
+            {settingsPanel === "identity" ? (
+              <IdentityMethodSettings onClose={() => setSettingsPanel(null)} />
+            ) : null}
+            {settingsPanel === "members" && currentSpace ? (
+              <MemberSettings
+                key={currentSpace.space_id}
+                spaceID={currentSpace.space_id}
+                canManage={currentSpace.can_manage_members}
+                canEnroll={currentSpace.can_enroll_machines}
+                onClose={() => setSettingsPanel(null)}
+              />
+            ) : null}
+          </>
         ) : null}
         <div className="workspace-intro">
           <div>

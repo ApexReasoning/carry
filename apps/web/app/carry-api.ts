@@ -2,9 +2,14 @@ import { client } from "./generated/client.gen";
 import {
   acceptWorkReview as acceptWorkReviewRequest,
   appendWorkMessage as appendWorkMessageRequest,
+  acceptSpaceInvitation as acceptSpaceInvitationRequest,
   createFirstSpace as createFirstSpaceRequest,
   createWork as createWorkRequest,
+  issueSpaceInvitation as issueSpaceInvitationRequest,
   listConversationMessages as listConversationMessagesRequest,
+  listInvitationInbox as listInvitationInboxRequest,
+  listManagedInvitations as listManagedInvitationsRequest,
+  listSpaceMembers as listSpaceMembersRequest,
   listWorks as listWorksRequest,
   loadCurrentUser,
   loadIdentityMethods as loadIdentityMethodsRequest,
@@ -12,7 +17,9 @@ import {
   requestEmailCode as requestEmailCodeRequest,
   requestEmailLinkCode as requestEmailLinkCodeRequest,
   requestEmailReauthenticationCode as requestEmailReauthenticationCodeRequest,
+  resendSpaceInvitation as resendSpaceInvitationRequest,
   retryWork as retryWorkRequest,
+  revokeSpaceInvitation as revokeSpaceInvitationRequest,
   revokeCurrentBrowserSession,
   sendConversationMessage as sendConversationMessageRequest,
   unlinkIdentityMethod as unlinkIdentityMethodRequest,
@@ -21,10 +28,14 @@ import {
   verifyEmailReauthenticationCode as verifyEmailReauthenticationCodeRequest,
 } from "./generated/sdk.gen";
 import type {
+  AcceptedInvitation,
   ConversationMessage,
   EmailChallenge,
   IdentityMethods,
+  InvitationInbox,
+  ManagedInvitation,
   Membership,
+  SpaceMember,
   User,
   Work,
   WorkMessage,
@@ -183,6 +194,121 @@ export async function createFirstSpace(
     result.response,
     result.error,
     "Create first Space",
+  );
+}
+
+export async function spaceMembers(
+  spaceID: string,
+): Promise<Array<SpaceMember>> {
+  const result = await listSpaceMembersRequest({
+    ...sameOrigin,
+    path: { spaceID },
+  });
+  return requireData(
+    result.data,
+    result.response,
+    result.error,
+    "Load Space members",
+  ).members;
+}
+
+export async function managedInvitations(
+  spaceID: string,
+): Promise<Array<ManagedInvitation>> {
+  const result = await listManagedInvitationsRequest({
+    ...sameOrigin,
+    path: { spaceID },
+  });
+  return requireData(
+    result.data,
+    result.response,
+    result.error,
+    "Load pending invitations",
+  ).invitations;
+}
+
+export async function issueInvitation(
+  spaceID: string,
+  email: string,
+  canManageMembers: boolean,
+  canEnrollMachines: boolean,
+  key: string,
+): Promise<ManagedInvitation> {
+  const result = await issueSpaceInvitationRequest({
+    ...sameOrigin,
+    path: { spaceID },
+    headers: { "Idempotency-Key": key },
+    body: {
+      email,
+      can_manage_members: canManageMembers,
+      can_enroll_machines: canEnrollMachines,
+    },
+  });
+  return requireMutationData(
+    result.data,
+    result.response,
+    result.error,
+    "Create invitation",
+  );
+}
+
+export async function resendInvitation(
+  spaceID: string,
+  invitationID: string,
+  key: string,
+): Promise<ManagedInvitation> {
+  const result = await resendSpaceInvitationRequest({
+    ...sameOrigin,
+    path: { spaceID, invitationID },
+    headers: { "Idempotency-Key": key },
+  });
+  return requireMutationData(
+    result.data,
+    result.response,
+    result.error,
+    "Resend invitation",
+  );
+}
+
+export async function revokeInvitation(
+  spaceID: string,
+  invitationID: string,
+  key: string,
+): Promise<void> {
+  const result = await revokeSpaceInvitationRequest({
+    ...sameOrigin,
+    path: { spaceID, invitationID },
+    headers: { "Idempotency-Key": key },
+  });
+  requireMutationSuccess(result.response, result.error, "Revoke invitation");
+}
+
+export async function invitationInbox(): Promise<InvitationInbox> {
+  const result = await listInvitationInboxRequest(sameOrigin);
+  return requireData(
+    result.data,
+    result.response,
+    result.error,
+    "Load invitations",
+  );
+}
+
+export async function acceptInvitation(
+  invitationID: string,
+  displayName: string,
+  key: string,
+): Promise<AcceptedInvitation> {
+  const result = await acceptSpaceInvitationRequest({
+    ...sameOrigin,
+    path: { invitationID },
+    headers: { "Idempotency-Key": key },
+    body: { display_name: displayName },
+  });
+  return requireMutationData(
+    result.data,
+    result.response,
+    result.error,
+    "Accept invitation",
   );
 }
 

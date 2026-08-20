@@ -1,7 +1,11 @@
 import { useEffect, useState } from "react";
 
-import { currentUser, MutationOutcomeUnknownError } from "../../carry-api";
-import type { User } from "../../generated/types.gen";
+import {
+  currentUser,
+  invitationInbox,
+  MutationOutcomeUnknownError,
+} from "../../carry-api";
+import type { InvitationInbox, User } from "../../generated/types.gen";
 import {
   clearPendingSignOut,
   finishBrowserSignOut,
@@ -24,6 +28,7 @@ type SessionPhase =
   | "email"
   | "code"
   | "first-space"
+  | "invitations"
   | "ready"
   | "failed"
   | "signing-out";
@@ -31,6 +36,7 @@ type SessionPhase =
 export function useUserSession() {
   const [phase, setPhase] = useState<SessionPhase>("checking");
   const [user, setUser] = useState<User | null>(null);
+  const [inbox, setInbox] = useState<InvitationInbox | null>(null);
   const [challenge, setChallenge] = useState<EmailChallengeCommand | null>(
     null,
   );
@@ -52,7 +58,7 @@ export function useUserSession() {
       setPhase("checking");
       try {
         const loaded = await currentUser();
-        if (active) routeUser(loaded);
+        if (active) await routeUser(loaded);
       } catch (caught) {
         if (!active) return;
         setError(errorMessage(caught));
@@ -65,11 +71,26 @@ export function useUserSession() {
     };
   }, [restoreAttempt]);
 
-  function routeUser(loaded: User | null) {
+  async function routeUser(loaded: User | null) {
     setUser(loaded);
+    setInbox(null);
     if (!loaded) {
       setPhase("email");
       return;
+    }
+    if (
+      loaded.spaces.length === 0 ||
+      window.location.pathname === "/invitations"
+    ) {
+      const invitations = await invitationInbox();
+      if (
+        invitations.invitations.length > 0 ||
+        window.location.pathname === "/invitations"
+      ) {
+        setInbox(invitations);
+        setPhase("invitations");
+        return;
+      }
     }
     setPhase(loaded.spaces.length === 0 ? "first-space" : "ready");
   }
@@ -131,7 +152,7 @@ export function useUserSession() {
       const loaded = await verifyExactEmailChallenge(
         newEmailVerification(challenge.challengeID, code),
       );
-      routeUser(loaded);
+      await routeUser(loaded);
     } catch (caught) {
       setError(errorMessage(caught));
       setPhase("code");
@@ -144,7 +165,9 @@ export function useUserSession() {
     setBusy(true);
     setError(null);
     try {
-      routeUser(await createExactFirstSpace(newFirstSpace(displayName, name)));
+      await routeUser(
+        await createExactFirstSpace(newFirstSpace(displayName, name)),
+      );
     } catch (caught) {
       setError(errorMessage(caught));
       setPhase("first-space");
@@ -189,12 +212,16 @@ export function useUserSession() {
   return {
     phase,
     user,
+    inbox,
     email: challenge?.email ?? "",
     challengeID: challenge?.challengeID ?? "",
     canRetryCodeRequest: requestRetryPending,
     busy,
     error,
     retry: () => setRestoreAttempt((attempt) => attempt + 1),
+    refresh: () => setRestoreAttempt((attempt) => attempt + 1),
+    skipInvitations: () =>
+      setPhase(user?.spaces.length === 0 ? "first-space" : "ready"),
     sendCode,
     retryCodeRequest,
     verifyCode,

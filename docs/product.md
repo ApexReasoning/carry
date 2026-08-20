@@ -8,7 +8,7 @@ Carry 是团队可以长期托付工作的 AI 同事。
 
 Carry 不是聊天机器人、任务清单、工作流编辑器、Agent 管理平台或只面向研发团队的自动化工具。它的价值不是完成一次模型调用，而是让一份责任跨越时间、成员、工具、模型和机器后仍然可理解、可纠正、可继续。
 
-除明确标注为未来方向的段落外，本文件描述当前 M1 基线与 Node 6–8 的公开身份、首个 Space 和显式登录方式管理合同。后续 Node 的顺序和进入条件只由 `docs/implementation.md` 定义；未来方向不是当前 API、状态或用户承诺。
+除明确标注为未来方向的段落外，本文件描述当前 M1 基线与 Node 6–9 的公开身份、首个 Space、显式登录方式管理和成员加入合同。后续 Node 的顺序和进入条件只由 `docs/implementation.md` 定义；未来方向不是当前 API、状态或用户承诺。
 
 ## 设计哲学：克制与自由
 
@@ -135,6 +135,12 @@ Space 是当前的团队边界，包含成员、团队权限、共同 Work 和�
 
 Space 不是文件夹。它决定哪些人和能力可以共同参与一份责任。
 
+持有 `can_manage_members` 的当前成员可以邀请一个准确邮箱。邀请固定 Space、recipient、邀请人、七天期限，以及现有 `can_manage_members`、`can_enroll_machines` 两个窄 authority；两项默认关闭，邀请人不能授予自己当前不持有的 authority。这里没有 Owner、Admin 或 Role framework。
+
+邮件只引导用户打开固定 `/invitations` 页面，不携带 invitation credential、recipient、Space、OTP 或 Session。Resend 接受提交只表示 provider accepted，不表示 delivered、inbox 或 read；Rejected 与 Unknown 保持准确，resend 是成员明确触发的新 submission，不延长期限、不改变 recipient 或 authority。
+
+邀请只对当前 Carry User 准确关联的受邀 Email method 可见。接受还要求当前 Browser Session 在数据库时间十分钟内以 Email 完成 proof；Google/GitHub profile email、成功认证、打开邮件、关联邮箱或查看邀请都不会自动建立 Membership。成员查看 Space、邀请人和准确权限后显式接受，PostgreSQL 才原子建立 Membership。没有准确邮箱 proof 时不能加入，也不能通过同邮箱猜测、merge、管理员 impersonation 或私人 Conversation 访问绕过。
+
 Space-enrolled Machine 是该 Space 的受信 Carry 执行基础设施，不是普通成员。它可以在准确、短期且可撤销的执行 authority 下处理完成当前责任所必需的 Space 内容，包括成员提交给 Carry 的有界私人 Conversation 上下文；enrollment 不授予通用内容浏览能力，也不能让 Machine 把私人内容写入共享 Work、日志或 provider Session。
 
 成员身份、浏览器会话、外部身份和执行机器身份必须分开。通过 Slack 或 Lark 验证的外部用户，不会因此自动成为 Space 成员。
@@ -215,7 +221,7 @@ Review identity 是绑定内部 understanding version 与内容 digest 的不透
 ## 未来产品方向（当前尚未实现）
 
 - 官方云端是主要产品形态，自托管是同一产品的部署选项；两者共享 User、Space、Membership、Browser Session 与隐私语义，不以共享 token 或无用户模式换取部署简单；
-- 成员邀请按 `docs/implementation.md` 后续 Node 进入；相同邮箱不能让 provider identity 自动关联、合并 User 或产生 Membership；
+- 成员移除与权限编辑按 `docs/implementation.md` 后续 Node 进入；相同邮箱不能让 provider identity 自动关联、合并 User 或产生 Membership；
 - 只有独立结果确实需要历史正文、独立引用及接受、修改或撤回生命周期时，才考虑 Result identity；
 - 第一条未来继续优先是 Work 的一个明确时间条件，不预建 Timer；
 - Pause、Close、Reopen、负责人转交、渠道、第三方能力和外部 Action 按 `docs/implementation.md` 的后续 journey 逐条重新设计。

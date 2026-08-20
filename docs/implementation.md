@@ -233,16 +233,27 @@ Apple、Microsoft、Passkey、企业 SSO、自动 same-email merge、GitHub repo
 
 ### 用户结果
 
-管理成员可以从 Settings → Members 邀请准确邮箱；受邀者认证并验证该邮箱后，看到 Space、邀请人与将获得的权限，明确接受后加入现有 Space。
+持有 `can_manage_members` 的当前成员从 Settings → Members 邀请一个准确邮箱，检查 recipient、Space 和现有两个窄 authority 后提交；两项 authority 默认关闭，邀请人不能授予自己当前不持有的权限。Carry 只准确表达邮件 submission outcome。
+
+邮件只包含 canonical HTTPS `/invitations` 路径，不携带 credential、recipient、Space、OTP 或 Session。受邀者通过任一首发方式认证；只有当前 User 的 exact Email method 可以发现邀请，接受还要求当前 Browser Session 在数据库时间十分钟内以 Email 完成 proof。受邀者看到 Space、邀请人与准确权限后显式接受，才加入现有 Space。
 
 ### 关闭证据
 
-- `can_manage_members` 是窄 authority，不建立角色 framework；
-- pending、expiry、revoke、resend、wrong-email、already-member、single winner 与 response-loss replay 由 PostgreSQL 裁决；
-- 邀请固定准确 recipient、Space 与将获得的 authority；provider accepted 不等于 delivered/read，Unknown 不盲目重发或伪造受邀者已收到；
-- 第一位新 User 与既有 User 都能在认证后返回准确邀请并接受；
-- 认证成功不自动接受邀请，provider/email identity 不能自行产生 Membership；
-- Space manager 不能恢复、登录或冒充另一成员，也不能读取其私人 Conversation。
+- `can_manage_members` 与 `can_enroll_machines` 保持两个现有 boolean；不建立 role、permission registry 或 Admin/Owner framework，issue transaction 对 requested grants 做 actor-authority attenuation；
+- invitation 固定 exact canonical recipient、Space、inviter、两个 grants 与七天 database-time expiry；更改其中任一事实必须 revoke 后创建新邀请；
+- issue 原子建立 invitation 和 initial prepared submission；Resend I/O 在 transaction 外，Accepted 不等于 delivered/read，Rejected 与 Unknown 保持准确；
+- resend 只在 pending invitation 上创建一个新 immutable submission，六十秒 cooldown，不延长 expiry；exact replay 不重复发送，Unknown 不盲目创建新 consequence；
+- issue、resend、revoke、accept 分别绑定 idempotency identity 与 request digest；changed replay 冲突，committed response loss 返回同一语义结果；
+- recipient projection 只依赖 Carry `email_identities` exact mapping；Google/GitHub profile email 不可见也不产生 authority，stale/non-email proof 可提示 reauthenticate 但不能 accept；
+- 第一位新 Email User 与既有 User 都能在认证后先看到准确邀请；Google/GitHub Session 必须 email reauthenticate，或显式 link 受邀 Email 后再接受；零 Space 且无邀请的 User 才进入 first-Space 创建；
+- 认证、email proof、linking、打开邮件与 invitation preview 都不自动接受或创建 Membership；
+- accept 在一个 PostgreSQL transaction 中重验 active Browser Session、recent Email proof、exact email ownership、invitation/expiry 与 Membership；缺少名字的新 User 显式提供名字并原子写入；provider profile 不填充名字；
+- concurrent accept/accept 与 accept/revoke 只有一个 winner；already-active Membership 不被 invitation grants 覆盖，exact accepted replay 只在 resulting Membership 仍 active 时恢复且不 resurrect later removal；
+- Space manager 不能恢复、登录或冒充另一成员，不能查看其 identity method、Session 或私人 Conversation；pending invitee 在 accept 前不能读取 Space content。
+
+### 明确不做
+
+member removal、permission editing、Role、bulk/domain invite、bearer invitation/public preview、secondary email、account merge、decline、proto-member、SCIM/SSO/JIT、reminder/notification、generic Delivery/outbox、membership history、removed-member reactivation 或 impersonation。
 
 ## 12. Node 10：Member removal
 

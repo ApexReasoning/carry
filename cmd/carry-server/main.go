@@ -256,6 +256,10 @@ func run(ctx context.Context, arguments []string, stdout io.Writer, stderr io.Wr
 	if err != nil {
 		return fmt.Errorf("compose first Space: %w", err)
 	}
+	spaceInvitations, err := space.NewInvitations(store, resendSubmitter, parsed.externalOrigin.InvitationsURL())
+	if err != nil {
+		return fmt.Errorf("compose Space invitations: %w", err)
+	}
 	machineEnrollment, err := machine.NewEnrollment(store, authority)
 	if err != nil {
 		return fmt.Errorf("compose Machine enrollment: %w", err)
@@ -277,7 +281,7 @@ func run(ctx context.Context, arguments []string, stdout io.Writer, stderr io.Wr
 	if err != nil {
 		return fmt.Errorf("compose User identity routes: %w", err)
 	}
-	userSpaceRoutes, err := carryserver.NewUserSpaceRoutes(firstSpace)
+	userSpaceRoutes, err := carryserver.NewUserSpaceRoutesWithInvitations(firstSpace, spaceInvitations, credentials, parsed.externalOrigin)
 	if err != nil {
 		return fmt.Errorf("compose User Space routes: %w", err)
 	}

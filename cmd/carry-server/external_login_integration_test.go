@@ -715,9 +715,26 @@ func composeExternalLoginTestAPI(
 	origin carryserver.ExternalOrigin,
 	google identity.GoogleLoginClient,
 	github identity.GitHubLoginClient,
+	extraSubmitters ...any,
 ) http.Handler {
 	t.Helper()
-	emailLogin, err := identity.NewEmailLogin(store, unavailableEmailCodeSubmitter{}, credentials)
+	var emailSubmitter identity.EmailCodeSubmitter = unavailableEmailCodeSubmitter{}
+	var invitationSubmitter space.InvitationSubmitter = acceptedInvitationFixture{}
+	for _, dependency := range extraSubmitters {
+		matched := false
+		if submitter, ok := dependency.(identity.EmailCodeSubmitter); ok {
+			emailSubmitter = submitter
+			matched = true
+		}
+		if submitter, ok := dependency.(space.InvitationSubmitter); ok {
+			invitationSubmitter = submitter
+			matched = true
+		}
+		if !matched {
+			t.Fatalf("unsupported test submitter %T", dependency)
+		}
+	}
+	emailLogin, err := identity.NewEmailLogin(store, emailSubmitter, credentials)
 	if err != nil {
 		t.Fatalf("compose email login: %v", err)
 	}
@@ -744,7 +761,11 @@ func composeExternalLoginTestAPI(
 	if err != nil {
 		t.Fatalf("compose User identity routes: %v", err)
 	}
-	spaceRoutes, err := carryserver.NewUserSpaceRoutes(firstSpace)
+	spaceInvitations, err := space.NewInvitations(store, invitationSubmitter, origin.InvitationsURL())
+	if err != nil {
+		t.Fatalf("compose Space invitations: %v", err)
+	}
+	spaceRoutes, err := carryserver.NewUserSpaceRoutesWithInvitations(firstSpace, spaceInvitations, credentials, origin)
 	if err != nil {
 		t.Fatalf("compose User Space routes: %v", err)
 	}
@@ -836,6 +857,16 @@ func (store *commitResponseLossStore) LostSessions() map[identity.ExternalLoginP
 		result[provider] = session
 	}
 	return result
+}
+
+type acceptedInvitationFixture struct{}
+
+func (acceptedInvitationFixture) InvitationPayloadDigest(message space.InvitationMessage) ([sha256.Size]byte, error) {
+	return sha256.Sum256([]byte(message.Recipient + "\x00" + message.DestinationURL + "\x00" + message.IdempotencyKey)), nil
+}
+
+func (acceptedInvitationFixture) SubmitInvitation(context.Context, space.InvitationMessage, [sha256.Size]byte) space.InvitationSubmission {
+	return space.InvitationSubmission{State: space.InvitationSubmissionAccepted, ProviderMessageID: "fixture-invitation"}
 }
 
 type unavailableEmailCodeSubmitter struct{}
