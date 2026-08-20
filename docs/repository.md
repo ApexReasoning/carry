@@ -420,7 +420,8 @@ make check-product
 - Machine enrollment 后用独立 mTLS claim 并推进 Work；
 - Host 中断后新的 Attempt 安全继续，旧 Attempt 不能晚到提交；
 - 成员在 Web 私聊 Carry，普通问题只得到私人回复；
-- 清晰委托原子形成一份共享 Work，而私人原文和 source identity 不进入 Work。
+- 清晰委托原子形成一份共享 Work，而私人原文和 source identity 不进入 Work；
+- 成员从 Web 的 Needs You 打开准确阶段结果，在 acceptance response loss 后用同一 identity + reload 收敛，并证明 Work 仍保持 Open。
 
 未来 journey 只有在实现并成为发布合同后才进入 required product suite。需要真实模型 credential 的 Pi/Codex canary 不在不可信 PR 上运行，改由 protected canary 执行。
 

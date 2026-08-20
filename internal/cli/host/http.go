@@ -9,10 +9,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+
+	hostdomain "github.com/ApexReasoning/carry/internal/host"
 )
 
 func parseServerURL(raw string) (string, error) {
@@ -65,12 +68,12 @@ func newJSONRequest(ctx context.Context, method string, requestURL string, value
 func sendJSON(client *http.Client, request *http.Request, destination any) error {
 	response, err := client.Do(request)
 	if err != nil {
-		return fmt.Errorf("send %s %s: %w", request.Method, request.URL, err)
+		return controlPlaneRequestError(fmt.Sprintf("send %s %s", request.Method, request.URL), err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		limited, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
-		return fmt.Errorf("%s %s returned %s: %s", request.Method, request.URL, response.Status, strings.TrimSpace(string(limited)))
+		return controlPlaneStatusError(request, response, strings.TrimSpace(string(limited)))
 	}
 	if destination == nil {
 		_, _ = io.Copy(io.Discard, response.Body)
@@ -80,4 +83,56 @@ func sendJSON(client *http.Client, request *http.Request, destination any) error
 		return fmt.Errorf("decode %s response: %w", request.URL, err)
 	}
 	return nil
+}
+
+func controlPlaneRequestError(action string, err error) error {
+	var certificateVerificationError *tls.CertificateVerificationError
+	var certificateInvalidError x509.CertificateInvalidError
+	var unknownAuthorityError x509.UnknownAuthorityError
+	var recordHeaderError tls.RecordHeaderError
+	var alertError tls.AlertError
+	if errors.As(err, &certificateVerificationError) ||
+		errors.As(err, &certificateInvalidError) ||
+		errors.As(err, &unknownAuthorityError) ||
+		errors.As(err, &recordHeaderError) ||
+		errors.As(err, &alertError) {
+		return fmt.Errorf("%s: %w", action, err)
+	}
+	if isTemporaryControlPlaneTransportError(err) {
+		return temporaryControlPlaneError(action, err)
+	}
+	return fmt.Errorf("%s: %w", action, err)
+}
+
+func isTemporaryControlPlaneTransportError(err error) bool {
+	var requestError *url.Error
+	if errors.As(err, &requestError) {
+		err = requestError.Err
+	}
+	if errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, io.EOF) ||
+		errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+	var operationError *net.OpError
+	if errors.As(err, &operationError) {
+		return true
+	}
+	var dnsError *net.DNSError
+	return errors.As(err, &dnsError)
+}
+
+func temporaryControlPlaneError(action string, err error) error {
+	return fmt.Errorf("%w: %s: %v", hostdomain.ErrControlPlaneUnavailable, action, err)
+}
+
+func controlPlaneStatusError(request *http.Request, response *http.Response, detail string) error {
+	message := fmt.Sprintf("%s %s returned %s", request.Method, request.URL, response.Status)
+	if detail != "" {
+		message += ": " + detail
+	}
+	if response.StatusCode == http.StatusTooManyRequests || response.StatusCode >= http.StatusInternalServerError {
+		return temporaryControlPlaneError(message, errors.New("temporary server response"))
+	}
+	return errors.New(message)
 }

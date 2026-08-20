@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -91,11 +92,11 @@ func (adapter *Adapter) generate(ctx context.Context, prompt string, includeStde
 	processDone := make(chan error, 1)
 	go func() { processDone <- command.Wait() }()
 
-	if err := json.NewEncoder(stdin).Encode(promptRequest{ID: promptRequestID, Type: "prompt", Message: prompt}); err != nil {
+	if err := writePrompt(stdin, prompt); err != nil {
 		_ = stdin.Close()
 		_ = command.Process.Kill()
 		<-processDone
-		return nil, fmt.Errorf("write Pi prompt: %w", err)
+		return nil, err
 	}
 
 	text, resultErr := awaitText(ctx, stdout)
@@ -115,6 +116,13 @@ func (adapter *Adapter) generate(ctx context.Context, prompt string, includeStde
 		return nil, fmt.Errorf("%w: %s", resultErr, stderr.String())
 	}
 	return nil, resultErr
+}
+
+func writePrompt(writer io.Writer, prompt string) error {
+	if err := json.NewEncoder(writer).Encode(promptRequest{ID: promptRequestID, Type: "prompt", Message: prompt}); err != nil {
+		return fmt.Errorf("%w: write Pi prompt: %v", host.ErrAgentOutcomeLost, err)
+	}
+	return nil
 }
 
 func piRPCArguments() []string {

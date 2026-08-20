@@ -3,6 +3,7 @@ package host
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"sync"
 	"testing"
@@ -11,6 +12,63 @@ import (
 	"github.com/ApexReasoning/carry/internal/conversation"
 	"github.com/ApexReasoning/carry/internal/run"
 )
+
+func TestWorkerRetriesTemporaryControlPlaneFailure(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	runs := &recordingRunClient{
+		claimErrors: []error{fmt.Errorf("%w: connection reset", ErrControlPlaneUnavailable)},
+		claims:      []run.Claim{workClaim("work-1")},
+		onCommit:    cancel,
+	}
+	worker := testWorker(runs, &recordingConversationClient{}, &recordingExecutor{
+		update: UnderstandingUpdate{Understanding: "Recovered after a temporary outage.", NextStep: "Continue."},
+	})
+	worker.PollInterval = time.Millisecond
+
+	if err := worker.Serve(ctx); err != nil {
+		t.Fatalf("serve after temporary control-plane failure: %v", err)
+	}
+	if runs.claimCalls < 2 || runs.commits != 1 {
+		t.Fatalf("claim calls = %d, commits = %d", runs.claimCalls, runs.commits)
+	}
+}
+
+func TestWorkerContinuesAfterTemporaryCommitResponseLoss(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	runs := &recordingRunClient{
+		claims:       []run.Claim{workClaim("work-with-lost-commit-response"), workClaim("next-work")},
+		commitErrors: []error{fmt.Errorf("%w: response lost", ErrControlPlaneUnavailable)},
+		onCommit:     cancel,
+	}
+	executor := &recordingExecutor{
+		update: UnderstandingUpdate{Understanding: "Known.", NextStep: "Continue."},
+	}
+	worker := testWorker(runs, &recordingConversationClient{}, executor)
+	worker.PollInterval = time.Millisecond
+
+	if err := worker.Serve(ctx); err != nil {
+		t.Fatalf("serve after temporary commit response loss: %v", err)
+	}
+	if runs.commits != 1 || !reflect.DeepEqual(executor.order, []string{"work", "work"}) {
+		t.Fatalf("successful commits = %d, execution order = %#v", runs.commits, executor.order)
+	}
+}
+
+func TestWorkerStopsOnUnclassifiedControlPlaneFailure(t *testing.T) {
+	t.Parallel()
+
+	failure := errors.New("Machine authority is invalid")
+	runs := &recordingRunClient{claimErrors: []error{failure}}
+	worker := testWorker(runs, &recordingConversationClient{}, &recordingExecutor{})
+
+	if err := worker.Serve(context.Background()); !errors.Is(err, failure) {
+		t.Fatalf("serve error = %v, want %v", err, failure)
+	}
+}
 
 func TestWorkerCommitsOneValidatedUnderstandingUpdate(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -335,19 +393,26 @@ func (executor *recordingExecutor) Reply(ctx context.Context, request Conversati
 }
 
 type recordingRunClient struct {
-	claims     []run.Claim
-	claimCalls int
-	renewals   int
-	renewErr   error
-	committed  UnderstandingUpdate
-	commits    int
-	finished   run.State
-	onCommit   func()
-	onFinish   func()
+	claims       []run.Claim
+	claimErrors  []error
+	commitErrors []error
+	claimCalls   int
+	renewals     int
+	renewErr     error
+	committed    UnderstandingUpdate
+	commits      int
+	finished     run.State
+	onCommit     func()
+	onFinish     func()
 }
 
 func (client *recordingRunClient) Claim(context.Context) (run.Claim, error) {
 	client.claimCalls++
+	if len(client.claimErrors) > 0 {
+		err := client.claimErrors[0]
+		client.claimErrors = client.claimErrors[1:]
+		return run.Claim{}, err
+	}
 	if len(client.claims) == 0 {
 		return run.Claim{}, run.ErrNoRunAvailable
 	}
@@ -365,6 +430,11 @@ func (client *recordingRunClient) Renew(context.Context, run.Claim) (time.Time, 
 }
 
 func (client *recordingRunClient) Commit(_ context.Context, _ run.Claim, update UnderstandingUpdate) error {
+	if len(client.commitErrors) > 0 {
+		err := client.commitErrors[0]
+		client.commitErrors = client.commitErrors[1:]
+		return err
+	}
 	client.committed = update
 	client.commits++
 	if client.onCommit != nil {

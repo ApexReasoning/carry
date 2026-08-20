@@ -70,7 +70,7 @@ func (c *machineHTTP) Claim(ctx context.Context) (run.Claim, error) {
 	}
 	response, err := c.client.Do(request)
 	if err != nil {
-		return run.Claim{}, fmt.Errorf("claim Run: %w", err)
+		return run.Claim{}, controlPlaneRequestError("claim Run", err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode == http.StatusNoContent {
@@ -79,12 +79,7 @@ func (c *machineHTTP) Claim(ctx context.Context) (run.Claim, error) {
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		limited, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
-		return run.Claim{}, fmt.Errorf(
-			"POST %s returned %s: %s",
-			request.URL,
-			response.Status,
-			strings.TrimSpace(string(limited)),
-		)
+		return run.Claim{}, controlPlaneStatusError(request, response, strings.TrimSpace(string(limited)))
 	}
 	var wire runClaimWire
 	if err := decodeBoundedExactJSON(response.Body, maxRunClaimWireBytes, &wire); err != nil {
@@ -203,7 +198,7 @@ func (c *machineHTTP) ClaimConversation(ctx context.Context) (conversation.Reply
 	}
 	response, err := c.client.Do(request)
 	if err != nil {
-		return conversation.ReplyClaim{}, fmt.Errorf("claim private Conversation reply: %w", err)
+		return conversation.ReplyClaim{}, controlPlaneRequestError("claim private Conversation reply", err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode == http.StatusNoContent {
@@ -212,7 +207,7 @@ func (c *machineHTTP) ClaimConversation(ctx context.Context) (conversation.Reply
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
-		return conversation.ReplyClaim{}, fmt.Errorf("POST %s returned %s", request.URL, response.Status)
+		return conversation.ReplyClaim{}, controlPlaneStatusError(request, response, "")
 	}
 	const maxClaimWireBytes = conversation.MaxContextTextBytes*6 + 64*1024
 	var wire conversationReplyClaimWire
@@ -303,12 +298,12 @@ func (c *machineHTTP) CommitConversation(
 func sendExactConversationJSON(client *http.Client, request *http.Request, destination any) error {
 	response, err := client.Do(request)
 	if err != nil {
-		return fmt.Errorf("send %s %s: %w", request.Method, request.URL, err)
+		return controlPlaneRequestError(fmt.Sprintf("send %s %s", request.Method, request.URL), err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
-		return fmt.Errorf("%s %s returned %s", request.Method, request.URL, response.Status)
+		return controlPlaneStatusError(request, response, "")
 	}
 	if err := decodeBoundedExactJSON(response.Body, 1<<20, destination); err != nil {
 		return fmt.Errorf("decode %s response: %w", request.URL, err)

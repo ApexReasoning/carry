@@ -14,6 +14,22 @@ import (
 	"github.com/ApexReasoning/carry/internal/host"
 )
 
+func TestTurnStartWriteFailureKeepsOutcomeUnknown(t *testing.T) {
+	t.Parallel()
+
+	client := newAppServerClient(failingWriter{}, strings.NewReader(""))
+	_, err := startStructuredTurnProtocol(
+		client,
+		context.Background(),
+		"thread-1",
+		"Advance the Work",
+		host.UnderstandingOutputSchema,
+	)
+	if !errors.Is(err, host.ErrAgentOutcomeLost) {
+		t.Fatalf("turn/start write error = %v, want outcome lost", err)
+	}
+}
+
 func TestAdapterExecutesToollessCodexTurnAndParsesCompletedDraft(t *testing.T) {
 	argumentFile := filepath.Join(t.TempDir(), "arguments")
 	t.Setenv("CODEX_ARGS_FILE", argumentFile)
@@ -269,6 +285,12 @@ func writeCodexFixture(t *testing.T, body string) string {
 func useCodexFixture(t *testing.T, binary string) {
 	t.Helper()
 	t.Setenv("PATH", filepath.Dir(binary)+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) {
+	return 0, errors.New("write failed after possible delivery")
 }
 
 func sameStrings(left []string, right []string) bool {

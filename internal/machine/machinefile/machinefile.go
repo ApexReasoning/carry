@@ -14,6 +14,11 @@ import (
 
 var ErrAlreadyEnrolled = errors.New("this Machine is already enrolled")
 
+const (
+	credentialFilename        = "machine.json"
+	revokedCredentialFilename = "machine-revoked.json"
+)
+
 // Credential is the installed Machine identity. Its private key is generated
 // and consumed locally and must never be sent to carry-server.
 type Credential struct {
@@ -57,16 +62,57 @@ func GenerateKey() (publicKeyDER []byte, privateKeyPEM []byte, err error) {
 
 // Save atomically publishes a mode-0600 Machine credential.
 func Save(directory string, credential Credential) error {
-	return saveJSON(directory, "machine.json", ".machine-*.json", "Machine credential", credential)
+	return saveJSON(directory, credentialFilename, ".machine-*.json", "Machine credential", credential)
 }
 
 // Load reads the installed Machine credential.
 func Load(directory string) (Credential, error) {
-	var credential Credential
-	if err := loadJSON(filepath.Join(directory, "machine.json"), "Machine credential", &credential); err != nil {
-		return Credential{}, err
+	return loadCredential(filepath.Join(directory, credentialFilename), "Machine credential")
+}
+
+// LoadForRevocation resumes local cleanup after the server has confirmed
+// revocation. confirmed is true only when the active credential was already
+// durably retired by an earlier invocation.
+func LoadForRevocation(directory string) (credential Credential, confirmed bool, err error) {
+	credential, err = Load(directory)
+	if err == nil {
+		return credential, false, nil
 	}
-	return credential, nil
+	if !errors.Is(err, os.ErrNotExist) {
+		return Credential{}, false, err
+	}
+	credential, err = loadCredential(
+		filepath.Join(directory, revokedCredentialFilename),
+		"revoked Machine credential",
+	)
+	if err != nil {
+		return Credential{}, false, err
+	}
+	return credential, true, nil
+}
+
+// MarkRevoked durably removes the credential from the active Host path while
+// retaining enough local state to retry cleanup after a crash.
+func MarkRevoked(directory string) error {
+	if err := os.Rename(
+		filepath.Join(directory, credentialFilename),
+		filepath.Join(directory, revokedCredentialFilename),
+	); err != nil {
+		return fmt.Errorf("retire revoked Machine credential: %w", err)
+	}
+	return syncDirectory(directory)
+}
+
+// RemoveRevoked destroys a credential only after server revocation is known.
+func RemoveRevoked(directory string) error {
+	path := filepath.Join(directory, revokedCredentialFilename)
+	if err := os.Remove(path); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("remove revoked Machine credential: %w", err)
+	}
+	return syncDirectory(directory)
 }
 
 // SavePending persists the private key and idempotency identity before the
@@ -124,6 +170,14 @@ func saveJSON(directory string, filename string, pattern string, description str
 		return fmt.Errorf("publish %s: %w", description, err)
 	}
 	return syncDirectory(directory)
+}
+
+func loadCredential(path string, description string) (Credential, error) {
+	var credential Credential
+	if err := loadJSON(path, description, &credential); err != nil {
+		return Credential{}, err
+	}
+	return credential, nil
 }
 
 func loadJSON(path string, description string, destination any) error {

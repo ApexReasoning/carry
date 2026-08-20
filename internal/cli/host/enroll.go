@@ -36,6 +36,9 @@ func newEnrollCommand(configDirectory string, output io.Writer) *cobra.Command {
 }
 
 func runEnroll(ctx context.Context, configDirectory string, output io.Writer, flags enrollFlags) error {
+	if err := machinefile.RemoveRevoked(configDirectory); err != nil {
+		return err
+	}
 	if _, err := machinefile.Load(configDirectory); err == nil {
 		if err := machinefile.RemovePending(configDirectory); err != nil {
 			return err

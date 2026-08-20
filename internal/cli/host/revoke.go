@@ -23,21 +23,29 @@ func newRevokeCommand(configDirectory string, output io.Writer) *cobra.Command {
 }
 
 func runRevoke(ctx context.Context, configDirectory string, output io.Writer) error {
-	member, err := memberfile.Load(configDirectory)
+	machine, serverConfirmed, err := machinefile.LoadForRevocation(configDirectory)
 	if err != nil {
 		return err
 	}
-	machine, err := machinefile.Load(configDirectory)
-	if err != nil {
+	if !serverConfirmed {
+		member, err := memberfile.Load(configDirectory)
+		if err != nil {
+			return err
+		}
+		connection, err := userapi.FromCredential(member)
+		if err != nil {
+			return err
+		}
+		if err := connection.RevokeMachine(ctx, machine.SpaceID, machine.MachineID); err != nil {
+			return err
+		}
+		if err := machinefile.MarkRevoked(configDirectory); err != nil {
+			return err
+		}
+	}
+	if err := machinefile.RemoveRevoked(configDirectory); err != nil {
 		return err
 	}
-	connection, err := userapi.FromCredential(member)
-	if err != nil {
-		return err
-	}
-	if err := connection.RevokeMachine(ctx, machine.SpaceID, machine.MachineID); err != nil {
-		return err
-	}
-	_, _ = fmt.Fprintf(output, "Revoked Machine %s\n", machine.MachineID)
+	_, _ = fmt.Fprintf(output, "Revoked Machine %s and removed its local credential\n", machine.MachineID)
 	return nil
 }

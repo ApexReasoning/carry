@@ -179,33 +179,23 @@ func TestOwnerReviewsResultProducedThroughNativeExecution(t *testing.T) {
 				t.Fatalf("Needs You response = %d %s", status, body)
 			}
 
-			status, body = memberRequest(
-				http.MethodGet,
-				"/v1/spaces/"+bootstrap.SpaceID+"/works/"+workID,
-				"",
+			run(t, root, nil, "pnpm", "--dir", "apps/web", "build")
+			webAddress := freeAddress(t)
+			stopWeb, webLog := startWeb(t, root, webAddress, serverURL, pkiDirectory)
+			defer stopWeb()
+			webURL := "https://" + webAddress
+			waitForServer(t, webURL, filepath.Join(pkiDirectory, "ca.pem"), webLog)
+			playwrightOutput, playwrightErr := runError(
+				root,
+				[]string{
+					"CARRY_WEB_URL=" + webURL,
+					"CARRY_MEMBER_TOKEN=" + bootstrap.UserToken,
+					"CARRY_REVIEW_WORK_GOAL=Prepare a customer renewal recommendation",
+				},
+				"pnpm", "--dir", "apps/web", "exec", "playwright", "test", "e2e/result-review.spec.ts",
 			)
-			var details struct {
-				Work struct {
-					Lifecycle     string `json:"lifecycle"`
-					Understanding string `json:"understanding"`
-					ReviewID      string `json:"review_id"`
-					NeedsReview   bool   `json:"needs_review"`
-				} `json:"work"`
-			}
-			if status != http.StatusOK || json.Unmarshal(body, &details) != nil ||
-				!details.Work.NeedsReview || details.Work.ReviewID == "" ||
-				details.Work.Understanding != "Finance approved a twelve month term." {
-				t.Fatalf("reviewable Work response = %d %s", status, body)
-			}
-
-			status, body = memberRequest(
-				http.MethodPost,
-				"/v1/spaces/"+bootstrap.SpaceID+"/works/"+workID+
-					"/reviews/"+details.Work.ReviewID+"/accept",
-				"accept-native-result",
-			)
-			if status != http.StatusNoContent {
-				t.Fatalf("accept result response = %d %s", status, body)
+			if playwrightErr != nil || !strings.Contains(playwrightOutput, "1 passed") {
+				t.Fatalf("run result-review browser journey: %v\n%s\nHost log:\n%s", playwrightErr, playwrightOutput, hostLog.String())
 			}
 
 			status, body = memberRequest(

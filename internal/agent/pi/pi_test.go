@@ -12,6 +12,15 @@ import (
 	"github.com/ApexReasoning/carry/internal/host"
 )
 
+func TestPromptWriteFailureKeepsOutcomeUnknown(t *testing.T) {
+	t.Parallel()
+
+	err := writePrompt(failingWriter{}, "Advance the Work")
+	if !errors.Is(err, host.ErrAgentOutcomeLost) {
+		t.Fatalf("prompt write error = %v, want outcome lost", err)
+	}
+}
+
 func TestAdapterExecutesIsolatedPiRPCAndParsesSettledDraft(t *testing.T) {
 	argumentFile := filepath.Join(t.TempDir(), "arguments")
 	t.Setenv("PI_ARGS_FILE", argumentFile)
@@ -136,6 +145,12 @@ func writePiFixture(t *testing.T, body string) string {
 		t.Fatalf("write Pi fixture: %v", err)
 	}
 	return path
+}
+
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) {
+	return 0, errors.New("write failed after possible delivery")
 }
 
 func usePiFixture(t *testing.T, binary string) {

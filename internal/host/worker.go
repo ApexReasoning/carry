@@ -75,18 +75,32 @@ func (worker Worker) Serve(ctx context.Context) error {
 			if ctx.Err() != nil {
 				return nil
 			}
-			return err
+			if !errors.Is(err, ErrControlPlaneUnavailable) {
+				return err
+			}
+			slog.Warn("Carry control plane is temporarily unavailable; Host will retry", "error", err)
+			if !worker.waitForPoll(ctx) {
+				return nil
+			}
+			continue
 		}
 		if handled {
 			continue
 		}
-		timer := time.NewTimer(worker.PollInterval)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
+		if !worker.waitForPoll(ctx) {
 			return nil
-		case <-timer.C:
 		}
+	}
+}
+
+func (worker Worker) waitForPoll(ctx context.Context) bool {
+	timer := time.NewTimer(worker.PollInterval)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
 	}
 }
 

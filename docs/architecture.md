@@ -123,7 +123,7 @@ User token 和 Browser Session 是两种 credential 表示，但都映射到同�
 
 `carry host enroll` 由已登录成员发起。服务端在同一事务中验证 Membership 与 enrollment 权限，并签发独立 Machine certificate。
 
-此后 `carry host start` 只使用 Machine mTLS。Machine 被撤销后不能 claim、renew、commit 或 finish。
+此后 `carry host start` 只使用 Machine mTLS。Machine 被撤销后不能 claim、renew、commit 或 finish。`carry host revoke` 只有在服务端明确确认撤销后，才把本地 credential 原子移出 active Host 路径并删除；响应丢失时保留 credential 供准确重试。已确认撤销后的本地 cleanup 可以在下一次 revoke/enroll 继续，新的 enrollment 不复用旧 Machine identity。
 
 Machine 只保存 durable identity、Space、显示名、证书 serial、enrollment 与 revocation。服务端不保存 Runtime report、binary path、版本、availability 或 Machine status projection。
 
@@ -133,7 +133,7 @@ Space-enrolled Machine 是该 Space 的受信 Carry 执行基础设施。除了�
 
 Host 启动时在本地只读 Diagnose Pi 和 Codex，并选择一个可用的 concrete executor。选择发生在 claim 前并在 worker 生命周期内保持稳定；claim 后不切换 provider 或自动 fallback。
 
-普通成员不选择 executor。服务端也不按 provider、Runtime、model 或 Work 类型路由。
+普通成员不选择 executor。服务端也不按 provider、Runtime、model 或 Work 类型路由。Host 对 transport failure、429 和 5xx 这类明确临时的控制面失败等待后继续 polling；认证、authority、协议或内容错误仍终止进程并交给 operator。这个自愈只重试控制面交互，不复活 stale Attempt，也不建立 heartbeat/status projection。
 
 Pi 与 Codex 保持独立 adapter，并只共享 Host 当前消费的两个产品行为：
 
@@ -316,7 +316,7 @@ Conversation Reply:  reply + nullable delegation_goal
 
 模型输出先经过对应的严格结构验证，再由当前 Host 使用该 owner 的 fenced Commit 写入 PostgreSQL。私人 Reply 的 actor、Space、owner、idempotency 与 authority 不来自模型。Agent settled、thread idle、进程退出或一段看似正确的文本都不能单独修改 Work 或 Conversation。
 
-Codex 缓冲结束但缺少准确 terminal notification 时，只可有界只读核对；不能证明完成则 Finish Unknown。Host 不在 claim 后切换到另一 adapter。
+Codex 缓冲结束但缺少准确 terminal notification 时，只可有界只读核对；不能证明完成则 Finish Unknown。Pi prompt 或 Codex `turn/start` 在 subprocess 启动后发生 write failure 时，request 可能已经部分或完整送达，同样归类为 Unknown，不能猜成 Failed。Host 不在 claim 后切换到另一 adapter。
 
 ## 10. User API
 

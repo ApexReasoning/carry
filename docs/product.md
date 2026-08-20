@@ -196,6 +196,7 @@ Review identity 是绑定内部 understanding version 与内容 digest 的不透
 
 ## 未来产品方向（当前尚未实现）
 
+- 官方云端是主要产品形态，自托管是同一产品的部署选项；两者共享 User、Space、Membership、Browser Session 与隐私语义，不以共享 token 或无用户模式换取部署简单；
 - 只有独立结果确实需要历史正文、独立引用及接受、修改或撤回生命周期时，才考虑 Result identity；
 - 第一条未来继续优先是 Work 的一个明确时间条件，不预建 Timer；
 - Pause、Close、Reopen、负责人转交、渠道、第三方能力和外部 Action 按 `docs/implementation.md` 的后续 journey 逐条重新设计。
@@ -254,7 +255,7 @@ Carry 必须区分：
 - 已授权与已执行；
 - 成功、失败和 Unknown。
 
-Host 或 Agent 失败后，Carry 依靠持久 Work 和数据库 authority 继续。lease 过期只撤销旧执行的提交权，不证明旧进程死亡。
+Host 或 Agent 失败后，Carry 依靠持久 Work 和数据库 authority 继续。lease 过期只撤销旧执行的提交权，不证明旧进程死亡。Host 自行跨越明确临时的网络或服务端故障继续 polling；认证、撤销或协议错误不会被伪装成临时故障。成员不需要因为一次控制面网络抖动手工重启正常 Host。
 
 在当前没有外部 tool 后果的原生执行旅程中，lease 中断的安全恢复是创建新 Attempt 并从 Work 重新执行。已经明确记录为 Failed 或 Unknown 的推进保持终态，不会自动重放；成员可以在 Work 上显式选择重新推进。原生 Session 恢复只有在成本或时延成为真实产品问题、且不需要把 provider state 提升进核心时才加入。
 

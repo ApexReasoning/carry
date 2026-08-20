@@ -1,10 +1,41 @@
 package machinefile
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 )
+
+func TestConfirmedRevocationRetiresThenRemovesMachineCredential(t *testing.T) {
+	t.Parallel()
+
+	directory := t.TempDir()
+	credential := Credential{MachineID: "machine-1", SpaceID: "space-1", PrivateKeyPEM: "private"}
+	if err := Save(directory, credential); err != nil {
+		t.Fatalf("save Machine credential: %v", err)
+	}
+	loaded, confirmed, err := LoadForRevocation(directory)
+	if err != nil || confirmed || loaded.MachineID != credential.MachineID {
+		t.Fatalf("active revocation credential = %#v, confirmed = %t, error = %v", loaded, confirmed, err)
+	}
+	if err := MarkRevoked(directory); err != nil {
+		t.Fatalf("mark Machine revoked: %v", err)
+	}
+	if _, err := Load(directory); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("active Machine credential remains: %v", err)
+	}
+	loaded, confirmed, err = LoadForRevocation(directory)
+	if err != nil || !confirmed || loaded.MachineID != credential.MachineID {
+		t.Fatalf("retired revocation credential = %#v, confirmed = %t, error = %v", loaded, confirmed, err)
+	}
+	if err := RemoveRevoked(directory); err != nil {
+		t.Fatalf("remove revoked Machine credential: %v", err)
+	}
+	if _, _, err := LoadForRevocation(directory); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("revoked Machine credential remains: %v", err)
+	}
+}
 
 func TestPendingEnrollmentIsProtectedAndRemoved(t *testing.T) {
 	t.Parallel()

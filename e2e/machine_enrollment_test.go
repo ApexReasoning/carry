@@ -117,9 +117,66 @@ func TestMemberEnrollsAndRevokesIndependentMachine(t *testing.T) {
 	if err := os.WriteFile(memberPath, memberCredential, 0o600); err != nil {
 		t.Fatalf("restore member credential: %v", err)
 	}
-	run(t, root, clientEnvironment, carry, "host", "revoke")
-	if output, err := runError(root, hostEnvironment, carry, "host", "start"); err == nil || !strings.Contains(output, "403 Forbidden") {
+	revokeOutput := run(t, root, clientEnvironment, carry, "host", "revoke")
+	if !strings.Contains(revokeOutput, "removed its local credential") {
+		t.Fatalf("revoke output = %q", revokeOutput)
+	}
+	if _, err := os.Stat(filepath.Join(configDirectory, "machine.json")); !os.IsNotExist(err) {
+		t.Fatalf("revoked Machine credential remains active: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(configDirectory, "machine-revoked.json"), machineJSON, 0o600); err != nil {
+		t.Fatalf("restore confirmed-revoked Machine credential: %v", err)
+	}
+	if err := os.Remove(memberPath); err != nil {
+		t.Fatalf("remove member credential before cleanup retry: %v", err)
+	}
+	cleanupOutput := run(t, root, clientEnvironment, carry, "host", "revoke")
+	if !strings.Contains(cleanupOutput, "removed its local credential") {
+		t.Fatalf("cleanup retry output = %q", cleanupOutput)
+	}
+	if _, err := os.Stat(filepath.Join(configDirectory, "machine-revoked.json")); !os.IsNotExist(err) {
+		t.Fatalf("confirmed-revoked Machine credential remains after cleanup retry: %v", err)
+	}
+	if err := os.WriteFile(memberPath, memberCredential, 0o600); err != nil {
+		t.Fatalf("restore member credential after cleanup retry: %v", err)
+	}
+
+	staleConfigDirectory := filepath.Join(temporary, "stale-revoked-config")
+	if err := os.MkdirAll(staleConfigDirectory, 0o700); err != nil {
+		t.Fatalf("create stale Machine config: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(staleConfigDirectory, "machine.json"), machineJSON, 0o600); err != nil {
+		t.Fatalf("restore stale Machine credential: %v", err)
+	}
+	staleEnvironment := []string{
+		"CARRY_CONFIG_DIR=" + staleConfigDirectory,
+		"PATH=" + binDirectory,
+	}
+	if output, err := runError(root, staleEnvironment, carry, "host", "start"); err == nil || !strings.Contains(output, "403 Forbidden") {
 		t.Fatalf("revoked Host output = %q, error = %v", output, err)
+	}
+
+	reenrollOutput := run(t, root, clientEnvironment, carry, "host", "enroll",
+		"--space", bootstrap.SpaceID, "--name", "replacement-enrollment-host")
+	if !strings.Contains(reenrollOutput, "Enrolled Machine") {
+		t.Fatalf("re-enrollment output = %q", reenrollOutput)
+	}
+	replacementJSON, err := os.ReadFile(filepath.Join(configDirectory, "machine.json"))
+	if err != nil {
+		t.Fatalf("read replacement Machine credential: %v", err)
+	}
+	var replacementCredential struct {
+		MachineID string `json:"machine_id"`
+	}
+	if err := json.Unmarshal(replacementJSON, &replacementCredential); err != nil {
+		t.Fatalf("decode replacement Machine credential: %v", err)
+	}
+	if replacementCredential.MachineID == "" || replacementCredential.MachineID == machineCredential.MachineID {
+		t.Fatalf("replacement Machine identity = %q, old = %q", replacementCredential.MachineID, machineCredential.MachineID)
+	}
+	if started := runHostUntilStarted(t, root, carry, hostEnvironment); !strings.Contains(started, replacementCredential.MachineID) {
+		t.Fatalf("replacement Host start output = %q", started)
 	}
 }
 

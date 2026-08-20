@@ -14,10 +14,11 @@ import (
 )
 
 var (
-	ErrAgentUnavailable   = errors.New("Agent executable is unavailable")
-	ErrAgentFailed        = errors.New("Agent execution failed")
-	ErrAgentOutcomeLost   = errors.New("Agent execution outcome is unknown")
-	ErrInvalidAgentUpdate = errors.New("Agent returned an invalid current understanding update")
+	ErrAgentUnavailable        = errors.New("Agent executable is unavailable")
+	ErrAgentFailed             = errors.New("Agent execution failed")
+	ErrAgentOutcomeLost        = errors.New("Agent execution outcome is unknown")
+	ErrControlPlaneUnavailable = errors.New("Carry control plane is temporarily unavailable")
+	ErrInvalidAgentUpdate      = errors.New("Agent returned an invalid current understanding update")
 )
 
 // Executor is the complete Host need shared by the two concrete native adapters.

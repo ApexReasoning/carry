@@ -54,7 +54,7 @@ func startStructuredTurnProtocol(
 		Sandbox:      sandboxPolicy{Type: "readOnly", NetworkAccess: false},
 	}
 	if err := client.sendRequest(startTurnRequestID, "turn/start", params); err != nil {
-		return "", err
+		return "", fmt.Errorf("%w: %v", host.ErrAgentOutcomeLost, err)
 	}
 	response, err := client.readResponse(ctx, startTurnRequestID)
 	if err != nil {

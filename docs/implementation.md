@@ -129,18 +129,19 @@ Milestone:
 ## 6. Milestones
 
 ```text
-M0 Foundation       Nodes 0–1         complete
-M1 Native core      Nodes 2–4         complete
-M2 Responsibility   Nodes 5–7
-M3 Connections      Nodes 8–11
-M4 V1 closure       Node 12
+M0 Foundation                  Nodes 0–1         complete
+M1 Native core                 Nodes 2–4         complete
+M2 Product access and recovery Nodes 5–10
+M3 Responsibility              Nodes 11–12
+M4 Connections and capability  Nodes 13–16
+M5 V1 closure                  Node 17
 ```
 
 Node 不是 package 或 migration 批次，而是用户结果。默认一到三个工作日；第三天仍不能关闭时应删减或拆分。
 
 ## 7. 已完成切割：Node 5 — 结果检查与 Needs You
 
-M1、进入前 polish 与 Node 5 已关闭。当前停止在 Node 5，等待明确决定后才进入 Node 6。Node 5 让当前 Work owner 检查 Carry 的重要阶段结果，并通过个人 Needs You 查询只看到必须由自己处理的 Work。
+M1、进入前 polish 与 Node 5 已关闭。当前先关闭 Pre-Node6 reliability correction，再进入新的 Node 6。Node 5 让当前 Work owner 检查 Carry 的重要阶段结果，并通过个人 Needs You 查询只看到必须由自己处理的 Work。
 
 ### 用户结果
 
@@ -172,7 +173,7 @@ Needs You 当前只包含两类 Work：准确当前结果等待 owner 检查；�
 
 ### 明确不做
 
-独立 Result/Attention/Question/Decision owner，结果历史正文、accept-and-continue、reject/challenge/withdraw、CLI 交互式 review、Node 6 lifecycle/transfer、Node 7 continuation、Action/Artifact/capability、Agent credential/API、provider registry、全局 Web state/query framework或 migration rewrite。
+独立 Result/Attention/Question/Decision owner，结果历史正文、accept-and-continue、reject/challenge/withdraw、CLI 交互式 review、Node 11 lifecycle/transfer、Node 12 continuation、Action/Artifact/capability、Agent credential/API、provider registry、全局 Web state/query framework或 migration rewrite。
 
 ## 8. 已完成基线：M0、M1 与 Node 5
 
@@ -205,7 +206,92 @@ Needs You 当前只包含两类 Work：准确当前结果等待 owner 检查；�
 - 普通进度和内部恢复不进入 Needs You；
 - 接受阶段结果不自动关闭仍有后续责任的 Work。
 
-## 14. Node 6：Responsibility authority
+## Pre-Node6 reliability correction
+
+状态：complete。focused/full checks、三门 review 与窄确认已关闭本次 bounded reliability correction；Node 6 仍需自己的研究、合同、实现和关闭证据。
+
+Node 0–5 中期审计确认 PostgreSQL authority、Work/Conversation privacy、concrete Pi/Codex adapter 与三对象产品预算应保留。本次 bounded closure 只关闭已经实现的可靠性行为：Host 跨 transport、429 和 5xx 这类明确临时控制面故障继续 polling；Pi prompt 与 Codex `turn/start` 在 subprocess 启动后的 write loss 保持 Unknown；服务端确认 Machine revoke 后，本机凭据先原子移出 active Host path，再可恢复地清理并允许 fresh enrollment；Node 5 的 Needs You → exact result → acceptance response-loss → reload 由真实 Web journey 证明。
+
+旧 token-to-browser 与 CLI bearer 仍只是 Node 0–5 的过渡基线，本次不把它们扩展成长期产品合同。云端 Identity、成员准入与恢复、Machine 操作链路和私人回复终态已经提升为正式 Nodes 6–10；每个 Node 重新从当前用户旅程、至少五个一手外部比较与 Loop 只读考古推导，不能把审计 finding 当成实现模板。
+
+## 14. Node 6：Cloud Identity and first Space
+
+### 用户结果
+
+用户可以在官方云端通过 Google、GitHub 或邮箱一次性验证码建立稳定 Carry User，并显式创建一个 Space 成为首位管理成员。自托管部署至少配置 SMTP 或 OIDC/OAuth，并保持相同的 User、Browser Session 与 Space authority；完全离线 Passkey 后置。
+
+Google、GitHub 和 email 是 concrete authentication methods，不是 Carry User。外部 identity 不能直接创建现有 Space Membership；相同邮箱不静默合并不同方法或既有 User。公开注册后的 Space 创建必须由用户明确发生，不自动制造默认 Space。
+
+### 关闭证据
+
+- 三种首发方法都完成真实 Browser journey，并在 repeat login 下解析到准确稳定 User；
+- provider subject、邮箱验证、login transaction、Browser Session 和 Space creation 都有准确 owner、expiry、replay 与并发证据；
+- 相同邮箱 collision fail closed 并进入明确 linking path，不自动 merge；
+- logout、stale cookie、provider outage 和 self-hosted auth misconfiguration 有直接失败证据；
+- 旧 bootstrap/member bearer 不再是正常 human login truth。
+
+### 明确不做
+
+成员邀请、method linking/recovery、CLI credential、Passkey、Apple、Microsoft、企业 SSO、domain auto-join 或 broker Organization authority。
+
+## 15. Node 7：Member admission
+
+### 用户结果
+
+管理成员可以从 Settings → Members 邀请准确邮箱；受邀者认证并验证该邮箱后，看到 Space、邀请人与权限，明确接受后加入现有 Space。
+
+### 关闭证据
+
+- `can_manage_members` 是窄 authority，不建立角色 framework；
+- invitation expiry、revoke、resend、wrong-email、already-member、single winner 与 response-loss replay 由 PostgreSQL 裁决；
+- 第一位新 User 与既有 User 都能接受；
+- Space manager 不能恢复、登录或冒充另一成员，也不能读取其私人 Conversation。
+
+## 16. Node 8：Identity recovery and CLI access
+
+### 用户结果
+
+成员可以在已登录状态下明确关联另一种首发认证方法，并通过浏览器批准准确 `carry login` installation；丢失一种方法或 CLI credential 后可以安全替换而不恢复旧 secret。
+
+### 关闭证据
+
+- 当前方法与新方法都经过 fresh proof，provider identity collision 不 merge User；
+- 至少一种可用方法保留，revoke 后旧 Browser Session/CLI credential 立即失效；
+- CLI approval 显示准确 server/device context，poll secret 与 final credential secret 分离；
+- exact approval、redeem、response loss 与 concurrent replay 收敛；
+- provider token、Browser Session、CLI credential 与 Machine certificate 不混用。
+
+## 17. Node 9：Machine connection and recovery
+
+### 用户结果
+
+成员运行 `carry host connect`，在 Browser 中检查准确 public key、Space 与显示名后批准这台 Machine；之后可以 list、远程 revoke、本地 cleanup 并重新连接一台新 Machine。
+
+Node 进入时优先重新研究 Multica 的当前 daemon/runtimes 操作链路，并与 GitHub Actions runner、Tailscale device、OpenHands runtime 和至少两个相关一手实现比较。只吸收清楚的产品旅程、确认与恢复优点；不复制 Multica 的 package tree、schema、heartbeat、online/offline、last-seen、Runtime/provider/version 或 capacity projection。
+
+### 关闭证据
+
+- Browser approval 准确绑定 public key、Space、display name 与 approving member；
+- Machine certificate 独立于 member/CLI credential；
+- list 只展示持久 inventory facts；
+- remote revoke 只承诺服务端 certificate authority 已撤销，不声称远端文件已删除；
+- local cleanup、response loss、stale credential rejection 和 fresh re-enrollment 有直接证据。
+
+## 18. Node 10：Private reply failure
+
+### 用户结果
+
+私人回复无法形成时，准确成员在原消息旁看到 Failed 或 Unknown，并可以明确 `Try again`；失败不会伪装成 Carry transcript 消息或 Needs You Work。
+
+### 关闭证据
+
+- 成员能区分仍可恢复、明确 Failed 与无法确认 outcome 的私人回复；
+- 自动恢复有明确上限，旧 claim/worker 不能晚到提交；
+- `Try again` 幂等，新 member message 不与旧失败恢复竞争；
+- 失败不伪装成 Carry 消息，也不进入共享 Work 或 Needs You；
+- 持久字段、expiry 推进者和 recovery transaction 只在 Node 10 操作链路研究与合同冻结后确定。
+
+## 19. Node 11：Responsibility authority
 
 ### 用户结果
 
@@ -220,7 +306,7 @@ Needs You 当前只包含两类 Work：准确当前结果等待 owner 检查；�
 - Pause/Close fence 旧 Run；
 - Reopen 不复活旧 authority。
 
-## 15. Node 7：Future continuation
+## 20. Node 12：Future continuation
 
 ### 用户结果
 
@@ -235,7 +321,7 @@ Needs You 当前只包含两类 Work：准确当前结果等待 owner 检查；�
 - Pause/Close fence 旧条件；
 - 不依赖原生 Agent Session。
 
-## 16. Node 8：First connected conversation
+## 21. Node 13：First connected conversation
 
 ### 用户结果
 
@@ -243,7 +329,7 @@ Needs You 当前只包含两类 Work：准确当前结果等待 owner 检查；�
 
 从第一条真实 provider journey 推导最小 native identity、target binding 和 outbound outcome。不要预建通用 Connector registry、InboundMessage、Event branch 或第二 provider framework。
 
-## 17. Node 9：Second channel parity
+## 22. Node 14：Second channel parity
 
 ### 用户结果
 
@@ -251,7 +337,7 @@ Needs You 当前只包含两类 Work：准确当前结果等待 owner 检查；�
 
 只有两个 concrete adapters 已经存在后，才提升它们真正共享的 delivery semantics；不统一 native payload 或 rich content。
 
-## 18. Node 10：First third-party capability
+## 23. Node 15：First third-party capability
 
 ### 用户结果
 
@@ -259,7 +345,7 @@ Pi 与 Codex 可以安全使用同一份固定只读能力。
 
 节点进入时只选择一个真实 fixture 和一种 transport。没有长期 bytes 前不建 Artifact；没有独立安装 lifecycle 前不建 Plugin owner；没有 credential-bearing invocation 前不建 broker 或 tool registry。
 
-## 19. Node 11：First external Action
+## 24. Node 16：First external Action
 
 ### 用户结果
 
@@ -267,7 +353,7 @@ Carry 提出一个准确外部写操作，由正确成员批准，唯一 worker 
 
 Action identity 必须由独立授权与后果 lifecycle 赚得。只实现一个 typed command，不建立 generic command JSON、universal approval engine 或 provider registry。
 
-## 20. Node 12：V1 closure
+## 25. Node 17：V1 closure
 
 ### 用户结果
 
@@ -283,7 +369,7 @@ Action identity 必须由独立授权与后果 lifecycle 赚得。只实现一�
 - 删除 stale experiment、script、dependency、generated artifact 和本文件；
 - 全仓三门 review，无 blocker。
 
-## 21. 条件 promotion
+## 26. 条件 promotion
 
 以下不占固定 Node，也不预建 owner：
 
@@ -295,7 +381,7 @@ Action identity 必须由独立授权与后果 lifecycle 赚得。只实现一�
 
 每次 promotion 都重新走研究、概念准入、Node contract 和关闭证据。
 
-## 22. Node 关闭记录
+## 27. Node 关闭记录
 
 关闭记录只进入 PR/Issue：
 

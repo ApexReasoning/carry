@@ -2,11 +2,15 @@ package host
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -29,6 +33,61 @@ func TestParseServerURLRequiresHTTPSRoot(t *testing.T) {
 		if _, err := parseServerURL(invalid); err == nil {
 			t.Errorf("invalid URL %q accepted", invalid)
 		}
+	}
+}
+
+func TestMachineHTTPClassifiesOnlyTemporaryFailuresForWorkerRetry(t *testing.T) {
+	t.Parallel()
+
+	request, err := newJSONRequest(context.Background(), http.MethodPost, "https://carry.example.com/v1/host/runs/claim", struct{}{})
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	for name, transport := range map[string]http.RoundTripper{
+		"network operation": roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return nil, &net.OpError{Op: "read", Net: "tcp", Err: syscall.ECONNRESET}
+		}),
+		"request timeout": roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return nil, context.DeadlineExceeded
+		}),
+		"server": roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return jsonResponse(http.StatusServiceUnavailable, `{"error":"temporarily unavailable"}`), nil
+		}),
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := sendJSON(&http.Client{Transport: transport}, request.Clone(context.Background()), nil)
+			if !errors.Is(err, hostdomain.ErrControlPlaneUnavailable) {
+				t.Fatalf("temporary error = %v", err)
+			}
+		})
+	}
+	forbidden := roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return jsonResponse(http.StatusForbidden, `{"error":"Machine is revoked"}`), nil
+	})
+	if err := sendJSON(&http.Client{Transport: forbidden}, request.Clone(context.Background()), nil); err == nil ||
+		errors.Is(err, hostdomain.ErrControlPlaneUnavailable) {
+		t.Fatalf("authority error = %v", err)
+	}
+	for name, transport := range map[string]http.RoundTripper{
+		"invalid certificate": roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return nil, &tls.CertificateVerificationError{Err: x509.CertificateInvalidError{Reason: x509.Expired}}
+		}),
+		"peer TLS rejection": roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return nil, tls.AlertError(42)
+		}),
+		"wrong TLS protocol": roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return nil, tls.RecordHeaderError{Msg: "server gave HTTP response to HTTPS client"}
+		}),
+		"unknown protocol failure": roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return nil, errors.New("unclassified transport protocol failure")
+		}),
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := sendJSON(&http.Client{Transport: transport}, request.Clone(context.Background()), nil)
+			if err == nil || errors.Is(err, hostdomain.ErrControlPlaneUnavailable) {
+				t.Fatalf("terminal TLS error = %v", err)
+			}
+		})
 	}
 }
 
