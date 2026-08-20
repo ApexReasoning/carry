@@ -138,43 +138,30 @@ M4 V1 closure       Node 12
 
 Node 不是 package 或 migration 批次，而是用户结果。默认一到三个工作日；第三天仍不能关闭时应删减或拆分。
 
-## 7. 已完成切割：Node 5 — 结果检查与 Needs You
+## 7. 当前关闭切割：Node 10 isolated read-only capability
 
-M1、进入前 polish 与 Node 5 已关闭。当前停止在 Node 5，等待明确决定后才进入 Node 6。Node 5 让当前 Work owner 检查 Carry 的重要阶段结果，并通过个人 Needs You 查询只看到必须由自己处理的 Work。
+M1、进入前 correction、Node 5 与 Node 10 实现已完成；当前只关闭 Node 10，不自动进入 Node 6。Node 10 从独立基线开发并在 Node 5 后集成，不实现或暗示 Nodes 6–9 已完成，也不提前带入 Responsibility、Timer 或 channel journey。Milestone 状态仍按各 Node 自己的关闭证据计算。
 
 ### 用户结果
 
-Carry 形成一个重要阶段结果时，当前 Work owner 可以从 Needs You 打开准确当前内容并接受它。接受只确认这一阶段结果已经检查，不关闭 Work，也不自动开始下一次推进。成员需要修改时继续使用现有 Work Message。
+一个 Work 需要 operator 已授权的 Reference Catalog 时，当前 Pi 或 Codex Attempt 可以用 key 读取一段有界参考文本；成员不选择 provider、tool server、MCP、Plugin 或 transport。准确行为与边界由本文件第 18 节的 Node 10 contract 拥有。
 
-Needs You 当前只包含两类 Work：准确当前结果等待 owner 检查；或 terminal Failed/Unknown 等待 owner 决定是否 `Try again`。普通进度、未应用输入、Run/Attempt 活动、lease recovery 和自然语言 next step 不进入该查询。
+### 当前范围
 
-### 事实与 authority
-
-1. Result 仍是 Work 当前 `understanding` 与 `next_step`，不建立 Result owner、结果正文副本或历史浏览。
-2. Agent strict output 增加 `review_required` boolean。它只能解释当前输出是否是重要阶段结果，不能提供 actor、owner、version、review identity、lifecycle 或 authority。
-3. 成功 Run commit 只在 `review_required` 且本次固定 input range 覆盖事务内当前 input head 时，原子创建一条 Work-owned review fact；较旧 Run 可以正常提交其理解，但不能要求成员检查已经遗漏新输入的结果。
-4. Review fact 绑定准确 Work、内部 understanding version 与 canonical content digest。User API 不公开数值 version；opaque review identity 只与 Work detail 的当前内容一起返回。
-5. Work Message 前进 input head 后，旧 review 通过 currentness 条件立即失效，不需要破坏性改写 review history。
-6. 首次接受在一个 PostgreSQL transaction 中验证 active Membership、当前 Work owner、Open Work、exact review、current version/digest 和没有未应用输入。接受记录 actor、request idempotency 与时间，不改变 lifecycle，也不创建输入或外部授权。
-7. 准确已提交接受可以先按 actor、idempotency identity 与 request digest 恢复 response-loss replay；新接受仍要求当前 authority，revoked member 始终 fail closed。
-8. Needs You 直接查询 Work/Run/review 当前事实，不建立 Attention、NeedsYou package、表或异步索引。
+- 只增加一个不独立持久化原始 response 的 `lookup_reference(key)` 和固定 HTTPS transport；
+- 只在 Work Execute 中启用，私人 Reply 不获得该能力；
+- 不改变当前六个持久 owner、User API、schema、migration、Work/Run identity 或 commit authority；
+- Node 5 result check 与 Needs You 合同保持不变，Nodes 6–9 仍按原顺序进入。
 
 ### 关闭证据
 
-- Pi 与 Codex 都严格产生 `understanding`、`next_step` 和 `review_required`，未知字段与缺失字段失败；
-- 有更新输入时，旧 fixed-range Run 的成功提交不产生 review；
-- current review 与 Work detail 内容准确绑定，较新消息后旧接受失败；
-- owner 接受幂等且 concurrent acceptance 一个 winner，非 owner、former member 与跨 Space actor 被拒绝；
-- 接受后 Work 仍是 Open，没有自动 Run 或外部后果；
-- Needs You 只返回当前 owner 的 pending review 或 `needs_retry`，不返回普通 progress/recovery；
-- Web 完成 Needs You → 打开 Work → 接受当前阶段结果的公开旅程，并对 response loss 使用同一 identity + reload 收敛；
-- focused checks、`make check`、race、三门独立 Node-close review、普通 commit、push 与 CI 成功。
+以第 18 节列出的 adapter、transport、failure、authority、live Pi contract、三门独立 review 与完整 repository checks 为准；review 不得借 Node 10 扩张 Nodes 6–9 的范围。
 
 ### 明确不做
 
-独立 Result/Attention/Question/Decision owner，结果历史正文、accept-and-continue、reject/challenge/withdraw、CLI 交互式 review、Node 6 lifecycle/transfer、Node 7 continuation、Action/Artifact/capability、Agent credential/API、provider registry、全局 Web state/query framework或 migration rewrite。
+Node 6–9 journey、schema/API/owner 变更、Artifact、credential broker、Plugin、MCP、tool/provider registry、provider routing、migration rewrite或外部写 Action。
 
-## 8. 已完成基线：M0、M1 与 Node 5
+## 8. 已完成基线：M0、M1、Node 5 与 Node 10
 
 详细 Node 关闭记录属于 Git/PR 历史；当前稳定行为由 Product、Architecture、协议和测试定义。
 
@@ -184,6 +171,7 @@ Needs You 当前只包含两类 Work：准确当前结果等待 owner 检查；�
 - **Node 3 — Host interruption recovery:** expired Attempt 永不复活；新 Machine/Attempt 增加 fence 并取得相同 fixed Run range；旧 Machine renew/commit/finish 均失败；Failed/Unknown 只由成员幂等 `Try again` 开启 fresh Run。
 - **Node 4 — Private Conversation:** 每个 `(Space, member)` 一个私人 Conversation、一个 outstanding turn；User API 与 Agent context 有界；exact Machine claim/fence/lease 才能读 fixed context；reply-once commit 可原子创建至多一份 Work，但 Work 不保存私人 source、digest 或 transcript；Browser 只保存随机 request key并 fail-closed sign-out。
 - **Node 5 — Result review and Needs You:** Agent 只解释 `review_required`；PostgreSQL 仅为覆盖 current input head 的准确 Work 内容创建 result check；Needs You 查询当前 owner 的待检查结果或 explicit retry；幂等接受绑定 exact version/digest，不关闭 Work、不自动继续，也不产生外部 authority。
+- **Node 10 — Fixed read-only Reference Catalog:** operator 为 Host 固定 HTTPS base URL；Pi/Codex Work Execute 只接受 key 并执行一次有界 GET；原始 response 不独立持久化且不能产生 authority；私人 Reply、数据库 owner、User API 与 Work/Run identity 不变。
 
 当前基线明确不包含 native Session recovery、Agent credential/API、provider routing、Work Offer、queued private turns、retention lifecycle、Work/Conversation target union、独立 Result/Attention owner、结果历史正文或 accept-and-continue。
 
@@ -255,9 +243,30 @@ Needs You 当前只包含两类 Work：准确当前结果等待 owner 检查；�
 
 ### 用户结果
 
-Pi 与 Codex 可以安全使用同一份固定只读能力。
+一个 Work 需要 operator 已授权 Reference Catalog 时，Pi 或 Codex 可以在当前 Run/Attempt 内通过 `lookup_reference(key)` 读取一条 bounded reference text，并继续完成 Work。成员不选择 provider、tool server、MCP、Plugin 或 transport。
 
-节点进入时只选择一个真实 fixture 和一种 transport。没有长期 bytes 前不建 Artifact；没有独立安装 lifecycle 前不建 Plugin owner；没有 credential-bearing invocation 前不建 broker 或 tool registry。
+### Node contract
+
+```text
+Node: Node 10 — First third-party capability
+Transport: fixed HTTPS GET /v1/references/{url_escaped_key}
+Input: model-supplied key only
+Bounds: one GET, 64 KiB UTF-8 response, short timeout, cancellation
+Authority: existing Machine mTLS + exact Run/Attempt/fence/lease/base version
+Persistence: no independent raw response/provenance; model-derived Work understanding remains ordinary model output
+```
+
+Pi 使用 temporary concrete extension；Codex 使用其 native dynamic tool contract。两者只共享 `lookup_reference` 的产品语义和 bounded HTTP 行为，不共享 provider wire。固定 base URL 来自 operator/Host 的 `CARRY_REFERENCE_BASE_URL` 配置；生产只允许 HTTPS，测试可使用 loopback `httptest` HTTP。
+
+失败状态、redirect、oversize、invalid UTF-8、timeout、cancellation 和 unavailable service 都 fail closed；能力失败不能形成虚假 Work update。没有长期 bytes 前不建 Artifact；没有独立安装 lifecycle 前不建 Plugin owner；没有 credential-bearing invocation 前不建 broker 或 tool registry。
+
+### 关闭证据
+
+- Pi adapter contract test 与 Codex native dynamic-tool contract test 通过；
+- Host/reference conformance 证明 key escaping、固定 origin、GET-only、64 KiB、UTF-8、redirect、timeout 和 cancellation；
+- 原始 capability response 不成为独立 PostgreSQL、browser storage、持久 provider Session、日志或 provenance 事实；模型引用只形成普通可纠正 Work understanding；
+- capability failure 不产生 Work commit，stale/expired Attempt 仍被既有 fenced commit 拒绝；
+- `make check`、live Pi extension contract、`git diff --check` 和三门独立 Node-close review 通过。
 
 ## 19. Node 11：First external Action
 
