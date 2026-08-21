@@ -21,8 +21,16 @@ func (s *Store) CreateExternalLogin(
 	if command.Purpose == "" {
 		command.Purpose = identity.LoginPurpose
 	}
-	if uuid.Validate(command.TransactionID) != nil || !validExternalProvider(command.Provider) ||
-		!validIdentityProofTarget(command.Purpose, command.TargetUserID, command.InitiatingSessionID) {
+	if uuid.Validate(command.TransactionID) != nil || !validExternalProvider(command.Provider) {
+		return time.Time{}, identity.ErrExternalLoginInvalid
+	}
+	if !validIdentityProofTarget(command.Purpose, command.TargetUserID, command.InitiatingSessionID) {
+		return time.Time{}, identity.ErrExternalLoginInvalid
+	}
+	if command.InvitationID != "" && uuid.Validate(command.InvitationID) != nil {
+		return time.Time{}, identity.ErrExternalLoginInvalid
+	}
+	if command.Purpose != identity.LoginPurpose && command.InvitationID != "" {
 		return time.Time{}, identity.ErrExternalLoginInvalid
 	}
 	transaction, err := s.pool.Begin(ctx)
@@ -61,9 +69,14 @@ func (s *Store) CreateExternalLogin(
 	}
 	targetUserID, _ := nullablePostgresUUID(command.TargetUserID)
 	initiatingSessionID, _ := nullablePostgresUUID(command.InitiatingSessionID)
+	invitationID, _ := nullablePostgresUUID(command.InvitationID)
 	expiresAt, err := queries.CreateExternalLogin(ctx, dbsqlc.CreateExternalLoginParams{
-		TransactionID: command.TransactionID, Provider: command.Provider.String(),
-		Purpose: string(command.Purpose), TargetUserID: targetUserID, InitiatingSessionID: initiatingSessionID,
+		TransactionID:       command.TransactionID,
+		Provider:            command.Provider.String(),
+		Purpose:             string(command.Purpose),
+		TargetUserID:        targetUserID,
+		InitiatingSessionID: initiatingSessionID,
+		InvitationID:        invitationID,
 	})
 	if err != nil {
 		return time.Time{}, fmt.Errorf("create external login transaction: %w", err)
@@ -100,7 +113,10 @@ func (s *Store) ClaimExternalLogin(
 	if current.Provider != command.Provider.String() {
 		return identity.ExternalLoginClaim{}, identity.ErrExternalLoginInvalid
 	}
-	claim := identity.ExternalLoginClaim{Purpose: identity.ProofPurpose(current.Purpose)}
+	claim := identity.ExternalLoginClaim{
+		Purpose:      identity.ProofPurpose(current.Purpose),
+		InvitationID: uuidValue(current.InvitationID),
+	}
 	if len(current.CallbackDigest) != 0 && !bytes.Equal(current.CallbackDigest, command.CallbackDigest[:]) {
 		return claim, identity.ErrExternalLoginConflict
 	}
@@ -124,14 +140,20 @@ func (s *Store) ClaimExternalLogin(
 		if err := transaction.Commit(ctx); err != nil {
 			return claim, fmt.Errorf("commit external login replay: %w", err)
 		}
-		return identity.ExternalLoginClaim{IsReplay: true, Session: identity.BrowserSession{
-			SessionID:           session.SessionID,
-			UserID:              session.UserID,
-			ExpiresAt:           session.ExpiresAt.Time,
-			IdentityProvedAt:    session.IdentityProvedAt.Time,
-			IdentityProofMethod: identity.Method(current.Provider),
-			Purpose:             identity.ProofPurpose(current.Purpose),
-		}, Purpose: identity.ProofPurpose(current.Purpose)}, nil
+		return identity.ExternalLoginClaim{
+			IsReplay: true,
+			Session: identity.BrowserSession{
+				SessionID:           session.SessionID,
+				UserID:              session.UserID,
+				ExpiresAt:           session.ExpiresAt.Time,
+				IdentityProvedAt:    session.IdentityProvedAt.Time,
+				IdentityProofMethod: identity.Method(current.Provider),
+				Purpose:             identity.ProofPurpose(current.Purpose),
+				InvitationID:        uuidValue(current.InvitationID),
+			},
+			Purpose:      identity.ProofPurpose(current.Purpose),
+			InvitationID: uuidValue(current.InvitationID),
+		}, nil
 	case "denied":
 		return claim, identity.ErrExternalLoginDenied
 	case "rejected":
@@ -533,7 +555,9 @@ func completeExternalProofTransaction(
 	if err := transaction.Commit(ctx); err != nil {
 		return identity.BrowserSession{}, fmt.Errorf("commit external proof: %w", err)
 	}
-	return browserSession(created, purpose, identity.Method(provider.String())), nil
+	session := browserSession(created, purpose, identity.Method(provider.String()))
+	session.InvitationID = uuidValue(current.InvitationID)
+	return session, nil
 }
 
 func (s *Store) RejectExternalLogin(

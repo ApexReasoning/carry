@@ -18,6 +18,7 @@ type SpaceInvitations interface {
 	Resend(context.Context, space.ResendInvitationRequest) (space.IssuedInvitation, error)
 	ListForSpace(context.Context, string, string) ([]space.ManagedInvitation, error)
 	ListForUser(context.Context, string, string) (space.InvitationInbox, error)
+	LoadForUser(context.Context, string, string, string) (space.RecipientInvitation, error)
 	Revoke(context.Context, space.RevokeInvitationCommand) error
 	Accept(context.Context, space.AcceptInvitationCommand) (space.AcceptedInvitation, error)
 }
@@ -218,6 +219,38 @@ func (api spaceInvitationAPI) inbox(response http.ResponseWriter, request *http.
 	}{items, inbox.ReauthenticationRequired})
 }
 
+func (api spaceInvitationAPI) targeted(response http.ResponseWriter, request *http.Request) {
+	user, ok := currentUser(response, request)
+	if !ok {
+		return
+	}
+	sessionID, ok := api.browserSessionID(response, request)
+	if !ok {
+		return
+	}
+	item, err := api.invitations.LoadForUser(
+		request.Context(), chi.URLParam(request, "invitation_id"), user.UserID, sessionID,
+	)
+	if err != nil {
+		writeInvitationError(response, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, targetedInvitationWire{
+		InvitationID:             item.InvitationID,
+		SpaceID:                  item.SpaceID,
+		SpaceName:                item.SpaceName,
+		InviterDisplayName:       item.InviterDisplayName,
+		CanManageMembers:         item.CanManageMembers,
+		CanEnrollMachines:        item.CanEnrollMachines,
+		CreatedAt:                item.CreatedAt,
+		ExpiresAt:                item.ExpiresAt,
+		State:                    string(item.State),
+		AcceptResult:             item.AcceptResult,
+		CurrentMember:            item.CurrentMember,
+		ReauthenticationRequired: item.ReauthenticationRequired,
+	})
+}
+
 func (api spaceInvitationAPI) accept(response http.ResponseWriter, request *http.Request) {
 	if !api.origin.acceptsSensitivePOST(request) {
 		writeAPIError(response, http.StatusBadRequest, "request origin is invalid")
@@ -295,6 +328,20 @@ type recipientInvitationWire struct {
 	CreatedAt          time.Time `json:"created_at"`
 	ExpiresAt          time.Time `json:"expires_at"`
 }
+type targetedInvitationWire struct {
+	InvitationID             string    `json:"invitation_id"`
+	SpaceID                  string    `json:"space_id"`
+	SpaceName                string    `json:"space_name"`
+	InviterDisplayName       string    `json:"inviter_display_name"`
+	CanManageMembers         bool      `json:"can_manage_members"`
+	CanEnrollMachines        bool      `json:"can_enroll_machines"`
+	CreatedAt                time.Time `json:"created_at"`
+	ExpiresAt                time.Time `json:"expires_at"`
+	State                    string    `json:"state"`
+	AcceptResult             string    `json:"accept_result"`
+	CurrentMember            bool      `json:"current_member"`
+	ReauthenticationRequired bool      `json:"reauthentication_required"`
+}
 type acceptedInvitationWire struct {
 	InvitationID      string `json:"invitation_id"`
 	SpaceID           string `json:"space_id"`
@@ -340,7 +387,13 @@ func writeInvitationError(response http.ResponseWriter, err error) {
 	case errors.Is(err, space.ErrInvitationResendCooldown):
 		writeAPIError(response, http.StatusTooManyRequests, err.Error())
 	case errors.Is(err, space.ErrInvitationUnavailable):
-		writeAPIError(response, http.StatusNotFound, "invitation is unavailable")
+		writeAPIError(response, http.StatusNotFound, "Space invitation is unavailable")
+	case errors.Is(err, space.ErrInvitationExpired):
+		writeAPIError(response, http.StatusGone, "Space invitation has expired")
+	case errors.Is(err, space.ErrInvitationRevoked):
+		writeAPIError(response, http.StatusGone, "Space invitation was revoked")
+	case errors.Is(err, space.ErrInvitationAccepted):
+		writeAPIError(response, http.StatusConflict, "Space invitation was already accepted")
 	case errors.Is(err, space.ErrInvitationConflict), errors.Is(err, space.ErrInvitationAlreadyMember), errors.Is(err, space.ErrIdempotencyConflict), errors.Is(err, space.ErrInvitationSubmissionConflict):
 		writeAPIError(response, http.StatusConflict, "invitation cannot be changed")
 	default:

@@ -363,44 +363,95 @@ test("Unicode Space URLs remain explicit and invitation entry bypasses the choos
   expect(await page.locator("main.center-state").innerText()).toBe(unknownCopy);
 
   const recipientEmail = derivedEmail(loginEmail, "invited-member");
-  const invitationStatus = await page.evaluate(async (recipient) => {
-    const current = (await fetch("/v1/me").then((response) =>
-      response.json(),
-    )) as { spaces: Array<{ space_id: string }> };
-    const response = await fetch(
-      `/v1/spaces/${current.spaces[0].space_id}/invitations`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Idempotency-Key": crypto.randomUUID(),
-        },
-        body: JSON.stringify({
-          email: recipient,
-          can_manage_members: false,
-          can_enroll_machines: false,
-        }),
-      },
-    );
-    return { status: response.status, body: await response.text() };
-  }, recipientEmail);
-  expect(invitationStatus).toEqual({ status: 201, body: expect.any(String) });
+  await page.goto(`/s/${encodeURIComponent(maximumName)}`);
+  await page.getByRole("button", { name: "Settings" }).click();
+  await page.getByRole("button", { name: "Members" }).click();
+  await page.getByLabel("Invite one exact Email").fill(recipientEmail);
+  await page.getByRole("button", { name: "Create invitation" }).click();
+  const invitationRow = page
+    .getByRole("listitem")
+    .filter({ has: page.getByText(recipientEmail, { exact: true }) });
+  const invitationLink = invitationRow.getByRole("link");
+  const invitationHref = await invitationLink.getAttribute("href");
+  expect(invitationHref).toMatch(/^\/invitations\/[0-9a-f-]{36}$/);
+  const exactPath = invitationHref as string;
+  const invitationID = exactPath.split("/").at(-1) as string;
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"], {
+    origin,
+  });
+  await invitationRow.getByRole("button", { name: "Copy link" }).click();
+  await expect(invitationRow.getByText("Link copied")).toBeVisible();
 
   const invitedContext = await browser.newContext({ ignoreHTTPSErrors: true });
   const invitedPage = await invitedContext.newPage();
-  await invitedPage.goto(`${origin}/`);
-  await signInWithEmail(invitedPage, emailCaptureFile, recipientEmail);
+  await invitedPage.goto(`${origin}${exactPath}`);
   await expect(
-    invitedPage.getByRole("heading", { name: "Space invitations" }),
+    invitedPage.getByRole("heading", {
+      name: "Sign in to review this invitation",
+    }),
+  ).toBeVisible();
+  await expect(invitedPage.getByText(maximumName)).toHaveCount(0);
+  await expect(invitedPage.locator('meta[name="referrer"]')).toHaveAttribute(
+    "content",
+    "no-referrer",
+  );
+  await signInWithEmail(invitedPage, emailCaptureFile, recipientEmail);
+  await expect(invitedPage).toHaveURL(new RegExp(`${exactPath}$`));
+  await expect(
+    invitedPage.getByRole("heading", { name: "Space invitation" }),
   ).toBeVisible();
   await expect(invitedPage.getByLabel("Your name")).toHaveCount(0);
+  await invitedPage.route(
+    `**/v1/invitations/${invitationID}/accept`,
+    async (route) => {
+      const response = await route.fetch();
+      expect(response.status()).toBe(200);
+      await route.abort("failed");
+    },
+    { times: 1 },
+  );
   await invitedPage.getByRole("button", { name: "Accept and join" }).click();
+  await expect(
+    invitedPage.getByText(/cannot confirm whether acceptance completed/),
+  ).toBeVisible();
+  await invitedPage
+    .getByRole("button", { name: "Reload invitation status" })
+    .click();
+  await expect(
+    invitedPage.getByText("This invitation was accepted and joined the Space."),
+  ).toBeVisible();
+  await expect(
+    invitedPage.getByText("Your Membership is current."),
+  ).toBeVisible();
+  await expect(
+    invitedPage.getByRole("button", { name: "Accept and join" }),
+  ).toHaveCount(0);
+  await invitedPage.getByRole("button", { name: "Not now" }).click();
   await expect(
     invitedPage.getByRole("heading", { name: "Choose a Space" }),
   ).toBeVisible();
   await expect(
     invitedPage.getByRole("link", { name: new RegExp(maximumName) }),
   ).toBeVisible();
+
+  await invitedPage.goto(`${origin}${exactPath}`);
+  await expect(
+    invitedPage.getByText("This invitation was accepted and joined the Space."),
+  ).toBeVisible();
+
+  const wrongContext = await browser.newContext({ ignoreHTTPSErrors: true });
+  const wrongPage = await wrongContext.newPage();
+  await wrongPage.goto(`${origin}${exactPath}`);
+  await signInWithEmail(
+    wrongPage,
+    emailCaptureFile,
+    derivedEmail(loginEmail, "wrong-invitation-owner"),
+  );
+  await expect(
+    wrongPage.getByText("This Carry User cannot review this invitation."),
+  ).toBeVisible();
+  await expect(wrongPage.getByText(maximumName)).toHaveCount(0);
+  await wrongContext.close();
   await invitedContext.close();
 });
 

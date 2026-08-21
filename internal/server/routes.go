@@ -133,6 +133,7 @@ func (routes *UserSpaceRoutes) mount(router chi.Router) {
 	}
 	router.Get("/invitations", routes.invitations.inbox)
 	router.Post("/invitations/{invitation_id}/accept", routes.invitations.accept)
+	router.Get("/invitations/{invitation_id}", routes.invitations.targeted)
 	router.Get("/spaces/{space_id}/members", routes.invitations.listMembers)
 	router.Post("/spaces/{space_id}/members/{user_id}/remove", routes.invitations.removeMember)
 	router.Get("/spaces/{space_id}/invitations", routes.invitations.listManaged)

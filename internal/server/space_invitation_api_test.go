@@ -43,9 +43,17 @@ func TestInvitationRoutesRequireBrowserOriginAndNeverMutateOnGET(t *testing.T) {
 		return req
 	}
 
+	unauthenticated := httptest.NewRequest(http.MethodGet, "https://carry.example/v1/invitations/40000000-0000-4000-8000-000000000001", nil)
+	unauthenticated.Host = "carry.example"
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, unauthenticated)
+	if response.Code != http.StatusUnauthorized || behavior.loads != 0 {
+		t.Fatalf("pre-auth preview = %d, loads = %d", response.Code, behavior.loads)
+	}
+
 	missingOrigin := request(http.MethodPost, "/v1/spaces/20000000-0000-0000-0000-000000000001/invitations")
 	missingOrigin.Header.Set("Idempotency-Key", "issue")
-	response := httptest.NewRecorder()
+	response = httptest.NewRecorder()
 	handler.ServeHTTP(response, missingOrigin)
 	if response.Code != http.StatusBadRequest || response.Header().Get("Cache-Control") != "no-store" || behavior.issues != 0 {
 		t.Fatalf("missing Origin = %d, issues = %d", response.Code, behavior.issues)
@@ -72,6 +80,68 @@ func TestInvitationRoutesRequireBrowserOriginAndNeverMutateOnGET(t *testing.T) {
 	handler.ServeHTTP(response, machine)
 	if response.Code != http.StatusUnauthorized {
 		t.Fatalf("Machine status = %d", response.Code)
+	}
+
+	behavior.loadError = space.ErrInvitationUnavailable
+	unavailable := request(http.MethodGet, "/v1/invitations/40000000-0000-4000-8000-000000000001")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, unavailable)
+	if response.Code != http.StatusNotFound || response.Body.String() != "{\"error\":\"Space invitation is unavailable\"}\n" {
+		t.Fatalf("uniform unavailable = %d %q", response.Code, response.Body.String())
+	}
+	behavior.loadError = nil
+	behavior.loaded = space.RecipientInvitation{
+		InvitationID:       "40000000-0000-4000-8000-000000000001",
+		SpaceID:            "20000000-0000-0000-0000-000000000001",
+		SpaceName:          "Research",
+		InviterDisplayName: "Manager",
+		State:              space.InvitationPending,
+	}
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, unavailable)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"state":"pending"`) {
+		t.Fatalf("owner projection = %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestInvitationTerminalErrorsHaveExactRecoveryMappings(t *testing.T) {
+	t.Parallel()
+	for name, test := range map[string]struct {
+		err     error
+		status  int
+		message string
+	}{
+		"expired": {
+			err:     space.ErrInvitationExpired,
+			status:  http.StatusGone,
+			message: "Space invitation has expired",
+		},
+		"revoked": {
+			err:     space.ErrInvitationRevoked,
+			status:  http.StatusGone,
+			message: "Space invitation was revoked",
+		},
+		"accepted": {
+			err:     space.ErrInvitationAccepted,
+			status:  http.StatusConflict,
+			message: "Space invitation was already accepted",
+		},
+		"unavailable": {
+			err:     space.ErrInvitationUnavailable,
+			status:  http.StatusNotFound,
+			message: "Space invitation is unavailable",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			writeInvitationError(response, test.err)
+			if response.Code != test.status {
+				t.Fatalf("status = %d, want %d", response.Code, test.status)
+			}
+			if response.Body.String() != "{\"error\":\""+test.message+"\"}\n" {
+				t.Fatalf("body = %q", response.Body.String())
+			}
+		})
 	}
 }
 
@@ -161,6 +231,9 @@ type invitationBehaviorStub struct {
 	removals       int
 	removalCommand space.RemoveMemberCommand
 	removalError   error
+	loaded         space.RecipientInvitation
+	loadError      error
+	loads          int
 }
 
 func (stub *invitationBehaviorStub) Issue(context.Context, space.IssueInvitationRequest) (space.IssuedInvitation, error) {
@@ -183,6 +256,10 @@ func (*invitationBehaviorStub) ListForSpace(context.Context, string, string) ([]
 }
 func (*invitationBehaviorStub) ListForUser(context.Context, string, string) (space.InvitationInbox, error) {
 	return space.InvitationInbox{}, nil
+}
+func (stub *invitationBehaviorStub) LoadForUser(context.Context, string, string, string) (space.RecipientInvitation, error) {
+	stub.loads++
+	return stub.loaded, stub.loadError
 }
 func (*invitationBehaviorStub) Revoke(context.Context, space.RevokeInvitationCommand) error {
 	return nil

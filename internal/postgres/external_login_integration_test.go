@@ -13,6 +13,79 @@ import (
 	"github.com/google/uuid"
 )
 
+func TestExternalLoginPersistsOpaqueInvitationContinuationAcrossOutcomeAndReplay(t *testing.T) {
+	ctx := context.Background()
+	pool := openMigratedTestPool(t, ctx)
+	store := NewStore(pool)
+	invitationID := uuid.NewString()
+	transactionID := uuid.NewString()
+	if _, err := store.CreateExternalLogin(ctx, identity.CreateExternalLoginCommand{
+		TransactionID: transactionID,
+		Provider:      identity.GitHubLoginProvider,
+		Purpose:       identity.LoginPurpose,
+		InvitationID:  invitationID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	digest := testEmailCredentials(t).RequestDigest("external-login-callback", "invitation-success")
+	claim, err := store.ClaimExternalLogin(ctx, identity.ClaimExternalLoginCommand{
+		TransactionID:  transactionID,
+		Provider:       identity.GitHubLoginProvider,
+		CallbackDigest: digest,
+		Outcome:        identity.ExternalCallbackCode,
+	})
+	if err != nil || claim.InvitationID != invitationID {
+		t.Fatalf("claim continuation = %#v, %v", claim, err)
+	}
+	completed, err := store.CompleteGitHubLogin(ctx, identity.CompleteGitHubLoginCommand{
+		TransactionID:  transactionID,
+		CallbackDigest: digest,
+		GitHubUserID:   140001,
+		SessionID:      uuid.NewString(),
+	})
+	if err != nil || completed.InvitationID != invitationID {
+		t.Fatalf("completion continuation = %#v, %v", completed, err)
+	}
+	replayed, err := store.ClaimExternalLogin(ctx, identity.ClaimExternalLoginCommand{
+		TransactionID:  transactionID,
+		Provider:       identity.GitHubLoginProvider,
+		CallbackDigest: digest,
+		Outcome:        identity.ExternalCallbackCode,
+	})
+	if err != nil {
+		t.Fatalf("replay continuation: %v", err)
+	}
+	if !replayed.IsReplay {
+		t.Fatalf("replay claim = %#v", replayed)
+	}
+	if replayed.InvitationID != invitationID {
+		t.Fatalf("replay continuation = %#v", replayed)
+	}
+	if replayed.Session.InvitationID != invitationID {
+		t.Fatalf("replay Session continuation = %#v", replayed)
+	}
+
+	deniedID := uuid.NewString()
+	if _, err := store.CreateExternalLogin(ctx, identity.CreateExternalLoginCommand{
+		TransactionID: deniedID,
+		Provider:      identity.GoogleLoginProvider,
+		Purpose:       identity.LoginPurpose,
+		InvitationID:  invitationID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	deniedDigest := testEmailCredentials(t).RequestDigest("external-login-callback", "invitation-denied")
+	denied, err := store.ClaimExternalLogin(ctx, identity.ClaimExternalLoginCommand{
+		TransactionID:  deniedID,
+		Provider:       identity.GoogleLoginProvider,
+		CallbackDigest: deniedDigest,
+		Outcome:        identity.ExternalCallbackDenied,
+	})
+	if !errors.Is(err, identity.ErrExternalLoginDenied) || denied.InvitationID != invitationID {
+		t.Fatalf("denied continuation = %#v, %v", denied, err)
+	}
+}
+
 func TestExternalLoginExactReplayReturnsSameActiveBrowserSession(t *testing.T) {
 	ctx := context.Background()
 	pool := openMigratedTestPool(t, ctx)

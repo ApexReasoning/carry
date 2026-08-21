@@ -5,7 +5,10 @@ import { CliCredentialSettings } from "./features/user-session/cli-credential-se
 import { CliLoginPage } from "./features/user-session/cli-login";
 import { SpaceEntry } from "./features/spaces/space-entry";
 import { IdentityMethodSettings } from "./features/user-session/identity-methods";
-import { InvitationInboxView } from "./features/user-session/invitation-inbox";
+import {
+  InvitationInboxView,
+  TargetedInvitationView,
+} from "./features/user-session/invitation-inbox";
 import { MemberSettings } from "./features/user-session/member-settings";
 import { MachineConnectPage } from "./features/user-session/machine-connect";
 import { MachineSettings } from "./features/user-session/machine-settings";
@@ -89,6 +92,7 @@ export function App() {
         email={session.email}
         busy={busy}
         error={session.error}
+        invitationID={session.invitationID}
         canRetryCodeRequest={session.canRetryCodeRequest}
         onSendCode={session.sendCode}
         onRetryCodeRequest={session.retryCodeRequest}
@@ -101,10 +105,18 @@ export function App() {
   if (session.phase === "invitations" && session.user && session.inbox) {
     return (
       <InvitationInboxView
-        user={session.user}
         initialInbox={session.inbox}
-        onChanged={session.refresh}
         onSkip={session.skipInvitations}
+      />
+    );
+  }
+  if (session.phase === "invitation" && session.user) {
+    return (
+      <TargetedInvitationView
+        state={session.targetedInvitation}
+        onReload={session.refresh}
+        onSkip={session.skipInvitations}
+        onSignOut={() => void session.signOut()}
       />
     );
   }

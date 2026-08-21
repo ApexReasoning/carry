@@ -48,6 +48,9 @@ export function MemberSettings({
   const [members, setMembers] = useState<Array<SpaceMember>>([]);
   const [nextMemberCursor, setNextMemberCursor] = useState<string | null>(null);
   const [pending, setPending] = useState<Array<ManagedInvitation>>([]);
+  const [copiedInvitationID, setCopiedInvitationID] = useState<string | null>(
+    null,
+  );
   const [email, setEmail] = useState("");
   const [grantManage, setGrantManage] = useState(false);
   const [grantEnroll, setGrantEnroll] = useState(false);
@@ -205,6 +208,16 @@ export function MemberSettings({
       setError(message(caught));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function copyInvitation(item: ManagedInvitation) {
+    setError(null);
+    try {
+      await navigator.clipboard.writeText(invitationURL(item.invitation_id));
+      setCopiedInvitationID(item.invitation_id);
+    } catch (caught) {
+      setError(message(caught));
     }
   }
 
@@ -393,7 +406,7 @@ export function MemberSettings({
                 disabled={!canEnroll}
                 onChange={(event) => setGrantEnroll(event.target.checked)}
               />{" "}
-              Can enroll Machines
+              Can connect Hosts
             </label>
             <button className="primary-button" disabled={busy || !email.trim()}>
               Create invitation
@@ -427,8 +440,22 @@ export function MemberSettings({
                     {grants(item.can_manage_members, item.can_enroll_machines)}
                   </span>
                   <span>{submissionCopy(item.submission.state)}</span>
+                  <a href={invitationPath(item.invitation_id)}>
+                    {invitationURL(item.invitation_id)}
+                  </a>
+                  {copiedInvitationID === item.invitation_id ? (
+                    <span>Link copied</span>
+                  ) : null}
                 </div>
                 <div className="identity-method-actions">
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void copyInvitation(item)}
+                  >
+                    Copy link
+                  </button>
                   <button
                     className="secondary-button"
                     type="button"
@@ -459,10 +486,19 @@ export function MemberSettings({
   );
 }
 
+function invitationPath(invitationID: string) {
+  return `/invitations/${encodeURIComponent(invitationID)}`;
+}
+function invitationURL(invitationID: string) {
+  return new URL(
+    invitationPath(invitationID),
+    window.location.origin,
+  ).toString();
+}
 function grants(manage: boolean, enroll: boolean) {
   return [
     manage ? "Can manage members" : "Cannot manage members",
-    enroll ? "Can enroll Machines" : "Cannot enroll Machines",
+    enroll ? "Can connect Hosts" : "Cannot connect Hosts",
   ].join(" · ");
 }
 function submissionCopy(state: ManagedInvitation["submission"]["state"]) {

@@ -119,6 +119,21 @@ export const zRecipientInvitation = z.object({
   expires_at: z.iso.datetime({ offset: true }),
 });
 
+export const zTargetedInvitation = z.object({
+  invitation_id: z.uuid(),
+  space_id: z.uuid(),
+  space_name: z.string(),
+  inviter_display_name: z.string(),
+  can_manage_members: z.boolean(),
+  can_enroll_machines: z.boolean(),
+  created_at: z.iso.datetime({ offset: true }),
+  expires_at: z.iso.datetime({ offset: true }),
+  state: z.enum(["pending", "accepted", "revoked", "expired"]),
+  accept_result: z.enum(["", "joined", "already_member"]),
+  current_member: z.boolean(),
+  reauthentication_required: z.boolean(),
+});
+
 export const zInvitationInbox = z.object({
   invitations: z.array(zRecipientInvitation).max(50),
   reauthentication_required: z.boolean(),
@@ -406,10 +421,18 @@ export const zVerifyEmailCodePath = z.object({
  */
 export const zVerifyEmailCodeResponse = z.void();
 
+export const zStartGoogleLoginBody = z.object({
+  invitation_id: z.uuid().optional(),
+});
+
 export const zCompleteGoogleLoginQuery = z.object({
   state: z.string().min(1).max(255),
   code: z.string().min(1).max(4096).optional(),
   error: z.string().min(1).max(255).optional(),
+});
+
+export const zStartGitHubLoginBody = z.object({
+  invitation_id: z.uuid().optional(),
 });
 
 export const zCompleteGitHubLoginQuery = z.object({
@@ -858,6 +881,15 @@ export const zRevokeSpaceInvitationResponse = z.void();
  * Invitations for the current User's exact Email method
  */
 export const zListInvitationInboxResponse = zInvitationInbox;
+
+export const zLoadInvitationPath = z.object({
+  invitationID: z.uuid(),
+});
+
+/**
+ * Owner-only invitation review or terminal truth
+ */
+export const zLoadInvitationResponse = zTargetedInvitation;
 
 export const zAcceptSpaceInvitationHeaders = z.object({
   "Idempotency-Key": z.string().min(1).max(255),

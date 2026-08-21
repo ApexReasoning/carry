@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/ApexReasoning/carry/internal/identity"
+	"github.com/ApexReasoning/carry/internal/space"
+	"github.com/google/uuid"
 )
 
 const externalLoginCookie = "__Host-carry_oauth"
@@ -39,10 +41,6 @@ func (origin ExternalOrigin) String() string {
 
 func (origin ExternalOrigin) CallbackURL(provider identity.ExternalLoginProvider) string {
 	return origin.value + "/v1/auth/" + provider.String() + "/callback"
-}
-
-func (origin ExternalOrigin) InvitationsURL() string {
-	return origin.value + "/invitations"
 }
 
 func (origin ExternalOrigin) matches(request *http.Request) bool {
@@ -88,8 +86,8 @@ func (origin ExternalOrigin) acceptsSensitivePOST(request *http.Request) bool {
 
 // ExternalLogin is the Identity provider-login behavior consumed by HTTP.
 type ExternalLogin interface {
-	StartGoogle(context.Context) (identity.ExternalLoginStart, error)
-	StartGitHub(context.Context) (identity.ExternalLoginStart, error)
+	StartGoogle(context.Context, string) (identity.ExternalLoginStart, error)
+	StartGitHub(context.Context, string) (identity.ExternalLoginStart, error)
 	StartGoogleReauthentication(context.Context, string, string) (identity.ExternalLoginStart, error)
 	StartGitHubReauthentication(context.Context, string, string) (identity.ExternalLoginStart, error)
 	StartGoogleLink(context.Context, string, string) (identity.ExternalLoginStart, error)
@@ -132,7 +130,7 @@ func (api externalLoginAPI) startGitHubLink(response http.ResponseWriter, reques
 func (api externalLoginAPI) start(
 	response http.ResponseWriter,
 	request *http.Request,
-	start func(context.Context) (identity.ExternalLoginStart, error),
+	start func(context.Context, string) (identity.ExternalLoginStart, error),
 ) {
 	response.Header().Set("Referrer-Policy", "no-referrer")
 	if !api.origin.matches(request) {
@@ -148,7 +146,12 @@ func (api externalLoginAPI) start(
 		writeAPIError(response, http.StatusConflict, "sign out before using another sign-in method")
 		return
 	}
-	result, err := start(request.Context())
+	invitationID := request.PostFormValue("invitation_id")
+	if invitationID != "" && uuid.Validate(invitationID) != nil {
+		writeAPIError(response, http.StatusBadRequest, "invitation continuation is invalid")
+		return
+	}
+	result, err := start(request.Context(), invitationID)
 	if err != nil {
 		writeAPIError(response, http.StatusServiceUnavailable, "start external sign-in")
 		return
@@ -238,6 +241,10 @@ func (api externalLoginAPI) callback(
 			http.Redirect(response, request, api.origin.identityURL(session.Purpose), http.StatusSeeOther)
 			return
 		}
+		if destination := api.invitationURL(session.InvitationID, ""); destination != "" {
+			http.Redirect(response, request, destination, http.StatusSeeOther)
+			return
+		}
 		http.Redirect(response, request, api.origin.appURL(""), http.StatusSeeOther)
 		return
 	}
@@ -251,7 +258,22 @@ func (api externalLoginAPI) callback(
 	} else if errors.Is(err, identity.ErrExternalLoginUnavailable) || errors.Is(err, identity.ErrExternalLoginConflict) {
 		status = "unavailable"
 	}
+	if destination := api.invitationURL(identity.ExternalProofFailureInvitationID(err), status); destination != "" {
+		http.Redirect(response, request, destination, http.StatusSeeOther)
+		return
+	}
 	http.Redirect(response, request, api.origin.appURL(status), http.StatusSeeOther)
+}
+
+func (api externalLoginAPI) invitationURL(invitationID, status string) string {
+	path, err := space.InvitationPath(invitationID)
+	if err != nil {
+		return ""
+	}
+	if status == "" {
+		return api.origin.value + path
+	}
+	return api.origin.value + path + "?" + url.Values{"sign_in": {status}}.Encode()
 }
 
 func parseExternalCallback(request *http.Request) (identity.ExternalLoginCallback, bool) {

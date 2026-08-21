@@ -4,7 +4,7 @@
 
 节点 0–12 是旧合同下的技术证据。旧的节点 13–19 作废，不得实施。本文件是节点 12 之后唯一的活动路线，拥有节点路线、研究程序、评审协议和证据标准。
 
-Roadmap reset 已由 Issue #1、commit `f2a10bc` 与 CI `32504005646` 关闭。当前节点是 **节点 13 — 选择或创建 Space（实现中）**；Issue #2 的研究审计与精确设计冻结已经通过，生产改动必须留在冻结预算内。
+Roadmap reset 已由 Issue #1、commit `f2a10bc` 与 CI `32504005646` 关闭；节点 13 已由 Issue #2、commit `663123b` 与 CI `32525708982` 关闭。当前节点是 **节点 14 — 邀请链接的登录与接受（实现中）**；Issue #3 的研究审计与 Revised exact design freeze v3 已通过，生产改动必须留在审计预算内。
 
 ## 1. 路线规则
 
@@ -281,21 +281,21 @@ GATE：<1 产品与直接证据 | 2 权限并发隐私与 AI-native | 3 美学�
 
 ### 节点 14 — 邀请链接的登录与接受
 
-**能力**：拿到邀请链接的人完成认证后直接看到并接受被邀请的 Space，跳过正常初始化。
+**能力**：拿到 `/invitations/{invitation_id}` 的人完成认证后，只有准确受邀 Email 的当前 owner 能看到并显式接受邀请；该 ID 本身不授权，也不在认证前披露元数据。
 
-**package 责任**：`space`（邀请的签发、两项窄 Membership 权限的不可扩大授予、一次性消费、过期、撤销）；`identity`（认证后回到邀请意图）；`server`（邀请签发/接受 transport，不拥有邀请策略）；Web 邀请签发与接受界面。
+**package 责任**：`space` 继续拥有邀请身份、收件 Email、Space、邀请人、两项授予、签发/重发/撤销/接受、终态与准确 owner 投影；`identity` 只在短期 login transaction 中携带一个语法有效、无 FK 且不解释的 invitation UUID 续接值；`postgres` 裁决终态 winner、数据库时间、重放与 Membership；`server` 只解析续接并映射到 Space-owned 准确路径；Web 保留 Email-owned 通用 inbox 作为 fallback。
 
-**删除**：无。`apps/web/app/features/user-session/invitation-inbox.tsx::InvitationInbox` 的 `user.spaces.length === 0` skip 分支已由节点 13 删除 first-Space phase 时一并改写；本节点保留现有邀请 owner 并纵向补齐跨认证/设备意图，不建立第二条初始化路径。
+**删除/替换**：删除 `Invitations.destinationURL` 与固定 `/invitations` 构造、`ExternalOrigin.InvitationsURL`、Web 把 `/invitations` 当作邮件准确入口的分支、会丢失准确意图的 history rewrites、通用 no-match/first-Space recovery 和固定通用链接断言。保留认证后的 `/invitations` inbox、email-owner list、delivery observation 与现有 Identity method 管理。
 
-**线性流程**：具有成员管理权限的成员签发链接并只能授予自己已有的管理成员/连接 Host 权限 → 收件人打开链接 → 选择登录方式并认证 → 显示邀请的 Space、邀请人和两项准确权限 → 接受 → 进入该 Space。
+**线性流程**：manager 签发并看到/复制由当前 origin 与 invitation ID 派生的准确链接 → 收件人打开链接 → 认证前只看到三种登录方式 → Email 验证留在当前页，Google/GitHub 的 login transaction 只携带 UUID → 有效成功/失败/重放回准确路径，失去 cookie/state 绑定则回 root 并要求重开链接 → 登录后 owner-only read → non-owner/unknown 统一 unavailable，恢复只取决于 viewer 自己是否已有 Email method → 准确 owner 看 pending/accepted/revoked/expired → pending 且 Email proof 不足 10 分钟时在页内证明 → 显式 Accept → 完整导航到 `/` chooser。
 
-**研究问题**：邀请意图如何在三种登录方式、跨设备和跨标签页之间安全存活到接受那一刻？**反证问题**：什么情况下邀请意图会被恢复到错误的身份，或让未受邀者获得 Space 访问？
+**事务与隐私**：`external_login_transactions.invitation_id` nullable UUID、无 FK，并约束只能用于 `purpose='login'`。Accept 在任何 Membership 写入前完成 session identity/method/revocation、准确 Email owner、邀请 identity 与终态的无时间授权；最后可能等待的 Membership insert 后只取一次 `clock_timestamp()`，同一个值校验 session/proof/expiry、写 accepted timestamp 与 SQL predicate。Revoke 在 manager 与邀请锁后同样只取一次 clock。owner/scope 成立后 expired→410、revoked→410、accepted→409；wrong User、unknown、cross-owner/cross-Space 始终统一 404。页面使用 `no-referrer`，认证前没有 preview。
 
-**权限 / 失败 / 直接证据**：只有成员管理者能签发；邀请不能授予签发者没有的权限；数据库证明一次性消费（第二次接受失败）、过期与撤销各有自己的错误；已是成员的人被直接送进 Space；错误账户接受时给出可恢复的说明；真实浏览器完成一次跨设备接受。
+**直接证据**：准确 URL 与 persisted-ID issue replay；login-only migration/no-FK；OAuth success/failure/replay/cookie binding；targeted pending/terminal/current/former owner projection与所有 non-owner 组合统一；non-owner Accept 零 Membership 后果；Accept/Revoke 两连接等待跨越 wall expiry 后拒绝；Accept-vs-Revoke 单 winner；页面内 Email proof、Unknown reload、manager copy/same resend URL、通用 inbox fallback、无 pre-auth preview/no-referrer 与 public-process 准确链接旅程。live Google/GitHub 凭据缺失只作为 residual 报告，按 Issue #3 v2 不阻断。
 
-**命令**：`go test ./internal/space/...`；`make test-db`；`pnpm --dir apps/web test`；`make check-product`。
+**命令**：`go test ./internal/space/... ./internal/identity/... ./internal/server/...`；`./scripts/test-db ./internal/postgres/...`；`./scripts/test-db ./cmd/carry-server/...`；`mise exec node@24.19.0 -- pnpm --dir apps/web test`；`mise exec node@24.19.0 -- pnpm --dir apps/web typecheck`；`mise exec node@24.19.0 -- make check`。
 
-**不做**：角色层级、任意权限矩阵、运行时 capability registry、批量邀请、域白名单、邀请人配额。
+**不做**：第二 locator/token/capability owner、FK、generic returnTo/open redirect、storage continuation、pre-auth preview、provider-profile-email authority、auto-accept、multi-email、OAuth parallel-tab redesign、角色矩阵/批量/域/配额邀请、Agent/Host/Work 改动、静态 hosting 产品或通用 router 重写。
 
 ### 节点 15 — Host 接入与持久 Agent 身份
 

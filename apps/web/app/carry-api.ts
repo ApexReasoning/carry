@@ -13,6 +13,7 @@ import {
   listCliCredentials as listCliCredentialsRequest,
   listConversationMessages as listConversationMessagesRequest,
   listInvitationInbox as listInvitationInboxRequest,
+  loadInvitation as loadInvitationRequest,
   listManagedInvitations as listManagedInvitationsRequest,
   listMachines as listMachinesRequest,
   listSpaceMembers as listSpaceMembersRequest,
@@ -53,6 +54,7 @@ import type {
   Membership,
   SpaceCreationConflict,
   SpaceMember,
+  TargetedInvitation,
   User,
   Work,
   WorkMessage,
@@ -499,6 +501,21 @@ export async function revokeInvitation(
     headers: { "Idempotency-Key": key },
   });
   requireMutationSuccess(result.response, result.error, "Revoke invitation");
+}
+
+export async function invitation(
+  invitationID: string,
+): Promise<TargetedInvitation> {
+  const result = await loadInvitationRequest({
+    ...sameOrigin,
+    path: { invitationID },
+  });
+  return requireData(
+    result.data,
+    result.response,
+    result.error,
+    "Load invitation",
+  );
 }
 
 export async function invitationInbox(): Promise<InvitationInbox> {

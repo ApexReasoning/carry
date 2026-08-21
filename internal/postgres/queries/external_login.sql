@@ -8,6 +8,7 @@ INSERT INTO external_login_transactions (
     purpose,
     target_user_id,
     initiating_session_id,
+    invitation_id,
     expires_at
 ) VALUES (
     sqlc.arg(transaction_id),
@@ -15,6 +16,7 @@ INSERT INTO external_login_transactions (
     sqlc.arg(purpose),
     sqlc.narg(target_user_id),
     sqlc.narg(initiating_session_id),
+    sqlc.narg(invitation_id),
     transaction_timestamp() + interval '10 minutes'
 )
 RETURNING expires_at;

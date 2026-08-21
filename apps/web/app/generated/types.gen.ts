@@ -116,6 +116,21 @@ export type RecipientInvitation = {
   expires_at: string;
 };
 
+export type TargetedInvitation = {
+  invitation_id: string;
+  space_id: string;
+  space_name: string;
+  inviter_display_name: string;
+  can_manage_members: boolean;
+  can_enroll_machines: boolean;
+  created_at: string;
+  expires_at: string;
+  state: "pending" | "accepted" | "revoked" | "expired";
+  accept_result: "" | "joined" | "already_member";
+  current_member: boolean;
+  reauthentication_required: boolean;
+};
+
 export type InvitationInbox = {
   invitations: Array<RecipientInvitation>;
   reauthentication_required: boolean;
@@ -727,7 +742,9 @@ export type VerifyEmailCodeResponse =
   VerifyEmailCodeResponses[keyof VerifyEmailCodeResponses];
 
 export type StartGoogleLoginData = {
-  body?: never;
+  body?: {
+    invitation_id?: string;
+  };
   path?: never;
   query?: never;
   url: "/v1/auth/google/start";
@@ -777,7 +794,9 @@ export type CompleteGoogleLoginError =
   CompleteGoogleLoginErrors[keyof CompleteGoogleLoginErrors];
 
 export type StartGitHubLoginData = {
-  body?: never;
+  body?: {
+    invitation_id?: string;
+  };
   path?: never;
   query?: never;
   url: "/v1/auth/github/start";
@@ -2203,6 +2222,10 @@ export type ResendSpaceInvitationErrors = {
   /**
    * Request rejected
    */
+  410: ApiError;
+  /**
+   * Request rejected
+   */
   429: ApiError;
 };
 
@@ -2249,6 +2272,10 @@ export type RevokeSpaceInvitationErrors = {
    * Request rejected
    */
   409: ApiError;
+  /**
+   * Request rejected
+   */
+  410: ApiError;
 };
 
 export type RevokeSpaceInvitationError =
@@ -2291,6 +2318,39 @@ export type ListInvitationInboxResponses = {
 export type ListInvitationInboxResponse =
   ListInvitationInboxResponses[keyof ListInvitationInboxResponses];
 
+export type LoadInvitationData = {
+  body?: never;
+  path: {
+    invitationID: string;
+  };
+  query?: never;
+  url: "/v1/invitations/{invitationID}";
+};
+
+export type LoadInvitationErrors = {
+  /**
+   * Request rejected
+   */
+  401: ApiError;
+  /**
+   * Request rejected
+   */
+  404: ApiError;
+};
+
+export type LoadInvitationError =
+  LoadInvitationErrors[keyof LoadInvitationErrors];
+
+export type LoadInvitationResponses = {
+  /**
+   * Owner-only invitation review or terminal truth
+   */
+  200: TargetedInvitation;
+};
+
+export type LoadInvitationResponse =
+  LoadInvitationResponses[keyof LoadInvitationResponses];
+
 export type AcceptSpaceInvitationData = {
   body?: never;
   headers: {
@@ -2320,6 +2380,10 @@ export type AcceptSpaceInvitationErrors = {
    * Request rejected
    */
   409: ApiError;
+  /**
+   * Request rejected
+   */
+  410: ApiError;
   /**
    * Request rejected
    */

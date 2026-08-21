@@ -405,6 +405,73 @@ func TestMigrateUpgradesTerminalNode2Runs(t *testing.T) {
 	}
 }
 
+func TestMigration17AddsLoginOnlyInvitationContinuationWithoutForeignKey(t *testing.T) {
+	ctx := context.Background()
+	pool := openMigratedTestPool(t, ctx)
+	if _, err := pool.Exec(ctx, `drop schema public cascade; create schema public`); err != nil {
+		t.Fatal(err)
+	}
+	connection, err := pool.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := connection.Exec(ctx, `create table carry_schema_migrations (version text primary key, applied_at timestamptz not null default transaction_timestamp())`); err != nil {
+		connection.Release()
+		t.Fatal(err)
+	}
+	entries, err := migrationFiles.ReadDir("migrations")
+	if err != nil {
+		connection.Release()
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if entry.Name() >= "0017_invitation_login_continuation.sql" {
+			continue
+		}
+		migration, readErr := migrationFiles.ReadFile("migrations/" + entry.Name())
+		if readErr != nil {
+			connection.Release()
+			t.Fatal(readErr)
+		}
+		if err := applyMigration(ctx, connection, entry.Name(), string(migration)); err != nil {
+			connection.Release()
+			t.Fatalf("apply %s: %v", entry.Name(), err)
+		}
+	}
+	connection.Release()
+
+	transactionID := uuid.NewString()
+	if _, err := pool.Exec(ctx, `insert into external_login_transactions(transaction_id,provider,expires_at) values($1,'google',transaction_timestamp()+interval '10 minutes')`, transactionID); err != nil {
+		t.Fatal(err)
+	}
+	if err := Migrate(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	var continuation *string
+	if err := pool.QueryRow(ctx, `select invitation_id from external_login_transactions where transaction_id=$1`, transactionID).Scan(&continuation); err != nil || continuation != nil {
+		t.Fatalf("backfilled continuation = %v, %v", continuation, err)
+	}
+	arbitraryInvitationID := uuid.NewString()
+	if _, err := pool.Exec(ctx, `insert into external_login_transactions(transaction_id,provider,purpose,invitation_id,expires_at) values($1,'github','login',$2,transaction_timestamp()+interval '10 minutes')`, uuid.NewString(), arbitraryInvitationID); err != nil {
+		t.Fatalf("non-FK continuation was rejected: %v", err)
+	}
+	targetUserID := uuid.NewString()
+	initiatingSessionID := uuid.NewString()
+	if _, err := pool.Exec(ctx, `insert into carry_users(user_id,display_name) values($1,'Migration 17 User')`, targetUserID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `insert into browser_sessions(session_id,user_id,expires_at,identity_proof_method) values($1,$2,transaction_timestamp()+interval '1 hour','github')`, initiatingSessionID, targetUserID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `insert into external_login_transactions(transaction_id,provider,purpose,target_user_id,initiating_session_id,invitation_id,expires_at) values($1,'github','link',$2,$3,$4,transaction_timestamp()+interval '10 minutes')`, uuid.NewString(), targetUserID, initiatingSessionID, arbitraryInvitationID); err == nil {
+		t.Fatal("valid link-purpose transaction accepted an invitation continuation")
+	}
+	var foreignKeys int
+	if err := pool.QueryRow(ctx, `select count(*) from pg_constraint where conrelid='external_login_transactions'::regclass and contype='f' and pg_get_constraintdef(oid) like '%invitation_id%'`).Scan(&foreignKeys); err != nil || foreignKeys != 0 {
+		t.Fatalf("invitation continuation foreign keys = %d, %v", foreignKeys, err)
+	}
+}
+
 func TestMigration16BackfillsImmutableSpaceSlugAndUserLabel(t *testing.T) {
 	ctx := context.Background()
 	pool := openMigratedTestPool(t, ctx)

@@ -158,6 +158,7 @@ type ExternalLoginTransaction struct {
 	Purpose             string
 	TargetUserID        pgtype.UUID
 	InitiatingSessionID pgtype.UUID
+	InvitationID        pgtype.UUID
 }
 
 type GithubIdentity struct {

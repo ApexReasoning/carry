@@ -214,7 +214,7 @@ func run(ctx context.Context, arguments []string, stdout io.Writer, stderr io.Wr
 	if err != nil {
 		return fmt.Errorf("compose Space creator: %w", err)
 	}
-	spaceInvitations, err := space.NewInvitations(store, resendSubmitter, parsed.externalOrigin.InvitationsURL())
+	spaceInvitations, err := space.NewInvitations(store, resendSubmitter, parsed.externalOrigin.String())
 	if err != nil {
 		return fmt.Errorf("compose Space invitations: %w", err)
 	}

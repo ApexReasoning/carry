@@ -98,28 +98,28 @@ type ExternalLoginStart struct {
 	ExpiresAt         time.Time
 }
 
-func (login *ExternalLogin) StartGoogle(ctx context.Context) (ExternalLoginStart, error) {
-	return login.start(ctx, GoogleLoginProvider, LoginPurpose, "", "")
+func (login *ExternalLogin) StartGoogle(ctx context.Context, invitationID string) (ExternalLoginStart, error) {
+	return login.start(ctx, GoogleLoginProvider, LoginPurpose, "", "", invitationID)
 }
 
 func (login *ExternalLogin) StartGoogleReauthentication(ctx context.Context, userID string, sessionID string) (ExternalLoginStart, error) {
-	return login.start(ctx, GoogleLoginProvider, ReauthenticatePurpose, userID, sessionID)
+	return login.start(ctx, GoogleLoginProvider, ReauthenticatePurpose, userID, sessionID, "")
 }
 
 func (login *ExternalLogin) StartGoogleLink(ctx context.Context, userID string, sessionID string) (ExternalLoginStart, error) {
-	return login.start(ctx, GoogleLoginProvider, LinkPurpose, userID, sessionID)
+	return login.start(ctx, GoogleLoginProvider, LinkPurpose, userID, sessionID, "")
 }
 
-func (login *ExternalLogin) StartGitHub(ctx context.Context) (ExternalLoginStart, error) {
-	return login.start(ctx, GitHubLoginProvider, LoginPurpose, "", "")
+func (login *ExternalLogin) StartGitHub(ctx context.Context, invitationID string) (ExternalLoginStart, error) {
+	return login.start(ctx, GitHubLoginProvider, LoginPurpose, "", "", invitationID)
 }
 
 func (login *ExternalLogin) StartGitHubReauthentication(ctx context.Context, userID string, sessionID string) (ExternalLoginStart, error) {
-	return login.start(ctx, GitHubLoginProvider, ReauthenticatePurpose, userID, sessionID)
+	return login.start(ctx, GitHubLoginProvider, ReauthenticatePurpose, userID, sessionID, "")
 }
 
 func (login *ExternalLogin) StartGitHubLink(ctx context.Context, userID string, sessionID string) (ExternalLoginStart, error) {
-	return login.start(ctx, GitHubLoginProvider, LinkPurpose, userID, sessionID)
+	return login.start(ctx, GitHubLoginProvider, LinkPurpose, userID, sessionID, "")
 }
 
 func (login *ExternalLogin) start(
@@ -128,11 +128,22 @@ func (login *ExternalLogin) start(
 	purpose ProofPurpose,
 	userID string,
 	sessionID string,
+	invitationID string,
 ) (ExternalLoginStart, error) {
+	if invitationID != "" && uuid.Validate(invitationID) != nil {
+		return ExternalLoginStart{}, ErrExternalLoginInvalid
+	}
+	if purpose != LoginPurpose && invitationID != "" {
+		return ExternalLoginStart{}, ErrExternalLoginInvalid
+	}
 	transactionID := uuid.NewString()
 	expiresAt, err := login.persistence.CreateExternalLogin(ctx, CreateExternalLoginCommand{
-		TransactionID: transactionID, Provider: provider, Purpose: purpose,
-		TargetUserID: userID, InitiatingSessionID: sessionID,
+		TransactionID:       transactionID,
+		Provider:            provider,
+		Purpose:             purpose,
+		TargetUserID:        userID,
+		InitiatingSessionID: sessionID,
+		InvitationID:        invitationID,
 	})
 	if err != nil {
 		return ExternalLoginStart{}, err
@@ -202,9 +213,10 @@ func (login *ExternalLogin) complete(
 		Outcome:        callback.Outcome,
 	})
 	if err != nil {
-		return BrowserSession{}, ExternalProofFailure(claim.Purpose, err)
+		return BrowserSession{}, ExternalProofFailure(claim.Purpose, claim.InvitationID, err)
 	}
 	if claim.IsReplay {
+		claim.Session.InvitationID = claim.InvitationID
 		return claim.Session, nil
 	}
 
@@ -220,7 +232,7 @@ func (login *ExternalLogin) complete(
 		)
 		if err != nil {
 			login.markUnknown(ctx, transactionID, provider, callbackDigest)
-			return BrowserSession{}, ExternalProofFailure(claim.Purpose, ErrExternalLoginUnavailable)
+			return BrowserSession{}, ExternalProofFailure(claim.Purpose, claim.InvitationID, ErrExternalLoginUnavailable)
 		}
 		session, completionErr = login.completeGoogle(ctx, transactionID, callbackDigest, proof)
 	case GitHubLoginProvider:
@@ -229,23 +241,24 @@ func (login *ExternalLogin) complete(
 		)
 		if err != nil {
 			login.markUnknown(ctx, transactionID, provider, callbackDigest)
-			return BrowserSession{}, ExternalProofFailure(claim.Purpose, ErrExternalLoginUnavailable)
+			return BrowserSession{}, ExternalProofFailure(claim.Purpose, claim.InvitationID, ErrExternalLoginUnavailable)
 		}
 		session, completionErr = login.completeGitHub(ctx, transactionID, callbackDigest, proof)
 	default:
 		return BrowserSession{}, ErrExternalLoginInvalid
 	}
 	if completionErr == nil {
+		session.InvitationID = claim.InvitationID
 		return session, nil
 	}
 	if reconciled, ok := login.reconcileCompletion(transactionID, provider, callbackDigest); ok {
 		return reconciled, nil
 	}
 	if knownExternalProofRejection(completionErr) && login.reject(ctx, transactionID, provider, callbackDigest) {
-		return BrowserSession{}, ExternalProofFailure(claim.Purpose, ErrExternalLoginRejected)
+		return BrowserSession{}, ExternalProofFailure(claim.Purpose, claim.InvitationID, ErrExternalLoginRejected)
 	}
 	login.markUnknown(ctx, transactionID, provider, callbackDigest)
-	return BrowserSession{}, ExternalProofFailure(claim.Purpose, ErrExternalLoginUnavailable)
+	return BrowserSession{}, ExternalProofFailure(claim.Purpose, claim.InvitationID, ErrExternalLoginUnavailable)
 }
 
 func (login *ExternalLogin) completeGoogle(
@@ -431,6 +444,7 @@ type CreateExternalLoginCommand struct {
 	Purpose             ProofPurpose
 	TargetUserID        string
 	InitiatingSessionID string
+	InvitationID        string
 }
 
 type ClaimExternalLoginCommand struct {
@@ -441,24 +455,30 @@ type ClaimExternalLoginCommand struct {
 }
 
 type ExternalLoginClaim struct {
-	IsReplay bool
-	Session  BrowserSession
-	Purpose  ProofPurpose
+	IsReplay     bool
+	Session      BrowserSession
+	Purpose      ProofPurpose
+	InvitationID string
 }
 
 type externalProofFailure struct {
-	purpose ProofPurpose
-	cause   error
+	purpose      ProofPurpose
+	invitationID string
+	cause        error
 }
 
 func (failure externalProofFailure) Error() string { return failure.cause.Error() }
 func (failure externalProofFailure) Unwrap() error { return failure.cause }
 
-func ExternalProofFailure(purpose ProofPurpose, cause error) error {
+func ExternalProofFailure(purpose ProofPurpose, invitationID string, cause error) error {
 	if !validProofPurpose(purpose) || cause == nil {
 		return cause
 	}
-	return externalProofFailure{purpose: purpose, cause: cause}
+	return externalProofFailure{
+		purpose:      purpose,
+		invitationID: invitationID,
+		cause:        cause,
+	}
 }
 
 func ExternalProofFailurePurpose(err error) (ProofPurpose, bool) {
@@ -467,6 +487,14 @@ func ExternalProofFailurePurpose(err error) (ProofPurpose, bool) {
 		return "", false
 	}
 	return failure.purpose, true
+}
+
+func ExternalProofFailureInvitationID(err error) string {
+	var failure externalProofFailure
+	if !errors.As(err, &failure) {
+		return ""
+	}
+	return failure.invitationID
 }
 
 type CompleteGoogleLoginCommand struct {

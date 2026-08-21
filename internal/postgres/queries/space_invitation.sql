@@ -20,9 +20,9 @@ SELECT
     s.payload_digest, s.provider_idempotency_key, s.state,
     s.provider_message_id, s.created_at AS submission_created_at,
     (s.state = 'prepared'
-        AND s.created_at + interval '24 hours' > transaction_timestamp()
+        AND s.created_at + interval '24 hours' > clock_timestamp()
         AND i.accepted_at IS NULL AND i.revoked_at IS NULL
-        AND i.expires_at > transaction_timestamp()) AS submit_eligible
+        AND i.expires_at > clock_timestamp()) AS submit_eligible
 FROM space_invitations AS i
 INNER JOIN space_invitation_submissions AS s ON s.invitation_id = i.invitation_id
 WHERE i.space_id = sqlc.arg(space_id)
@@ -130,9 +130,9 @@ SELECT
     s.provider_message_id, s.created_at AS submission_created_at,
     s.request_digest,
     (s.state = 'prepared'
-        AND s.created_at + interval '24 hours' > transaction_timestamp()
+        AND s.created_at + interval '24 hours' > clock_timestamp()
         AND i.accepted_at IS NULL AND i.revoked_at IS NULL
-        AND i.expires_at > transaction_timestamp()) AS submit_eligible
+        AND i.expires_at > clock_timestamp()) AS submit_eligible
 FROM space_invitation_submissions AS s
 INNER JOIN space_invitations AS i ON i.invitation_id = s.invitation_id
 WHERE s.invitation_id = sqlc.arg(invitation_id)
@@ -177,6 +177,31 @@ SELECT bs.user_id, bs.identity_proved_at, bs.identity_proof_method,
 FROM browser_sessions AS bs
 WHERE bs.session_id = sqlc.arg(session_id)
 FOR UPDATE;
+
+-- name: LoadInvitationForUser :one
+SELECT
+    i.invitation_id, i.space_id, sp.name AS space_name,
+    inviter.display_name AS inviter_display_name,
+    i.can_manage_members, i.can_enroll_machines,
+    i.created_at, i.expires_at, i.accepted_at, i.accept_result, i.revoked_at,
+    bs.expires_at AS session_expires_at, bs.revoked_at AS session_revoked_at,
+    bs.identity_proved_at, bs.identity_proof_method,
+    (membership.user_id IS NOT NULL AND membership.revoked_at IS NULL) AS current_member,
+    clock_timestamp()::timestamptz AS observed_at
+FROM space_invitations AS i
+INNER JOIN email_identities AS email
+    ON email.canonical_email = i.recipient_email
+    AND email.user_id = sqlc.arg(user_id)
+INNER JOIN spaces AS sp ON sp.space_id = i.space_id
+INNER JOIN carry_users AS inviter ON inviter.user_id = i.inviter_user_id
+INNER JOIN browser_sessions AS bs
+    ON bs.session_id = sqlc.arg(session_id)
+    AND bs.user_id = sqlc.arg(user_id)
+LEFT JOIN space_memberships AS membership
+    ON membership.space_id = i.space_id
+    AND membership.user_id = sqlc.arg(user_id)
+WHERE i.invitation_id = sqlc.arg(invitation_id)
+    AND (i.accepted_by_user_id IS NULL OR i.accepted_by_user_id = sqlc.arg(user_id));
 
 -- name: ListInvitationsForEmailOwner :many
 SELECT
@@ -224,27 +249,30 @@ INSERT INTO space_memberships (
     sqlc.arg(can_manage_members), sqlc.arg(can_enroll_machines)
 );
 
+-- name: InvitationDatabaseTime :one
+SELECT clock_timestamp()::timestamptz;
+
 -- name: AcceptSpaceInvitation :execrows
 UPDATE space_invitations
 SET
     accepted_by_user_id = sqlc.arg(user_id),
-    accepted_at = transaction_timestamp(),
+    accepted_at = sqlc.arg(now),
     accept_result = sqlc.arg(accept_result),
     accept_idempotency_key = sqlc.arg(idempotency_key),
     accept_request_digest = sqlc.arg(request_digest)
 WHERE invitation_id = sqlc.arg(invitation_id)
     AND accepted_at IS NULL
     AND revoked_at IS NULL
-    AND expires_at > transaction_timestamp();
+    AND expires_at > sqlc.arg(now);
 
 -- name: RevokeSpaceInvitation :execrows
 UPDATE space_invitations
 SET
     revoked_by_user_id = sqlc.arg(user_id),
-    revoked_at = transaction_timestamp(),
+    revoked_at = sqlc.arg(now),
     revoke_idempotency_key = sqlc.arg(idempotency_key),
     revoke_request_digest = sqlc.arg(request_digest)
 WHERE invitation_id = sqlc.arg(invitation_id)
     AND accepted_at IS NULL
     AND revoked_at IS NULL
-    AND expires_at > transaction_timestamp();
+    AND expires_at > sqlc.arg(now);

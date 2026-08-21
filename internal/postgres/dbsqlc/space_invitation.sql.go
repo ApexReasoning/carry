@@ -15,18 +15,19 @@ const acceptSpaceInvitation = `-- name: AcceptSpaceInvitation :execrows
 UPDATE space_invitations
 SET
     accepted_by_user_id = $1,
-    accepted_at = transaction_timestamp(),
-    accept_result = $2,
-    accept_idempotency_key = $3,
-    accept_request_digest = $4
-WHERE invitation_id = $5
+    accepted_at = $2,
+    accept_result = $3,
+    accept_idempotency_key = $4,
+    accept_request_digest = $5
+WHERE invitation_id = $6
     AND accepted_at IS NULL
     AND revoked_at IS NULL
-    AND expires_at > transaction_timestamp()
+    AND expires_at > $2
 `
 
 type AcceptSpaceInvitationParams struct {
 	UserID         pgtype.UUID
+	Now            pgtype.Timestamptz
 	AcceptResult   *string
 	IdempotencyKey *string
 	RequestDigest  []byte
@@ -36,6 +37,7 @@ type AcceptSpaceInvitationParams struct {
 func (q *Queries) AcceptSpaceInvitation(ctx context.Context, arg AcceptSpaceInvitationParams) (int64, error) {
 	result, err := q.db.Exec(ctx, acceptSpaceInvitation,
 		arg.UserID,
+		arg.Now,
 		arg.AcceptResult,
 		arg.IdempotencyKey,
 		arg.RequestDigest,
@@ -226,6 +228,17 @@ func (q *Queries) InsertSpaceInvitationSubmission(ctx context.Context, arg Inser
 	return i, err
 }
 
+const invitationDatabaseTime = `-- name: InvitationDatabaseTime :one
+SELECT clock_timestamp()::timestamptz
+`
+
+func (q *Queries) InvitationDatabaseTime(ctx context.Context) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, invitationDatabaseTime)
+	var column_1 pgtype.Timestamptz
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const listInvitationsForEmailOwner = `-- name: ListInvitationsForEmailOwner :many
 SELECT
     i.invitation_id, i.space_id, sp.name AS space_name,
@@ -376,6 +389,83 @@ func (q *Queries) LoadInvitationEmailOwner(ctx context.Context, recipientEmail s
 	return user_id, err
 }
 
+const loadInvitationForUser = `-- name: LoadInvitationForUser :one
+SELECT
+    i.invitation_id, i.space_id, sp.name AS space_name,
+    inviter.display_name AS inviter_display_name,
+    i.can_manage_members, i.can_enroll_machines,
+    i.created_at, i.expires_at, i.accepted_at, i.accept_result, i.revoked_at,
+    bs.expires_at AS session_expires_at, bs.revoked_at AS session_revoked_at,
+    bs.identity_proved_at, bs.identity_proof_method,
+    (membership.user_id IS NOT NULL AND membership.revoked_at IS NULL) AS current_member,
+    clock_timestamp()::timestamptz AS observed_at
+FROM space_invitations AS i
+INNER JOIN email_identities AS email
+    ON email.canonical_email = i.recipient_email
+    AND email.user_id = $1
+INNER JOIN spaces AS sp ON sp.space_id = i.space_id
+INNER JOIN carry_users AS inviter ON inviter.user_id = i.inviter_user_id
+INNER JOIN browser_sessions AS bs
+    ON bs.session_id = $2
+    AND bs.user_id = $1
+LEFT JOIN space_memberships AS membership
+    ON membership.space_id = i.space_id
+    AND membership.user_id = $1
+WHERE i.invitation_id = $3
+    AND (i.accepted_by_user_id IS NULL OR i.accepted_by_user_id = $1)
+`
+
+type LoadInvitationForUserParams struct {
+	UserID       string
+	SessionID    string
+	InvitationID string
+}
+
+type LoadInvitationForUserRow struct {
+	InvitationID        string
+	SpaceID             string
+	SpaceName           string
+	InviterDisplayName  string
+	CanManageMembers    bool
+	CanEnrollMachines   bool
+	CreatedAt           pgtype.Timestamptz
+	ExpiresAt           pgtype.Timestamptz
+	AcceptedAt          pgtype.Timestamptz
+	AcceptResult        *string
+	RevokedAt           pgtype.Timestamptz
+	SessionExpiresAt    pgtype.Timestamptz
+	SessionRevokedAt    pgtype.Timestamptz
+	IdentityProvedAt    pgtype.Timestamptz
+	IdentityProofMethod string
+	CurrentMember       *bool
+	ObservedAt          pgtype.Timestamptz
+}
+
+func (q *Queries) LoadInvitationForUser(ctx context.Context, arg LoadInvitationForUserParams) (LoadInvitationForUserRow, error) {
+	row := q.db.QueryRow(ctx, loadInvitationForUser, arg.UserID, arg.SessionID, arg.InvitationID)
+	var i LoadInvitationForUserRow
+	err := row.Scan(
+		&i.InvitationID,
+		&i.SpaceID,
+		&i.SpaceName,
+		&i.InviterDisplayName,
+		&i.CanManageMembers,
+		&i.CanEnrollMachines,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+		&i.AcceptedAt,
+		&i.AcceptResult,
+		&i.RevokedAt,
+		&i.SessionExpiresAt,
+		&i.SessionRevokedAt,
+		&i.IdentityProvedAt,
+		&i.IdentityProofMethod,
+		&i.CurrentMember,
+		&i.ObservedAt,
+	)
+	return i, err
+}
+
 const loadInvitationInboxSession = `-- name: LoadInvitationInboxSession :one
 SELECT bs.user_id, bs.identity_proved_at, bs.identity_proof_method,
     bs.expires_at, bs.revoked_at
@@ -413,9 +503,9 @@ SELECT
     s.payload_digest, s.provider_idempotency_key, s.state,
     s.provider_message_id, s.created_at AS submission_created_at,
     (s.state = 'prepared'
-        AND s.created_at + interval '24 hours' > transaction_timestamp()
+        AND s.created_at + interval '24 hours' > clock_timestamp()
         AND i.accepted_at IS NULL AND i.revoked_at IS NULL
-        AND i.expires_at > transaction_timestamp()) AS submit_eligible
+        AND i.expires_at > clock_timestamp()) AS submit_eligible
 FROM space_invitations AS i
 INNER JOIN space_invitation_submissions AS s ON s.invitation_id = i.invitation_id
 WHERE i.space_id = $1
@@ -483,9 +573,9 @@ SELECT
     s.provider_message_id, s.created_at AS submission_created_at,
     s.request_digest,
     (s.state = 'prepared'
-        AND s.created_at + interval '24 hours' > transaction_timestamp()
+        AND s.created_at + interval '24 hours' > clock_timestamp()
         AND i.accepted_at IS NULL AND i.revoked_at IS NULL
-        AND i.expires_at > transaction_timestamp()) AS submit_eligible
+        AND i.expires_at > clock_timestamp()) AS submit_eligible
 FROM space_invitation_submissions AS s
 INNER JOIN space_invitations AS i ON i.invitation_id = s.invitation_id
 WHERE s.invitation_id = $1
@@ -870,17 +960,18 @@ const revokeSpaceInvitation = `-- name: RevokeSpaceInvitation :execrows
 UPDATE space_invitations
 SET
     revoked_by_user_id = $1,
-    revoked_at = transaction_timestamp(),
-    revoke_idempotency_key = $2,
-    revoke_request_digest = $3
-WHERE invitation_id = $4
+    revoked_at = $2,
+    revoke_idempotency_key = $3,
+    revoke_request_digest = $4
+WHERE invitation_id = $5
     AND accepted_at IS NULL
     AND revoked_at IS NULL
-    AND expires_at > transaction_timestamp()
+    AND expires_at > $2
 `
 
 type RevokeSpaceInvitationParams struct {
 	UserID         pgtype.UUID
+	Now            pgtype.Timestamptz
 	IdempotencyKey *string
 	RequestDigest  []byte
 	InvitationID   string
@@ -889,6 +980,7 @@ type RevokeSpaceInvitationParams struct {
 func (q *Queries) RevokeSpaceInvitation(ctx context.Context, arg RevokeSpaceInvitationParams) (int64, error) {
 	result, err := q.db.Exec(ctx, revokeSpaceInvitation,
 		arg.UserID,
+		arg.Now,
 		arg.IdempotencyKey,
 		arg.RequestDigest,
 		arg.InvitationID,

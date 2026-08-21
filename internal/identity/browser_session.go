@@ -9,4 +9,5 @@ type BrowserSession struct {
 	IdentityProvedAt    time.Time
 	IdentityProofMethod Method
 	Purpose             ProofPurpose
+	InvitationID        string
 }

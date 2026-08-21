@@ -78,8 +78,9 @@ func TestSpaceInvitationPublicBrowserJourney(t *testing.T) {
 		t.Fatalf("issue = %d %#v", issued.status, issued.body)
 	}
 	invitationID := issued.body["invitation_id"].(string)
-	if len(submitted.To) != 1 || submitted.To[0] != "invitee@example.com" || !strings.Contains(submitted.Text, carry.URL+"/invitations") || strings.Contains(submitted.Text, invitationID) {
-		t.Fatalf("concrete invitation payload = %#v", submitted)
+	exactInvitationURL := carry.URL + "/invitations/" + invitationID
+	if len(submitted.To) != 1 || submitted.To[0] != "invitee@example.com" || !strings.Contains(submitted.Text, exactInvitationURL) {
+		t.Fatalf("concrete invitation payload = %#v, want %q", submitted, exactInvitationURL)
 	}
 
 	loginChallenge := uuid.NewString()
@@ -95,6 +96,10 @@ func TestSpaceInvitationPublicBrowserJourney(t *testing.T) {
 	var inviteeID string
 	if err := pool.QueryRow(ctx, `select user_id from email_identities where canonical_email = 'invitee@example.com'`).Scan(&inviteeID); err != nil {
 		t.Fatalf("load Email-login User: %v", err)
+	}
+	targeted := browserJSON(t, carry.Client(), http.MethodGet, carry.URL+"/v1/invitations/"+invitationID, "", inviteeCredential, "", nil)
+	if targeted.status != http.StatusOK || targeted.body["state"] != "pending" || targeted.body["space_name"] != "Research Space" {
+		t.Fatalf("targeted invitation = %d %#v", targeted.status, targeted.body)
 	}
 	inbox := browserJSON(t, carry.Client(), http.MethodGet, carry.URL+"/v1/invitations", "", inviteeCredential, "", nil)
 	if inbox.status != http.StatusOK || len(inbox.body["invitations"].([]any)) != 1 {
@@ -112,6 +117,19 @@ func TestSpaceInvitationPublicBrowserJourney(t *testing.T) {
 	var manage, enroll bool
 	if err := pool.QueryRow(ctx, `select can_manage_members, can_enroll_machines from space_memberships where space_id = $1 and user_id = $2 and revoked_at is null`, spaceID, inviteeID).Scan(&manage, &enroll); err != nil || !manage || enroll {
 		t.Fatalf("Membership = %t/%t, %v", manage, enroll, err)
+	}
+	terminal := browserJSON(t, carry.Client(), http.MethodGet, carry.URL+"/v1/invitations/"+invitationID, "", inviteeCredential, "", nil)
+	if terminal.status != http.StatusOK {
+		t.Fatalf("terminal invitation status = %d", terminal.status)
+	}
+	if terminal.body["state"] != "accepted" {
+		t.Fatalf("terminal invitation state = %#v", terminal.body)
+	}
+	if terminal.body["accept_result"] != "joined" {
+		t.Fatalf("terminal invitation result = %#v", terminal.body)
+	}
+	if terminal.body["current_member"] != true {
+		t.Fatalf("terminal invitation Membership = %#v", terminal.body)
 	}
 
 	for _, method := range []string{"google", "github"} {

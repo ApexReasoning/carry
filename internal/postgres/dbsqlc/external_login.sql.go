@@ -79,6 +79,7 @@ INSERT INTO external_login_transactions (
     purpose,
     target_user_id,
     initiating_session_id,
+    invitation_id,
     expires_at
 ) VALUES (
     $1,
@@ -86,6 +87,7 @@ INSERT INTO external_login_transactions (
     $3,
     $4,
     $5,
+    $6,
     transaction_timestamp() + interval '10 minutes'
 )
 RETURNING expires_at
@@ -97,6 +99,7 @@ type CreateExternalLoginParams struct {
 	Purpose             string
 	TargetUserID        pgtype.UUID
 	InitiatingSessionID pgtype.UUID
+	InvitationID        pgtype.UUID
 }
 
 func (q *Queries) CreateExternalLogin(ctx context.Context, arg CreateExternalLoginParams) (pgtype.Timestamptz, error) {
@@ -106,6 +109,7 @@ func (q *Queries) CreateExternalLogin(ctx context.Context, arg CreateExternalLog
 		arg.Purpose,
 		arg.TargetUserID,
 		arg.InitiatingSessionID,
+		arg.InvitationID,
 	)
 	var expires_at pgtype.Timestamptz
 	err := row.Scan(&expires_at)
@@ -235,7 +239,7 @@ func (q *Queries) LoadGoogleIdentity(ctx context.Context, arg LoadGoogleIdentity
 }
 
 const lockExternalLogin = `-- name: LockExternalLogin :one
-SELECT transaction_id, provider, status, callback_digest, created_at, expires_at, completed_at, user_id, browser_session_id, purpose, target_user_id, initiating_session_id
+SELECT transaction_id, provider, status, callback_digest, created_at, expires_at, completed_at, user_id, browser_session_id, purpose, target_user_id, initiating_session_id, invitation_id
 FROM external_login_transactions
 WHERE transaction_id = $1
 FOR UPDATE
@@ -257,6 +261,7 @@ func (q *Queries) LockExternalLogin(ctx context.Context, transactionID string) (
 		&i.Purpose,
 		&i.TargetUserID,
 		&i.InitiatingSessionID,
+		&i.InvitationID,
 	)
 	return i, err
 }

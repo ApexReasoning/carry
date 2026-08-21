@@ -331,6 +331,17 @@ paths:
     post:
       operationId: startGoogleLogin
       security: []
+      requestBody:
+        required: false
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                invitation_id:
+                  type: string
+                  format: uuid
       responses:
         "303":
           description: Redirect to the fixed Google authorization endpoint
@@ -374,6 +385,17 @@ paths:
     post:
       operationId: startGitHubLogin
       security: []
+      requestBody:
+        required: false
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                invitation_id:
+                  type: string
+                  format: uuid
       responses:
         "303":
           description: Redirect to the fixed GitHub authorization endpoint
@@ -1486,6 +1508,8 @@ paths:
           $ref: "#/components/responses/Error"
         "409":
           $ref: "#/components/responses/Error"
+        "410":
+          $ref: "#/components/responses/Error"
         "429":
           $ref: "#/components/responses/Error"
   /v1/spaces/{spaceID}/invitations/{invitationID}/revoke:
@@ -1509,6 +1533,8 @@ paths:
           $ref: "#/components/responses/Error"
         "409":
           $ref: "#/components/responses/Error"
+        "410":
+          $ref: "#/components/responses/Error"
   /v1/invitations:
     get:
       operationId: listInvitationInbox
@@ -1522,6 +1548,24 @@ paths:
               schema:
                 $ref: "#/components/schemas/InvitationInbox"
         "401":
+          $ref: "#/components/responses/Error"
+  /v1/invitations/{invitationID}:
+    parameters:
+      - $ref: "#/components/parameters/InvitationID"
+    get:
+      operationId: loadInvitation
+      security:
+        - browserSession: []
+      responses:
+        "200":
+          description: Owner-only invitation review or terminal truth
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TargetedInvitation"
+        "401":
+          $ref: "#/components/responses/Error"
+        "404":
           $ref: "#/components/responses/Error"
   /v1/invitations/{invitationID}/accept:
     parameters:
@@ -1546,6 +1590,8 @@ paths:
         "404":
           $ref: "#/components/responses/Error"
         "409":
+          $ref: "#/components/responses/Error"
+        "410":
           $ref: "#/components/responses/Error"
         "428":
           $ref: "#/components/responses/Error"
@@ -2011,6 +2057,55 @@ components:
         expires_at:
           type: string
           format: date-time
+    TargetedInvitation:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          invitation_id,
+          space_id,
+          space_name,
+          inviter_display_name,
+          can_manage_members,
+          can_enroll_machines,
+          created_at,
+          expires_at,
+          state,
+          accept_result,
+          current_member,
+          reauthentication_required,
+        ]
+      properties:
+        invitation_id:
+          type: string
+          format: uuid
+        space_id:
+          type: string
+          format: uuid
+        space_name:
+          type: string
+        inviter_display_name:
+          type: string
+        can_manage_members:
+          type: boolean
+        can_enroll_machines:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        state:
+          type: string
+          enum: [pending, accepted, revoked, expired]
+        accept_result:
+          type: string
+          enum: ["", joined, already_member]
+        current_member:
+          type: boolean
+        reauthentication_required:
+          type: boolean
     InvitationInbox:
       type: object
       additionalProperties: false

@@ -200,6 +200,47 @@ func TestExternalLoginBrowserJourneyWithConcreteProviders(t *testing.T) {
 		}
 	})
 
+	t.Run("two tabs preserve the winning exact continuation", func(t *testing.T) {
+		firstInvitationID := "10000000-0000-4000-8000-000000000001"
+		secondInvitationID := "20000000-0000-4000-8000-000000000002"
+		first := startBrowserLogin(t, browser, carry.URL, googleJourney, firstInvitationID)
+		second := startBrowserLogin(t, browser, carry.URL, googleJourney, secondInvitationID)
+		response, secondSession := completeBrowserLogin(t, browser, carry.URL, googleJourney, second, "second-tab-code")
+		if response.Header.Get("Location") != carry.URL+"/invitations/"+secondInvitationID {
+			t.Fatalf("second-tab location = %q", response.Header.Get("Location"))
+		}
+
+		firstCallback := carry.URL + googleJourney.callbackPath + "?code=displaced&state=" + url.QueryEscape(first.state)
+		response = browserRequest(t, browser, http.MethodGet, firstCallback, "", nil)
+		_ = response.Body.Close()
+		if response.Header.Get("Location") != carry.URL+"/?sign_in=invalid" {
+			t.Fatalf("displaced first-tab location = %q", response.Header.Get("Location"))
+		}
+
+		secondCallback := carry.URL + googleJourney.callbackPath + "?code=second-tab-code&state=" + url.QueryEscape(second.state)
+		request, err := http.NewRequest(http.MethodGet, secondCallback, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.AddCookie(&http.Cookie{
+			Name:  "__Host-carry_oauth",
+			Value: second.binding,
+		})
+		response, err = browser.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		replayedSession := responseCookie(response, "__Host-carry_session")
+		if response.Header.Get("Location") != carry.URL+"/invitations/"+secondInvitationID {
+			t.Fatalf("second-tab replay location = %q", response.Header.Get("Location"))
+		}
+		if replayedSession == nil || replayedSession.Value != secondSession.Value {
+			t.Fatalf("second-tab replay Session = %#v, want %#v", replayedSession, secondSession)
+		}
+		logoutBrowser(t, browser, carry.URL)
+	})
+
 	t.Run("provider outage becomes Unknown and a fresh start succeeds", func(t *testing.T) {
 		started := startBrowserLogin(t, browser, carry.URL, githubJourney)
 		transactionID, ok := credentials.ParseExternalLoginState(started.state, identity.GitHubLoginProvider)
@@ -601,9 +642,27 @@ func exerciseProviderBrowserJourney(
 	return userID
 }
 
-func startBrowserLogin(t *testing.T, browser *http.Client, carryURL string, journey browserProviderJourney) startedBrowserLogin {
+func startBrowserLogin(t *testing.T, browser *http.Client, carryURL string, journey browserProviderJourney, invitationIDs ...string) startedBrowserLogin {
 	t.Helper()
-	response := browserRequest(t, browser, http.MethodPost, carryURL+journey.startPath, carryURL, nil)
+	if len(invitationIDs) > 1 {
+		t.Fatal("one invitation continuation is allowed")
+	}
+	var body io.Reader
+	if len(invitationIDs) == 1 {
+		body = strings.NewReader(url.Values{"invitation_id": {invitationIDs[0]}}.Encode())
+	}
+	request, err := http.NewRequest(http.MethodPost, carryURL+journey.startPath, body)
+	if err != nil {
+		t.Fatalf("create %s start: %v", journey.name, err)
+	}
+	request.Header.Set("Origin", carryURL)
+	if body != nil {
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	}
+	response, err := browser.Do(request)
+	if err != nil {
+		t.Fatalf("send %s start: %v", journey.name, err)
+	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusSeeOther {
 		t.Fatalf("start %s status = %d, body = %s", journey.name, response.StatusCode, readBody(response))
@@ -794,7 +853,7 @@ func composeExternalLoginTestAPI(
 	if err != nil {
 		t.Fatalf("compose User identity routes: %v", err)
 	}
-	spaceInvitations, err := space.NewInvitations(store, invitationSubmitter, origin.InvitationsURL())
+	spaceInvitations, err := space.NewInvitations(store, invitationSubmitter, origin.String())
 	if err != nil {
 		t.Fatalf("compose Space invitations: %v", err)
 	}

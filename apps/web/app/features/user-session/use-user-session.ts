@@ -1,11 +1,18 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import {
+  APIResponseError,
   currentUser,
+  identityMethods,
+  invitation,
   invitationInbox,
   MutationOutcomeUnknownError,
 } from "../../carry-api";
-import type { InvitationInbox, User } from "../../generated/types.gen";
+import type {
+  InvitationInbox,
+  TargetedInvitation,
+  User,
+} from "../../generated/types.gen";
 import {
   clearPendingSignOut,
   finishBrowserSignOut,
@@ -22,11 +29,18 @@ import {
   verifyExactEmailChallenge,
 } from "./email-verification";
 
+export type TargetedInvitationState =
+  | { status: "loading" }
+  | { status: "owner"; invitation: TargetedInvitation }
+  | { status: "unavailable"; hasEmail: boolean }
+  | { status: "error"; message: string };
+
 type SessionPhase =
   | "checking"
   | "email"
   | "code"
   | "invitations"
+  | "invitation"
   | "ready"
   | "failed"
   | "signing-out";
@@ -35,6 +49,11 @@ export function useUserSession() {
   const [phase, setPhase] = useState<SessionPhase>("checking");
   const [user, setUser] = useState<User | null>(null);
   const [inbox, setInbox] = useState<InvitationInbox | null>(null);
+  const [targetedInvitation, setTargetedInvitation] =
+    useState<TargetedInvitationState>({ status: "loading" });
+  const invitationID = invitationIDFromPath(window.location.pathname);
+  const invalidInvitationPath =
+    window.location.pathname.startsWith("/invitations/") && !invitationID;
   const [challenge, setChallenge] = useState<EmailChallengeCommand | null>(
     null,
   );
@@ -42,10 +61,68 @@ export function useUserSession() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const routeUser = useCallback(
+    async (loaded: User | null) => {
+      setUser(loaded);
+      setInbox(null);
+      if (!loaded) {
+        setPhase("email");
+        return;
+      }
+      if (invitationID) {
+        setTargetedInvitation({ status: "loading" });
+        setPhase("invitation");
+        try {
+          setTargetedInvitation({
+            status: "owner",
+            invitation: await invitation(invitationID),
+          });
+        } catch (caught) {
+          if (caught instanceof APIResponseError && caught.status === 404) {
+            try {
+              const methods = await identityMethods();
+              setTargetedInvitation({
+                status: "unavailable",
+                hasEmail: methods.methods.includes("email"),
+              });
+            } catch (methodError) {
+              setTargetedInvitation({
+                status: "error",
+                message: errorMessage(methodError),
+              });
+            }
+          } else {
+            setTargetedInvitation({
+              status: "error",
+              message: errorMessage(caught),
+            });
+          }
+        }
+        return;
+      }
+      const invitations = await invitationInbox();
+      if (
+        invitations.invitations.length > 0 ||
+        window.location.pathname === "/invitations"
+      ) {
+        setInbox(invitations);
+        setPhase("invitations");
+        return;
+      }
+      setPhase("ready");
+    },
+    [invitationID],
+  );
+
   useEffect(() => {
     let active = true;
     async function restore() {
       setError(takeExternalSignInStatus());
+      if (invalidInvitationPath) {
+        setPhase("failed");
+        setError("This invitation link is invalid.");
+        return;
+      }
       if (hasPendingSignOut()) {
         setUser(null);
         setPhase("signing-out");
@@ -66,26 +143,7 @@ export function useUserSession() {
     return () => {
       active = false;
     };
-  }, []);
-
-  async function routeUser(loaded: User | null) {
-    setUser(loaded);
-    setInbox(null);
-    if (!loaded) {
-      setPhase("email");
-      return;
-    }
-    const invitations = await invitationInbox();
-    if (
-      invitations.invitations.length > 0 ||
-      window.location.pathname === "/invitations"
-    ) {
-      setInbox(invitations);
-      setPhase("invitations");
-      return;
-    }
-    setPhase("ready");
-  }
+  }, [invalidInvitationPath, routeUser]);
 
   async function refresh() {
     try {
@@ -211,6 +269,8 @@ export function useUserSession() {
     phase,
     user,
     inbox,
+    invitationID,
+    targetedInvitation,
     email: challenge?.email ?? "",
     challengeID: challenge?.challengeID ?? "",
     canRetryCodeRequest: requestRetryPending,
@@ -218,10 +278,7 @@ export function useUserSession() {
     error,
     retry: () => void retryRestore(),
     refresh: () => void refresh(),
-    skipInvitations: () => {
-      window.history.replaceState(null, "", "/");
-      setPhase("ready");
-    },
+    skipInvitations: () => window.location.assign("/"),
     sendCode,
     retryCodeRequest,
     verifyCode,
@@ -254,9 +311,24 @@ function takeExternalSignInStatus(): string | null {
     case "unavailable":
       return "Carry could not confirm sign-in. Start a fresh sign-in.";
     case "invalid":
-      return "This sign-in link is invalid or expired. Start again.";
+      return "This sign-in attempt could not be confirmed. Start a fresh sign-in; if you opened an invitation, reopen its link.";
     default:
       return "Carry could not confirm sign-in. Start again.";
+  }
+}
+
+function invitationIDFromPath(pathname: string): string | null {
+  const match = /^\/invitations\/([^/]+)$/.exec(pathname);
+  if (!match?.[1]) return null;
+  try {
+    const value = decodeURIComponent(match[1]);
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      value,
+    )
+      ? value
+      : null;
+  } catch {
+    return null;
   }
 }
 

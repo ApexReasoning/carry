@@ -37,6 +37,151 @@ test("offers Google GitHub and email without implying account linking", async ()
   expect(screen.getByLabelText("Email")).toBeVisible();
 });
 
+test("signed-out exact invitation reveals no metadata and carries only its ID", async () => {
+  const invitationID = "22222222-2222-4222-8222-222222222222";
+  window.history.replaceState(null, "", `/invitations/${invitationID}`);
+  const paths: Array<string> = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request =
+        input instanceof Request ? input : new Request(input, init);
+      paths.push(new URL(request.url).pathname);
+      if (
+        request.method === "GET" &&
+        new URL(request.url).pathname === "/v1/me"
+      )
+        return json(
+          { error: "Browser Session authentication is required" },
+          401,
+        );
+      throw new Error(`unexpected preview ${request.method} ${request.url}`);
+    }),
+  );
+
+  render(<App />);
+
+  expect(
+    await screen.findByRole("heading", {
+      name: "Sign in to review this invitation",
+    }),
+  ).toBeVisible();
+  expect(paths).toEqual(["/v1/me"]);
+  expect(screen.queryByText(/Research|Manager|manage members/)).toBeNull();
+  for (const name of ["Continue with Google", "Continue with GitHub"]) {
+    const form = screen.getByRole("button", { name }).closest("form");
+    expect(form?.querySelector('input[name="invitation_id"]')).toHaveValue(
+      invitationID,
+    );
+  }
+  expect(window.localStorage.length).toBe(0);
+  expect(window.sessionStorage.length).toBe(0);
+});
+
+test("malformed exact invitation path fails before authentication or preview", async () => {
+  window.history.replaceState(null, "", "/invitations/%E0%A4%A");
+  const fetch = vi.fn();
+  vi.stubGlobal("fetch", fetch);
+
+  render(<App />);
+
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "This invitation link is invalid.",
+  );
+  expect(fetch).not.toHaveBeenCalled();
+});
+
+test("targeted invitation loading and read failure stay explicit", async () => {
+  const invitationID = "22222222-2222-4222-8222-222222222222";
+  window.history.replaceState(null, "", `/invitations/${invitationID}`);
+  let resolveInvitation: (response: Response) => void = () => undefined;
+  const invitationResponse = new Promise<Response>((resolve) => {
+    resolveInvitation = resolve;
+  });
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request =
+        input instanceof Request ? input : new Request(input, init);
+      const path = new URL(request.url).pathname;
+      if (request.method === "GET" && path === "/v1/me") {
+        return json(currentUser([]));
+      }
+      if (
+        request.method === "GET" &&
+        path === `/v1/invitations/${invitationID}`
+      ) {
+        return invitationResponse;
+      }
+      throw new Error(`unexpected request: ${request.method} ${path}`);
+    }),
+  );
+
+  render(<App />);
+
+  expect(await screen.findByText("Loading invitation…")).toBeVisible();
+  resolveInvitation(json({ error: "targeted read failed" }, 500));
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "targeted read failed",
+  );
+  expect(
+    screen.queryByText("Confirm your Email to review this invitation."),
+  ).not.toBeInTheDocument();
+});
+
+test("targeted invitation method lookup failure becomes an explicit error", async () => {
+  const invitationID = "22222222-2222-4222-8222-222222222222";
+  window.history.replaceState(null, "", `/invitations/${invitationID}`);
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request =
+        input instanceof Request ? input : new Request(input, init);
+      const path = new URL(request.url).pathname;
+      if (request.method === "GET" && path === "/v1/me") {
+        return json(currentUser([]));
+      }
+      if (
+        request.method === "GET" &&
+        path === `/v1/invitations/${invitationID}`
+      ) {
+        return json({ error: "Space invitation is unavailable" }, 404);
+      }
+      if (request.method === "GET" && path === "/v1/identity/methods") {
+        return json({ error: "method lookup failed" }, 500);
+      }
+      throw new Error(`unexpected request: ${request.method} ${path}`);
+    }),
+  );
+
+  render(<App />);
+
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "method lookup failed",
+  );
+  expect(
+    screen.queryByText("Confirm your Email to review this invitation."),
+  ).not.toBeInTheDocument();
+});
+
+test("provider outcome cleanup preserves the exact invitation path", async () => {
+  const invitationID = "22222222-2222-4222-8222-222222222222";
+  window.history.replaceState(
+    null,
+    "",
+    `/invitations/${invitationID}?sign_in=unavailable`,
+  );
+  mockUnauthenticatedEmail(async () => null);
+
+  render(<App />);
+
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Carry could not confirm sign-in. Start a fresh sign-in.",
+  );
+  expect(window.location.pathname).toBe(`/invitations/${invitationID}`);
+  expect(window.location.search).toBe("");
+});
+
 test("shows a neutral provider callback outcome and removes it from the URL", async () => {
   window.history.replaceState(null, "", "/?sign_in=unavailable");
   mockUnauthenticatedEmail(async () => null);

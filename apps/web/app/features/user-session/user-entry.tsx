@@ -5,6 +5,7 @@ type UserEntryProps = {
   email: string;
   busy: boolean;
   error: string | null;
+  invitationID: string | null;
   onSendCode: (email: string) => Promise<void>;
   canRetryCodeRequest: boolean;
   onRetryCodeRequest: () => Promise<void>;
@@ -18,6 +19,7 @@ export function UserEntry({
   email,
   busy,
   error,
+  invitationID,
   canRetryCodeRequest,
   onSendCode,
   onRetryCodeRequest,
@@ -48,10 +50,15 @@ export function UserEntry({
         </p>
         {step === "email" ? (
           <>
-            <h1 id="entry-title">Work that stays in good hands.</h1>
+            <h1 id="entry-title">
+              {invitationID
+                ? "Sign in to review this invitation"
+                : "Work that stays in good hands."}
+            </h1>
             <p className="entry-copy">
-              Carry is your team’s durable AI colleague. Sign in to open your
-              Work or create a Space.
+              {invitationID
+                ? "Authentication does not accept an invitation."
+                : "Carry is your team’s durable AI colleague. Sign in to open your Work or create a Space."}
             </p>
             <div
               className="provider-entry"
@@ -59,6 +66,13 @@ export function UserEntry({
               aria-label="Sign-in methods"
             >
               <form method="post" action="/v1/auth/google/start">
+                {invitationID ? (
+                  <input
+                    type="hidden"
+                    name="invitation_id"
+                    value={invitationID}
+                  />
+                ) : null}
                 <button
                   type="submit"
                   className="secondary-button"
@@ -68,6 +82,13 @@ export function UserEntry({
                 </button>
               </form>
               <form method="post" action="/v1/auth/github/start">
+                {invitationID ? (
+                  <input
+                    type="hidden"
+                    name="invitation_id"
+                    value={invitationID}
+                  />
+                ) : null}
                 <button
                   type="submit"
                   className="secondary-button"

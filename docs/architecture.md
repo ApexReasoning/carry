@@ -28,8 +28,8 @@ browser ──member session──► Carry Server ──┐
 
 | Owner | 拥有 | 不拥有 |
 | --- | --- | --- |
-| Identity | User、GitHub/Google/Email 登录方式、浏览器会话、恢复 | Space、Agent 或 Machine 权威 |
-| Space | Space、显示名与全局唯一 slug、Membership、管理成员/连接 Host 两项窄权限、邀请的一次性与撤销、成员生命周期 | 私人对话内容、Work 负责人变更、通用角色系统 |
+| Identity | User、GitHub/Google/Email 登录方式、浏览器会话、恢复；一次短期 login transaction 可以携带一个语法有效的 invitation UUID 作为不授权的因果续接值，它没有 FK、不会读取或解释邀请 | Space、邀请真相、Agent 或 Machine 权威 |
+| Space | Space、显示名与全局唯一 slug、Membership、管理成员/连接 Host 两项窄权限、邀请身份/收件 Email/内容/终态/一次性与撤销、成员生命周期 | 私人对话内容、Work 负责人变更、通用角色系统 |
 | Agent | Agent 身份：ID、所属 Space、Space 内唯一归一化名字、确定性头像（新身份的人类 owner 来自浏览器批准该 Host 的成员）、唯一 Host 绑定、Active/Removed、创建时间 | 进程在场、模型目录、Work 真相、发现内容改写身份 |
 | Conversation | 成员与一个确定 Agent 的消息及其准确受众、Web 表单形成的 target-Agent 结构化请求、Conversation 固定的 Agent（与可选模型） | provider 续接句柄、共享 Work 权威、Work 创建结果 |
 | Work | 责任、人类负责人、Agent 负责人及其交接事实、生命周期、有序计划项、产出项及其与计划项的关联、需要人的事项、未来与周期继续 | 进程 lease、provider 内部状态、Inbox 视图 |

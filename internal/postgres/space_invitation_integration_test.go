@@ -8,6 +8,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/ApexReasoning/carry/internal/identity"
 	"github.com/ApexReasoning/carry/internal/space"
@@ -220,6 +221,45 @@ func TestSpaceInvitationRecordsObservedOutcomeAfterCallerCancellation(t *testing
 	}
 }
 
+func TestSpaceInvitationIssueReplayBuildsPayloadFromPersistedInvitationID(t *testing.T) {
+	ctx := context.Background()
+	pool := openMigratedTestPool(t, ctx)
+	store := NewStore(pool)
+	manager := invitationManagerFixture(t, ctx, store)
+	lossStore := &invitationPrepareResponseLossStore{Store: store}
+	submitter := &acceptedInvitationSubmitter{}
+	invitations := newTestInvitations(t, lossStore, submitter)
+	request := space.IssueInvitationRequest{
+		SpaceID:        manager.SpaceID,
+		ActorUserID:    manager.UserID,
+		RecipientEmail: "persisted-link@example.com",
+		IdempotencyKey: "persisted-link",
+	}
+	if _, err := invitations.Issue(ctx, request); err == nil {
+		t.Fatal("first prepared response was not lost")
+	}
+	persisted, err := invitations.Issue(ctx, request)
+	if err != nil {
+		t.Fatalf("replay issue: %v", err)
+	}
+	if len(submitter.messages) != 1 {
+		t.Fatalf("submitted messages = %d", len(submitter.messages))
+	}
+	if len(lossStore.invitationIDs) != 2 {
+		t.Fatalf("prepared invitation IDs = %#v", lossStore.invitationIDs)
+	}
+	if lossStore.invitationIDs[0] == lossStore.invitationIDs[1] {
+		t.Fatalf("fresh replay ID was not regenerated: %#v", lossStore.invitationIDs)
+	}
+	if persisted.InvitationID != lossStore.invitationIDs[0] {
+		t.Fatalf("persisted invitation ID = %q, commands %#v", persisted.InvitationID, lossStore.invitationIDs)
+	}
+	wantURL := "https://carry.example/invitations/" + persisted.InvitationID
+	if submitter.messages[0].DestinationURL != wantURL {
+		t.Fatalf("replayed payload URL = %q, want %q", submitter.messages[0].DestinationURL, wantURL)
+	}
+}
+
 func TestSpaceInvitationSubmissionCommitResponseLossRecoversWithoutAnotherSend(t *testing.T) {
 	ctx := context.Background()
 	pool := openMigratedTestPool(t, ctx)
@@ -272,6 +312,10 @@ func TestSpaceInvitationRequiresExactRecentEmailProofAndReplaysAcceptance(t *tes
 		IdempotencyKey: "accept-wrong",
 	}); !errors.Is(err, space.ErrInvitationUnavailable) {
 		t.Fatalf("wrong-email acceptance = %v", err)
+	}
+	var wrongMemberships int
+	if err := pool.QueryRow(ctx, `select count(*) from space_memberships where space_id=$1 and user_id=$2`, manager.SpaceID, wrongUserID).Scan(&wrongMemberships); err != nil || wrongMemberships != 0 {
+		t.Fatalf("non-owner acceptance consequences = %d, %v", wrongMemberships, err)
 	}
 
 	inviteeID, _ := seedIdentityUser(t, ctx, store, "invitee@example.com", 0)
@@ -370,6 +414,19 @@ func TestSpaceInvitationAlreadyMemberUnchangedAndDatabaseTimeExpiry(t *testing.T
 	if !accepted.AlreadyMember || accepted.CanManageMembers || accepted.CanEnrollMachines {
 		t.Fatalf("already member result = %#v", accepted)
 	}
+	alreadyMemberProjection, err := invitations.LoadForUser(ctx, issued.InvitationID, userID, sessions[0])
+	if err != nil {
+		t.Fatalf("load already-member projection: %v", err)
+	}
+	if alreadyMemberProjection.State != space.InvitationAccepted {
+		t.Fatalf("already-member state = %#v", alreadyMemberProjection)
+	}
+	if alreadyMemberProjection.AcceptResult != "already_member" {
+		t.Fatalf("already-member result = %#v", alreadyMemberProjection)
+	}
+	if !alreadyMemberProjection.CurrentMember {
+		t.Fatalf("already-member Membership = %#v", alreadyMemberProjection)
+	}
 
 	expired, err := invitations.Issue(ctx, space.IssueInvitationRequest{
 		SpaceID: manager.SpaceID, ActorUserID: manager.UserID, RecipientEmail: "expired@example.com", IdempotencyKey: "issue-expired",
@@ -388,7 +445,7 @@ func TestSpaceInvitationAlreadyMemberUnchangedAndDatabaseTimeExpiry(t *testing.T
 	if _, err := invitations.Accept(ctx, space.AcceptInvitationCommand{
 		InvitationID: expired.InvitationID, UserID: expiredUser, SessionID: expiredSessions[0],
 		IdempotencyKey: "accept-expired",
-	}); !errors.Is(err, space.ErrInvitationUnavailable) {
+	}); !errors.Is(err, space.ErrInvitationExpired) {
 		t.Fatalf("expired acceptance = %v", err)
 	}
 }
@@ -430,6 +487,9 @@ func TestInvitationResendCooldownReplayAndRevoke(t *testing.T) {
 	if resent.ExpiresAt != issued.ExpiresAt || submitter.calls != 2 {
 		t.Fatalf("resent = %#v, calls = %d", resent, submitter.calls)
 	}
+	if len(submitter.messages) != 2 || submitter.messages[0].DestinationURL != submitter.messages[1].DestinationURL {
+		t.Fatalf("resend URLs = %#v", submitter.messages)
+	}
 	replayed, err := invitations.Resend(ctx, request)
 	if err != nil || replayed.Submission.SubmissionID != resent.Submission.SubmissionID || submitter.calls != 2 {
 		t.Fatalf("resend replay = %#v, %v, calls = %d", replayed, err, submitter.calls)
@@ -445,6 +505,313 @@ func TestInvitationResendCooldownReplayAndRevoke(t *testing.T) {
 	inbox, err := invitations.ListForUser(ctx, userID, sessions[0])
 	if err != nil || len(inbox.Invitations) != 0 {
 		t.Fatalf("revoked inbox = %#v, %v", inbox, err)
+	}
+}
+
+func TestInvitationResendReplayUsesFreshClockAfterAuthorityWait(t *testing.T) {
+	ctx := context.Background()
+	pool := openMigratedTestPool(t, ctx)
+	store := NewStore(pool)
+	manager := invitationManagerFixture(t, ctx, store)
+	submitter := &acceptedInvitationSubmitter{}
+	invitations := newTestInvitations(t, store, submitter)
+	issued, err := invitations.Issue(ctx, space.IssueInvitationRequest{
+		SpaceID:        manager.SpaceID,
+		ActorUserID:    manager.UserID,
+		RecipientEmail: "resend-replay-clock@example.com",
+		IdempotencyKey: "issue-resend-replay-clock",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `update space_invitation_submissions set created_at=created_at-interval '61 seconds' where invitation_id=$1`, issued.InvitationID); err != nil {
+		t.Fatal(err)
+	}
+	requestDigest := sha256.Sum256([]byte(`{"invitation_id":"` + issued.InvitationID + `"}`))
+	submissionID := uuid.NewString()
+	providerKey := "space-invitation/" + submissionID
+	payloadDigest, err := submitter.InvitationPayloadDigest(space.InvitationMessage{
+		Recipient:      issued.RecipientEmail,
+		DestinationURL: "https://carry.example/invitations/" + issued.InvitationID,
+		IdempotencyKey: providerKey,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := space.PrepareInvitationResendCommand{
+		SpaceID:                manager.SpaceID,
+		InvitationID:           issued.InvitationID,
+		ActorUserID:            manager.UserID,
+		SubmissionID:           submissionID,
+		IdempotencyKey:         "resend-replay-clock",
+		RequestDigest:          requestDigest,
+		ProviderIdempotencyKey: providerKey,
+		PayloadDigest:          payloadDigest,
+	}
+	prepared, err := store.PrepareInvitationResend(ctx, command)
+	if err != nil || !prepared.Submission.SubmitEligible {
+		t.Fatalf("prepare resend = %#v, %v", prepared, err)
+	}
+	if _, err := pool.Exec(ctx, `
+		update space_invitations
+		set created_at=transaction_timestamp()-interval '7 days'+interval '400 milliseconds',
+		    expires_at=transaction_timestamp()+interval '400 milliseconds'
+		where invitation_id=$1
+	`, issued.InvitationID); err != nil {
+		t.Fatal(err)
+	}
+	blocker, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = blocker.Rollback(context.Background()) }()
+	if _, err := blocker.Exec(ctx, `select user_id from space_memberships where space_id=$1 and user_id=$2 for update`, manager.SpaceID, manager.UserID); err != nil {
+		t.Fatal(err)
+	}
+	type replayResult struct {
+		invitation space.IssuedInvitation
+		err        error
+	}
+	result := make(chan replayResult, 1)
+	go func() {
+		replayed, replayErr := store.PrepareInvitationResend(ctx, command)
+		result <- replayResult{invitation: replayed, err: replayErr}
+	}()
+	time.Sleep(700 * time.Millisecond)
+	if err := blocker.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	replayed := <-result
+	if replayed.err != nil {
+		t.Fatalf("replay resend: %v", replayed.err)
+	}
+	if replayed.invitation.Submission.SubmitEligible {
+		t.Fatalf("expired replay remained submit eligible: %#v", replayed.invitation)
+	}
+}
+
+func TestTargetedInvitationProjectsOnlyExactOwnerAndTerminalTruth(t *testing.T) {
+	ctx := context.Background()
+	pool := openMigratedTestPool(t, ctx)
+	store := NewStore(pool)
+	manager := invitationManagerFixture(t, ctx, store)
+	invitations := newTestInvitations(t, store, &acceptedInvitationSubmitter{})
+	issued, err := invitations.Issue(ctx, space.IssueInvitationRequest{
+		SpaceID:        manager.SpaceID,
+		ActorUserID:    manager.UserID,
+		RecipientEmail: "targeted@example.com",
+		IdempotencyKey: "issue-targeted",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownerID, _ := seedIdentityUser(t, ctx, store, "targeted@example.com", 0)
+	providerSession := createIdentityTestSession(t, ctx, store, ownerID, identity.GoogleMethod)
+	pending, err := invitations.LoadForUser(ctx, issued.InvitationID, ownerID, providerSession)
+	if err != nil {
+		t.Fatalf("load pending projection: %v", err)
+	}
+	if pending.State != space.InvitationPending {
+		t.Fatalf("pending state = %#v", pending)
+	}
+	if !pending.ReauthenticationRequired {
+		t.Fatalf("pending proof = %#v", pending)
+	}
+	if pending.SpaceName != "Invitation Space" {
+		t.Fatalf("pending Space = %#v", pending)
+	}
+	wrongID, wrongSessions := seedIdentityUser(t, ctx, store, "other-targeted@example.com", 1)
+	for _, unavailableID := range []string{issued.InvitationID, uuid.NewString()} {
+		if _, err := invitations.LoadForUser(ctx, unavailableID, wrongID, wrongSessions[0]); !errors.Is(err, space.ErrInvitationUnavailable) {
+			t.Fatalf("non-owner projection %s = %v", unavailableID, err)
+		}
+	}
+	acceptedByOther, err := invitations.Issue(ctx, space.IssueInvitationRequest{
+		SpaceID:        manager.SpaceID,
+		ActorUserID:    manager.UserID,
+		RecipientEmail: "accepted-by-other@example.com",
+		IdempotencyKey: "issue-accepted-by-other",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherOwnerID, otherOwnerSessions := seedIdentityUser(t, ctx, store, "accepted-by-other@example.com", 1)
+	if _, err := pool.Exec(ctx, `
+		update space_invitations
+		set accepted_by_user_id=$2, accepted_at=clock_timestamp(), accept_result='joined',
+			accept_idempotency_key='accepted-by-other',
+			accept_request_digest=decode(repeat('01',32),'hex')
+		where invitation_id=$1
+	`, acceptedByOther.InvitationID, manager.UserID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := invitations.LoadForUser(ctx, acceptedByOther.InvitationID, otherOwnerID, otherOwnerSessions[0]); !errors.Is(err, space.ErrInvitationUnavailable) {
+		t.Fatalf("accepted-by-other owner projection = %v", err)
+	}
+	if _, err := invitations.Accept(ctx, space.AcceptInvitationCommand{
+		InvitationID:   acceptedByOther.InvitationID,
+		UserID:         otherOwnerID,
+		SessionID:      otherOwnerSessions[0],
+		IdempotencyKey: "accept-as-later-email-owner",
+	}); !errors.Is(err, space.ErrInvitationUnavailable) {
+		t.Fatalf("accepted-by-other owner acceptance = %v", err)
+	}
+	var laterOwnerMemberships int
+	if err := pool.QueryRow(ctx, `select count(*) from space_memberships where space_id=$1 and user_id=$2`, manager.SpaceID, otherOwnerID).Scan(&laterOwnerMemberships); err != nil {
+		t.Fatal(err)
+	}
+	if laterOwnerMemberships != 0 {
+		t.Fatalf("later Email owner Memberships = %d", laterOwnerMemberships)
+	}
+	emailSession := createIdentityTestSession(t, ctx, store, ownerID, identity.EmailMethod)
+	if _, err := invitations.Accept(ctx, space.AcceptInvitationCommand{
+		InvitationID:   issued.InvitationID,
+		UserID:         ownerID,
+		SessionID:      emailSession,
+		IdempotencyKey: "accept-targeted",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	accepted, err := invitations.LoadForUser(ctx, issued.InvitationID, ownerID, emailSession)
+	if err != nil {
+		t.Fatalf("load accepted projection: %v", err)
+	}
+	if accepted.State != space.InvitationAccepted {
+		t.Fatalf("accepted state = %#v", accepted)
+	}
+	if accepted.AcceptResult != "joined" {
+		t.Fatalf("accepted result = %#v", accepted)
+	}
+	if !accepted.CurrentMember {
+		t.Fatalf("accepted Membership = %#v", accepted)
+	}
+	if _, err := pool.Exec(ctx, `update space_memberships set revoked_at=clock_timestamp() where space_id=$1 and user_id=$2`, manager.SpaceID, ownerID); err != nil {
+		t.Fatal(err)
+	}
+	former, err := invitations.LoadForUser(ctx, issued.InvitationID, ownerID, emailSession)
+	if err != nil || former.CurrentMember {
+		t.Fatalf("former projection = %#v, %v", former, err)
+	}
+
+	for _, state := range []space.InvitationState{space.InvitationRevoked, space.InvitationExpired} {
+		email := string(state) + "-targeted@example.com"
+		terminal, issueErr := invitations.Issue(ctx, space.IssueInvitationRequest{
+			SpaceID:        manager.SpaceID,
+			ActorUserID:    manager.UserID,
+			RecipientEmail: email,
+			IdempotencyKey: "issue-" + string(state),
+		})
+		if issueErr != nil {
+			t.Fatal(issueErr)
+		}
+		terminalOwner, _ := seedIdentityUser(t, ctx, store, email, 0)
+		terminalSession := createIdentityTestSession(t, ctx, store, terminalOwner, identity.EmailMethod)
+		if state == space.InvitationRevoked {
+			if err := invitations.Revoke(ctx, space.RevokeInvitationCommand{
+				SpaceID:        manager.SpaceID,
+				InvitationID:   terminal.InvitationID,
+				ActorUserID:    manager.UserID,
+				IdempotencyKey: "revoke-targeted",
+			}); err != nil {
+				t.Fatal(err)
+			}
+		} else if _, err := pool.Exec(ctx, `update space_invitations set created_at=created_at-interval '8 days', expires_at=expires_at-interval '8 days' where invitation_id=$1`, terminal.InvitationID); err != nil {
+			t.Fatal(err)
+		}
+		projected, err := invitations.LoadForUser(ctx, terminal.InvitationID, terminalOwner, terminalSession)
+		if err != nil || projected.State != state {
+			t.Fatalf("%s projection = %#v, %v", state, projected, err)
+		}
+	}
+}
+
+func TestInvitationAcceptAndRevokeUseClockAfterInvitationLockWait(t *testing.T) {
+	ctx := context.Background()
+	pool := openMigratedTestPool(t, ctx)
+	store := NewStore(pool)
+	manager := invitationManagerFixture(t, ctx, store)
+	invitations := newTestInvitations(t, store, &acceptedInvitationSubmitter{})
+
+	acceptIssue, err := invitations.Issue(ctx, space.IssueInvitationRequest{
+		SpaceID:        manager.SpaceID,
+		ActorUserID:    manager.UserID,
+		RecipientEmail: "wait-accept@example.com",
+		IdempotencyKey: "issue-wait-accept",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	acceptUser, acceptSessions := seedIdentityUser(t, ctx, store, "wait-accept@example.com", 1)
+	if _, err := pool.Exec(ctx, `update space_invitations set created_at=boundary.expires_at-interval '7 days', expires_at=boundary.expires_at from (select clock_timestamp()+interval '400 milliseconds' as expires_at) as boundary where invitation_id=$1`, acceptIssue.InvitationID); err != nil {
+		t.Fatal(err)
+	}
+	acceptLock, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := acceptLock.Exec(ctx, `select invitation_id from space_invitations where invitation_id=$1 for update`, acceptIssue.InvitationID); err != nil {
+		t.Fatal(err)
+	}
+	acceptResult := make(chan error, 1)
+	go func() {
+		_, acceptErr := invitations.Accept(ctx, space.AcceptInvitationCommand{
+			InvitationID:   acceptIssue.InvitationID,
+			UserID:         acceptUser,
+			SessionID:      acceptSessions[0],
+			IdempotencyKey: "accept-after-wait",
+		})
+		acceptResult <- acceptErr
+	}()
+	time.Sleep(700 * time.Millisecond)
+	if err := acceptLock.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-acceptResult; !errors.Is(err, space.ErrInvitationExpired) {
+		t.Fatalf("post-wait accept = %v", err)
+	}
+	var membershipCount int
+	if err := pool.QueryRow(ctx, `select count(*) from space_memberships where space_id=$1 and user_id=$2`, manager.SpaceID, acceptUser).Scan(&membershipCount); err != nil || membershipCount != 0 {
+		t.Fatalf("expired accept consequences = %d, %v", membershipCount, err)
+	}
+
+	revokeIssue, err := invitations.Issue(ctx, space.IssueInvitationRequest{
+		SpaceID:        manager.SpaceID,
+		ActorUserID:    manager.UserID,
+		RecipientEmail: "wait-revoke@example.com",
+		IdempotencyKey: "issue-wait-revoke",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `update space_invitations set created_at=boundary.expires_at-interval '7 days', expires_at=boundary.expires_at from (select clock_timestamp()+interval '400 milliseconds' as expires_at) as boundary where invitation_id=$1`, revokeIssue.InvitationID); err != nil {
+		t.Fatal(err)
+	}
+	revokeLock, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := revokeLock.Exec(ctx, `select invitation_id from space_invitations where invitation_id=$1 for update`, revokeIssue.InvitationID); err != nil {
+		t.Fatal(err)
+	}
+	revokeResult := make(chan error, 1)
+	go func() {
+		revokeResult <- invitations.Revoke(ctx, space.RevokeInvitationCommand{
+			SpaceID:        manager.SpaceID,
+			InvitationID:   revokeIssue.InvitationID,
+			ActorUserID:    manager.UserID,
+			IdempotencyKey: "revoke-after-wait",
+		})
+	}()
+	time.Sleep(700 * time.Millisecond)
+	if err := revokeLock.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-revokeResult; !errors.Is(err, space.ErrInvitationExpired) {
+		t.Fatalf("post-wait revoke = %v", err)
+	}
+	var revokedAt *time.Time
+	if err := pool.QueryRow(ctx, `select revoked_at from space_invitations where invitation_id=$1`, revokeIssue.InvitationID).Scan(&revokedAt); err != nil || revokedAt != nil {
+		t.Fatalf("expired revoke terminal = %v, %v", revokedAt, err)
 	}
 }
 
@@ -484,7 +851,7 @@ func TestConcurrentInvitationAcceptsHaveOneWinner(t *testing.T) {
 	for err := range errorsSeen {
 		if err == nil {
 			successes++
-		} else if errors.Is(err, space.ErrIdempotencyConflict) {
+		} else if errors.Is(err, space.ErrInvitationAccepted) {
 			conflicts++
 		} else {
 			t.Fatalf("accept error = %v", err)
@@ -558,11 +925,27 @@ func invitationManagerFixture(t *testing.T, ctx context.Context, store *Store) t
 
 func newTestInvitations(t *testing.T, persistence space.InvitationPersistence, submitter space.InvitationSubmitter) *space.Invitations {
 	t.Helper()
-	invitations, err := space.NewInvitations(persistence, submitter, "https://carry.example/invitations")
+	invitations, err := space.NewInvitations(persistence, submitter, "https://carry.example")
 	if err != nil {
 		t.Fatalf("create invitation behavior: %v", err)
 	}
 	return invitations
+}
+
+type invitationPrepareResponseLossStore struct {
+	*Store
+	lost          bool
+	invitationIDs []string
+}
+
+func (store *invitationPrepareResponseLossStore) PrepareInvitation(ctx context.Context, command space.PrepareInvitationCommand) (space.IssuedInvitation, error) {
+	store.invitationIDs = append(store.invitationIDs, command.InvitationID)
+	issued, err := store.Store.PrepareInvitation(ctx, command)
+	if err == nil && !store.lost {
+		store.lost = true
+		return space.IssuedInvitation{}, errors.New("simulated prepared response loss")
+	}
+	return issued, err
 }
 
 type invitationRecordResponseLossStore struct {
@@ -580,17 +963,19 @@ func (store *invitationRecordResponseLossStore) RecordInvitationSubmission(ctx c
 }
 
 type acceptedInvitationSubmitter struct {
-	calls  int
-	state  space.InvitationSubmissionState
-	cancel context.CancelFunc
+	calls    int
+	state    space.InvitationSubmissionState
+	cancel   context.CancelFunc
+	messages []space.InvitationMessage
 }
 
 func (submitter *acceptedInvitationSubmitter) InvitationPayloadDigest(message space.InvitationMessage) ([32]byte, error) {
 	return sha256.Sum256([]byte(message.Recipient + "\x00" + message.DestinationURL + "\x00" + message.IdempotencyKey)), nil
 }
 
-func (submitter *acceptedInvitationSubmitter) SubmitInvitation(_ context.Context, _ space.InvitationMessage, _ [32]byte) space.InvitationSubmission {
+func (submitter *acceptedInvitationSubmitter) SubmitInvitation(_ context.Context, message space.InvitationMessage, _ [32]byte) space.InvitationSubmission {
 	submitter.calls++
+	submitter.messages = append(submitter.messages, message)
 	if submitter.cancel != nil {
 		submitter.cancel()
 	}

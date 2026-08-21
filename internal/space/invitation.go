@@ -24,6 +24,9 @@ var (
 	ErrInvitationConflict           = errors.New("a current invitation already exists")
 	ErrInvitationUnavailable        = errors.New("Space invitation is unavailable")
 	ErrInvitationAlreadyMember      = errors.New("User already belongs to the Space")
+	ErrInvitationExpired            = errors.New("Space invitation has expired")
+	ErrInvitationRevoked            = errors.New("Space invitation was revoked")
+	ErrInvitationAccepted           = errors.New("Space invitation was already accepted")
 	ErrInvitationProofRequired      = errors.New("recent proof of the invited Email is required")
 	ErrInvitationResendCooldown     = errors.New("Space invitation resend is cooling down")
 	ErrInvitationSubmissionConflict = errors.New("invitation submission outcome conflicts")
@@ -60,22 +63,84 @@ type InvitationPersistence interface {
 	RecordInvitationSubmission(context.Context, RecordInvitationSubmissionCommand) (InvitationSubmission, error)
 	ListSpaceInvitations(context.Context, string, string) ([]ManagedInvitation, error)
 	ListUserInvitations(context.Context, string, string) (InvitationInbox, error)
+	LoadInvitationForUser(context.Context, string, string, string) (RecipientInvitation, error)
 	RevokeInvitation(context.Context, RevokeInvitationCommand) error
 	AcceptInvitation(context.Context, AcceptInvitationCommand) (AcceptedInvitation, error)
 }
 
 type Invitations struct {
-	persistence    InvitationPersistence
-	submitter      InvitationSubmitter
-	destinationURL string
+	persistence InvitationPersistence
+	submitter   InvitationSubmitter
+	origin      string
 }
 
-func NewInvitations(persistence InvitationPersistence, submitter InvitationSubmitter, destinationURL string) (*Invitations, error) {
-	parsed, err := url.Parse(strings.TrimSpace(destinationURL))
-	if persistence == nil || submitter == nil || err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.Path != "/invitations" {
+func NewInvitations(persistence InvitationPersistence, submitter InvitationSubmitter, origin string) (*Invitations, error) {
+	if persistence == nil || submitter == nil {
 		return nil, ErrInvalidInvitation
 	}
-	return &Invitations{persistence: persistence, submitter: submitter, destinationURL: parsed.String()}, nil
+	if _, err := InvitationURL(origin, uuid.NewString()); err != nil {
+		return nil, err
+	}
+	return &Invitations{
+		persistence: persistence,
+		submitter:   submitter,
+		origin:      origin,
+	}, nil
+}
+
+func InvitationPath(invitationID string) (string, error) {
+	if uuid.Validate(invitationID) != nil {
+		return "", ErrInvalidInvitation
+	}
+	return "/invitations/" + url.PathEscape(invitationID), nil
+}
+
+func InvitationURL(origin, invitationID string) (string, error) {
+	if strings.TrimSpace(origin) != origin || origin == "" {
+		return "", ErrInvalidInvitation
+	}
+	parsed, err := url.Parse(origin)
+	if err != nil {
+		return "", ErrInvalidInvitation
+	}
+	if parsed.Scheme != "https" {
+		return "", ErrInvalidInvitation
+	}
+	if parsed.Host == "" {
+		return "", ErrInvalidInvitation
+	}
+	if parsed.Hostname() == "" {
+		return "", ErrInvalidInvitation
+	}
+	if parsed.User != nil {
+		return "", ErrInvalidInvitation
+	}
+	if parsed.Path != "" {
+		return "", ErrInvalidInvitation
+	}
+	if parsed.RawPath != "" {
+		return "", ErrInvalidInvitation
+	}
+	if parsed.RawQuery != "" {
+		return "", ErrInvalidInvitation
+	}
+	if parsed.Fragment != "" {
+		return "", ErrInvalidInvitation
+	}
+	if parsed.Opaque != "" {
+		return "", ErrInvalidInvitation
+	}
+	if parsed.Host != strings.ToLower(parsed.Host) {
+		return "", ErrInvalidInvitation
+	}
+	if origin != "https://"+parsed.Host {
+		return "", ErrInvalidInvitation
+	}
+	path, err := InvitationPath(invitationID)
+	if err != nil {
+		return "", err
+	}
+	return origin + path, nil
 }
 
 type IssueInvitationRequest struct {
@@ -99,7 +164,15 @@ func (invitations *Invitations) Issue(ctx context.Context, request IssueInvitati
 	}{recipient, request.CanManageMembers, request.CanEnrollMachines})
 	invitationID, submissionID := uuid.NewString(), uuid.NewString()
 	providerKey := "space-invitation/" + submissionID
-	message := InvitationMessage{Recipient: recipient, DestinationURL: invitations.destinationURL, IdempotencyKey: providerKey}
+	destinationURL, err := InvitationURL(invitations.origin, invitationID)
+	if err != nil {
+		return IssuedInvitation{}, err
+	}
+	message := InvitationMessage{
+		Recipient:      recipient,
+		DestinationURL: destinationURL,
+		IdempotencyKey: providerKey,
+	}
 	payloadDigest, err := invitations.submitter.InvitationPayloadDigest(message)
 	if err != nil {
 		return IssuedInvitation{}, ErrInvitationSubmissionConflict
@@ -135,7 +208,15 @@ func (invitations *Invitations) Resend(ctx context.Context, request ResendInvita
 	if err != nil {
 		return IssuedInvitation{}, err
 	}
-	message := InvitationMessage{Recipient: recipient, DestinationURL: invitations.destinationURL, IdempotencyKey: providerKey}
+	destinationURL, err := InvitationURL(invitations.origin, request.InvitationID)
+	if err != nil {
+		return IssuedInvitation{}, err
+	}
+	message := InvitationMessage{
+		Recipient:      recipient,
+		DestinationURL: destinationURL,
+		IdempotencyKey: providerKey,
+	}
 	payloadDigest, err := invitations.submitter.InvitationPayloadDigest(message)
 	if err != nil {
 		return IssuedInvitation{}, ErrInvitationSubmissionConflict
@@ -155,7 +236,15 @@ func (invitations *Invitations) submit(ctx context.Context, issued IssuedInvitat
 	if !issued.Submission.SubmitEligible {
 		return issued, nil
 	}
-	message := InvitationMessage{Recipient: issued.Submission.Recipient, DestinationURL: invitations.destinationURL, IdempotencyKey: issued.Submission.ProviderIdempotencyKey}
+	destinationURL, err := InvitationURL(invitations.origin, issued.InvitationID)
+	if err != nil {
+		return IssuedInvitation{}, err
+	}
+	message := InvitationMessage{
+		Recipient:      issued.Submission.Recipient,
+		DestinationURL: destinationURL,
+		IdempotencyKey: issued.Submission.ProviderIdempotencyKey,
+	}
 	actualDigest, err := invitations.submitter.InvitationPayloadDigest(message)
 	if err != nil || actualDigest != issued.Submission.PayloadDigest {
 		return IssuedInvitation{}, ErrInvitationSubmissionConflict
@@ -179,6 +268,9 @@ func (invitations *Invitations) ListForSpace(ctx context.Context, userID, spaceI
 }
 func (invitations *Invitations) ListForUser(ctx context.Context, userID, sessionID string) (InvitationInbox, error) {
 	return invitations.persistence.ListUserInvitations(ctx, userID, sessionID)
+}
+func (invitations *Invitations) LoadForUser(ctx context.Context, invitationID, userID, sessionID string) (RecipientInvitation, error) {
+	return invitations.persistence.LoadInvitationForUser(ctx, invitationID, userID, sessionID)
 }
 func (invitations *Invitations) Revoke(ctx context.Context, command RevokeInvitationCommand) error {
 	command.RequestDigest = digest(struct {
@@ -237,10 +329,23 @@ type IssuedInvitation struct {
 	Submission                                                InvitationSubmission
 }
 type ManagedInvitation = IssuedInvitation
+type InvitationState string
+
+const (
+	InvitationPending  InvitationState = "pending"
+	InvitationAccepted InvitationState = "accepted"
+	InvitationRevoked  InvitationState = "revoked"
+	InvitationExpired  InvitationState = "expired"
+)
+
 type RecipientInvitation struct {
 	InvitationID, SpaceID, SpaceName, InviterDisplayName string
 	CanManageMembers, CanEnrollMachines                  bool
 	CreatedAt, ExpiresAt                                 time.Time
+	State                                                InvitationState
+	AcceptResult                                         string
+	CurrentMember                                        bool
+	ReauthenticationRequired                             bool
 }
 type InvitationInbox struct {
 	Invitations              []RecipientInvitation

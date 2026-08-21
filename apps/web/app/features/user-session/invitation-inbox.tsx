@@ -7,22 +7,18 @@ import {
   requestIdentityEmailCode,
   verifyIdentityEmailCode,
 } from "../../carry-api";
-import type { InvitationInbox, User } from "../../generated/types.gen";
+import type { InvitationInbox } from "../../generated/types.gen";
 import { IdentityMethodSettings } from "./identity-methods";
+import type { TargetedInvitationState } from "./use-user-session";
 
 export function InvitationInboxView({
-  user,
   initialInbox,
-  onChanged,
   onSkip,
 }: {
-  user: User;
   initialInbox: InvitationInbox;
-  onChanged: () => void;
   onSkip: () => void;
 }) {
   const [inbox, setInbox] = useState(initialInbox);
-  const [showMethods, setShowMethods] = useState(false);
   const [challenge, setChallenge] = useState<{
     id: string;
     requestKey: string;
@@ -101,9 +97,8 @@ export function InvitationInboxView({
     setError(null);
     try {
       await acceptInvitation(command.invitationID, command.key);
-      window.history.replaceState(null, "", "/");
       setPendingAccept(null);
-      onChanged();
+      window.location.assign("/");
     } catch (caught) {
       if (!(caught instanceof MutationOutcomeUnknownError))
         setPendingAccept(null);
@@ -113,15 +108,6 @@ export function InvitationInboxView({
     }
   }
 
-  if (showMethods)
-    return (
-      <IdentityMethodSettings
-        onClose={() => {
-          setShowMethods(false);
-          void refresh();
-        }}
-      />
-    );
   return (
     <main className="center-state invitation-inbox">
       <p className="brand-mark">
@@ -135,22 +121,9 @@ export function InvitationInboxView({
       ) : null}
       {inbox.invitations.length === 0 ? (
         <>
-          <p>No invitation matches this Carry User’s linked Email.</p>
-          <p>
-            Google or GitHub profile email is not used. Link the exact invited
-            Email explicitly.
-          </p>
-          <button
-            className="secondary-button"
-            type="button"
-            onClick={() => setShowMethods(true)}
-          >
-            Manage sign-in methods
-          </button>
+          <p>No pending Space invitations.</p>
           <button className="ghost-button" type="button" onClick={onSkip}>
-            {user.spaces.length === 0
-              ? "Create a new Space instead"
-              : "Back to Carry"}
+            Back to Carry
           </button>
         </>
       ) : (
@@ -243,10 +216,252 @@ export function InvitationInboxView({
   );
 }
 
+export function TargetedInvitationView({
+  state,
+  onReload,
+  onSkip,
+  onSignOut,
+}: {
+  state: TargetedInvitationState;
+  onReload: () => void;
+  onSkip: () => void;
+  onSignOut: () => void;
+}) {
+  const [showMethods, setShowMethods] = useState(false);
+  const [challenge, setChallenge] = useState<{
+    id: string;
+    requestKey: string;
+    verifyKey: string;
+  } | null>(null);
+  const [code, setCode] = useState("");
+  const [acceptKey, setAcceptKey] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const invitation = state.status === "owner" ? state.invitation : null;
+
+  async function confirmEmail() {
+    const next = challenge ?? {
+      id: crypto.randomUUID(),
+      requestKey: crypto.randomUUID(),
+      verifyKey: crypto.randomUUID(),
+    };
+    setChallenge(next);
+    setBusy(true);
+    setError(null);
+    try {
+      await requestIdentityEmailCode(
+        "reauthenticate",
+        next.id,
+        next.requestKey,
+      );
+    } catch (caught) {
+      setError(message(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function verify(event: React.FormEvent) {
+    event.preventDefault();
+    if (!challenge || !/^\d{6}$/.test(code)) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await verifyIdentityEmailCode(
+        "reauthenticate",
+        challenge.id,
+        code,
+        challenge.verifyKey,
+      );
+      onReload();
+    } catch (caught) {
+      setError(message(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function accept() {
+    if (!invitation) return;
+    const key = acceptKey ?? crypto.randomUUID();
+    setAcceptKey(key);
+    setBusy(true);
+    setError(null);
+    try {
+      await acceptInvitation(invitation.invitation_id, key);
+      window.location.assign("/");
+    } catch (caught) {
+      if (caught instanceof MutationOutcomeUnknownError) {
+        setError(
+          "Carry cannot confirm whether acceptance completed. Reload to reconcile the invitation before choosing again.",
+        );
+      } else {
+        setAcceptKey(null);
+        setError(message(caught));
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (showMethods)
+    return (
+      <IdentityMethodSettings
+        onClose={() => {
+          setShowMethods(false);
+          onReload();
+        }}
+      />
+    );
+
+  return (
+    <main className="center-state invitation-inbox">
+      <p className="brand-mark">
+        Carry<span className="brand-dot">.</span>
+      </p>
+      <h1>Space invitation</h1>
+      {error ? (
+        <p className="alert" role="alert">
+          {error}
+        </p>
+      ) : null}
+      {state.status === "loading" ? (
+        <p>Loading invitation…</p>
+      ) : state.status === "error" ? (
+        <>
+          <p className="alert" role="alert">
+            {state.message}
+          </p>
+          <button className="secondary-button" type="button" onClick={onReload}>
+            Reload invitation
+          </button>
+        </>
+      ) : state.status === "unavailable" ? (
+        state.hasEmail ? (
+          <>
+            <p>This Carry User cannot review this invitation.</p>
+            <p>Sign out and continue as the Carry User that owns it.</p>
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={onSignOut}
+            >
+              Sign out
+            </button>
+          </>
+        ) : (
+          <>
+            <p>Confirm your Email to review this invitation.</p>
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={() => setShowMethods(true)}
+            >
+              Confirm Email
+            </button>
+          </>
+        )
+      ) : invitation ? (
+        <>
+          <strong>{invitation.space_name}</strong>
+          <p>Invited by {invitation.inviter_display_name}</p>
+          <p>
+            {grants(
+              invitation.can_manage_members,
+              invitation.can_enroll_machines,
+            )}
+          </p>
+          {invitation.state === "revoked" ? (
+            <p>This invitation was revoked before acceptance.</p>
+          ) : null}
+          {invitation.state === "expired" ? (
+            <p>This invitation expired before acceptance.</p>
+          ) : null}
+          {invitation.state === "accepted" ? (
+            <>
+              <p>
+                {invitation.accept_result === "already_member"
+                  ? "This invitation was accepted while you were already a member."
+                  : "This invitation was accepted and joined the Space."}
+              </p>
+              <p>
+                {invitation.current_member
+                  ? "Your Membership is current."
+                  : "You are no longer a current member of this Space."}
+              </p>
+            </>
+          ) : null}
+          {invitation.state === "pending" ? (
+            invitation.reauthentication_required ? (
+              <section className="identity-confirmation">
+                <p>Confirm the invited Email before accepting.</p>
+                {!challenge ? (
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void confirmEmail()}
+                  >
+                    Confirm with Email
+                  </button>
+                ) : (
+                  <form onSubmit={(event) => void verify(event)}>
+                    <label htmlFor="targeted-invitation-code">
+                      Newest six-digit Email code
+                    </label>
+                    <input
+                      id="targeted-invitation-code"
+                      inputMode="numeric"
+                      value={code}
+                      onChange={(event) =>
+                        setCode(
+                          event.target.value.replace(/\D/g, "").slice(0, 6),
+                        )
+                      }
+                    />
+                    <button
+                      className="primary-button"
+                      disabled={busy || !/^\d{6}$/.test(code)}
+                    >
+                      Confirm Email
+                    </button>
+                  </form>
+                )}
+              </section>
+            ) : (
+              <button
+                className="primary-button"
+                type="button"
+                disabled={busy}
+                onClick={() => void accept()}
+              >
+                Accept and join
+              </button>
+            )
+          ) : null}
+        </>
+      ) : null}
+      {acceptKey ? (
+        <button
+          className="ghost-button"
+          type="button"
+          disabled={busy}
+          onClick={onReload}
+        >
+          Reload invitation status
+        </button>
+      ) : null}
+      <button className="ghost-button" type="button" onClick={onSkip}>
+        Not now
+      </button>
+    </main>
+  );
+}
+
 function grants(manage: boolean, enroll: boolean) {
   const values = [
     manage ? "Can manage members" : "Cannot manage members",
-    enroll ? "Can enroll Machines" : "Cannot enroll Machines",
+    enroll ? "Can connect Hosts" : "Cannot connect Hosts",
   ];
   return values.join(" · ");
 }

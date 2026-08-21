@@ -12,7 +12,7 @@ func TestInvitationIssueCanonicalizesRecipientAndRecordsSubmission(t *testing.T)
 	submitter := &invitationSubmitterStub{result: InvitationSubmission{
 		State: InvitationSubmissionAccepted, ProviderMessageID: "email_123",
 	}}
-	invitations, err := NewInvitations(persistence, submitter, "https://carry.example/invitations")
+	invitations, err := NewInvitations(persistence, submitter, "https://carry.example")
 	if err != nil {
 		t.Fatalf("new invitations: %v", err)
 	}
@@ -31,8 +31,9 @@ func TestInvitationIssueCanonicalizesRecipientAndRecordsSubmission(t *testing.T)
 	if persistence.prepared.ExpiresIn != InvitationLifetime {
 		t.Fatalf("lifetime = %s", persistence.prepared.ExpiresIn)
 	}
-	if submitter.message.DestinationURL != "https://carry.example/invitations" || submitter.message.Recipient != "teammate@example.com" {
-		t.Fatalf("message = %#v", submitter.message)
+	wantURL := "https://carry.example/invitations/" + issued.InvitationID
+	if submitter.message.DestinationURL != wantURL || submitter.message.Recipient != "teammate@example.com" {
+		t.Fatalf("message = %#v, want URL %q", submitter.message, wantURL)
 	}
 	if persistence.recorded.State != InvitationSubmissionAccepted || persistence.recorded.ProviderMessageID != "email_123" {
 		t.Fatalf("recorded = %#v", persistence.recorded)
@@ -45,7 +46,7 @@ func TestInvitationIssueCanonicalizesRecipientAndRecordsSubmission(t *testing.T)
 func TestInvitationIssuePreservesUnknown(t *testing.T) {
 	persistence := &invitationPersistenceStub{}
 	submitter := &invitationSubmitterStub{result: InvitationSubmission{State: InvitationSubmissionUnknown}}
-	invitations, err := NewInvitations(persistence, submitter, "https://carry.example/invitations")
+	invitations, err := NewInvitations(persistence, submitter, "https://carry.example")
 	if err != nil {
 		t.Fatalf("new invitations: %v", err)
 	}
@@ -61,11 +62,34 @@ func TestInvitationIssuePreservesUnknown(t *testing.T) {
 	}
 }
 
+func TestInvitationPathAndURLAreExactAndRejectUnsafeInputs(t *testing.T) {
+	invitationID := "10000000-0000-4000-8000-000000000001"
+	path, err := InvitationPath(invitationID)
+	if err != nil || path != "/invitations/"+invitationID {
+		t.Fatalf("path = %q, %v", path, err)
+	}
+	exact, err := InvitationURL("https://carry.example", invitationID)
+	if err != nil || exact != "https://carry.example"+path {
+		t.Fatalf("URL = %q, %v", exact, err)
+	}
+	for _, invalid := range []struct{ origin, id string }{
+		{"http://carry.example", invitationID},
+		{"https://carry.example/", invitationID},
+		{"https://carry.example/invitations", invitationID},
+		{"https://CARRY.example", invitationID},
+		{"https://carry.example", "not-a-uuid"},
+	} {
+		if _, err := InvitationURL(invalid.origin, invalid.id); !errors.Is(err, ErrInvalidInvitation) {
+			t.Errorf("unsafe URL %q / %q = %v", invalid.origin, invalid.id, err)
+		}
+	}
+}
+
 func TestInvitationRejectsUnsafeDestinationAndInvalidRequest(t *testing.T) {
-	if _, err := NewInvitations(&invitationPersistenceStub{}, &invitationSubmitterStub{}, "http://carry.example/invitations"); !errors.Is(err, ErrInvalidInvitation) {
+	if _, err := NewInvitations(&invitationPersistenceStub{}, &invitationSubmitterStub{}, "http://carry.example"); !errors.Is(err, ErrInvalidInvitation) {
 		t.Fatalf("destination error = %v", err)
 	}
-	invitations, err := NewInvitations(&invitationPersistenceStub{}, &invitationSubmitterStub{}, "https://carry.example/invitations")
+	invitations, err := NewInvitations(&invitationPersistenceStub{}, &invitationSubmitterStub{}, "https://carry.example")
 	if err != nil {
 		t.Fatalf("new invitations: %v", err)
 	}
@@ -116,6 +140,9 @@ func (stub *invitationPersistenceStub) ListSpaceInvitations(context.Context, str
 }
 func (stub *invitationPersistenceStub) ListUserInvitations(context.Context, string, string) (InvitationInbox, error) {
 	return InvitationInbox{}, nil
+}
+func (stub *invitationPersistenceStub) LoadInvitationForUser(context.Context, string, string, string) (RecipientInvitation, error) {
+	return RecipientInvitation{}, nil
 }
 func (stub *invitationPersistenceStub) RevokeInvitation(context.Context, RevokeInvitationCommand) error {
 	return nil

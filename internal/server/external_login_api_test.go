@@ -56,6 +56,56 @@ func TestExternalLoginStartUsesCanonicalHostAndLaxBrowserBinding(t *testing.T) {
 	}
 }
 
+func TestExternalLoginStartAndCallbackPreserveOnlyInvitationContinuation(t *testing.T) {
+	t.Parallel()
+	invitationID := "40000000-0000-4000-8000-000000000001"
+	login := &recordingExternalLogin{start: identity.ExternalLoginStart{
+		AuthorizationURL:  "https://accounts.google.com",
+		BrowserCredential: "binding",
+		ExpiresAt:         time.Now().Add(time.Minute),
+	}}
+	handler := externalLoginTestAPI(t, login, &recordingBrowserSessions{})
+	start := httptest.NewRequest(http.MethodPost, "https://carry.example/v1/auth/google/start", strings.NewReader("invitation_id="+invitationID))
+	start.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, start)
+	if response.Code != http.StatusSeeOther || login.started != "google:"+invitationID {
+		t.Fatalf("start = %d, continuation %q", response.Code, login.started)
+	}
+
+	login.session = identity.BrowserSession{
+		SessionID:    testSessionID,
+		UserID:       "provider-user",
+		ExpiresAt:    time.Now().Add(time.Hour),
+		InvitationID: invitationID,
+	}
+	callback := httptest.NewRequest(http.MethodGet, "https://carry.example/v1/auth/google/callback?code=code&state=state", nil)
+	callback.AddCookie(&http.Cookie{
+		Name:  externalLoginCookie,
+		Value: "binding",
+	})
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, callback)
+	if response.Header().Get("Location") != "https://carry.example/invitations/"+invitationID {
+		t.Fatalf("success location = %q", response.Header().Get("Location"))
+	}
+
+	login.completeErr = identity.ExternalProofFailure(identity.LoginPurpose, invitationID, identity.ErrExternalLoginDenied)
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, callback)
+	if response.Header().Get("Location") != "https://carry.example/invitations/"+invitationID+"?sign_in=cancelled" {
+		t.Fatalf("denied location = %q", response.Header().Get("Location"))
+	}
+
+	malformed := httptest.NewRequest(http.MethodPost, "https://carry.example/v1/auth/google/start", strings.NewReader("invitation_id=wrong"))
+	malformed.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, malformed)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("malformed continuation status = %d", response.Code)
+	}
+}
+
 func TestExternalLoginStartRejectsWrongHostCrossSiteAndAuthenticatedPrincipals(t *testing.T) {
 	t.Parallel()
 	credentials := testIdentityCredentials(t)
@@ -195,7 +245,7 @@ func TestExternalMethodCallbackFailuresReturnToSettings(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			login := &recordingExternalLogin{
-				completeErr: identity.ExternalProofFailure(test.purpose, test.cause),
+				completeErr: identity.ExternalProofFailure(test.purpose, "", test.cause),
 			}
 			handler := externalLoginTestAPI(t, login, &recordingBrowserSessions{})
 			request := httptest.NewRequest(
@@ -254,13 +304,13 @@ type recordingExternalLogin struct {
 	completed   bool
 }
 
-func (login *recordingExternalLogin) StartGoogle(context.Context) (identity.ExternalLoginStart, error) {
-	login.started = "google"
+func (login *recordingExternalLogin) StartGoogle(_ context.Context, invitationID string) (identity.ExternalLoginStart, error) {
+	login.started = "google:" + invitationID
 	return login.start, login.startErr
 }
 
-func (login *recordingExternalLogin) StartGitHub(context.Context) (identity.ExternalLoginStart, error) {
-	login.started = "github"
+func (login *recordingExternalLogin) StartGitHub(_ context.Context, invitationID string) (identity.ExternalLoginStart, error) {
+	login.started = "github:" + invitationID
 	return login.start, login.startErr
 }
 

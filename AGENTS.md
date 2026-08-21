@@ -1,7 +1,7 @@
 # Carry Agent Contract
 
-Current Node: **Node 13 — choose or create a Space (implementation active).**
-Issue #2 owns the approved journey, research and exact design budget; implementation must stay inside it.
+Current Node: **Node 14 — invitation link login and acceptance (implementation active).**
+Issue #3 owns the approved journey, research and Revised exact design freeze v3; implementation must stay inside that audited budget.
 
 Carry is an AI teammate: a person hands a responsibility over in carry.ai Web, a named Agent owns keeping it moving, and the Work stays true across Conversations, Agent sessions, Hosts, channels and time.
 
