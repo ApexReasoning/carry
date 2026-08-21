@@ -16,7 +16,7 @@ test("manager invitation defaults grants off and keeps Unknown truthful", async 
         input instanceof Request ? input : new Request(input, init);
       const path = new URL(request.url).pathname;
       if (request.method === "GET" && path.endsWith("/members"))
-        return json({ members: [] });
+        return json({ members: [], next_cursor: null });
       if (request.method === "GET" && path.endsWith("/invitations"))
         return json({ invitations: [] });
       if (request.method === "POST" && path.endsWith("/invitations")) {
@@ -42,9 +42,12 @@ test("manager invitation defaults grants off and keeps Unknown truthful", async 
   render(
     <MemberSettings
       spaceID="20000000-0000-4000-8000-000000000001"
+      spaceName="Research"
+      currentUserID="30000000-0000-4000-8000-000000000001"
       canManage
       canEnroll
       onClose={() => undefined}
+      onRemoved={() => undefined}
     />,
   );
   await user.type(

@@ -259,16 +259,22 @@ member removal、permission editing、Role、bulk/domain invite、bearer invitat
 
 ### 用户结果
 
-持有 `can_manage_members` 的成员可以移除一名 active Space member；移除立即撤销其未来 Space 访问，但不改写真实历史，也不能留下无人负责的 Open Work 或没有成员管理 authority 的 Space。
+持有 `can_manage_members` 的成员可以从 Settings → Members 移除一名 active Space member。若目标仍负责 Open Work，管理者必须显式选择一名 active successor；Carry 原子转交该目标名下全部 Open Work 并撤销 Membership。移除立即撤销目标未来 Space 访问，但不改写真实历史、全局登出 User、撤销 Space Machine 或自动猜测 successor。
 
 ### 关闭证据
 
-- actor、target Membership 与当前 authority 在一个 PostgreSQL transaction 中验证，并发 removal 一个 winner；
-- target 仍负责 Open Work 时拒绝 removal，成员先使用显式 transfer；
-- 唯一持有 `can_manage_members` 的成员不能移除自己或被移除；
-- removal 后旧 Browser/CLI session 即使仍代表同一 User，也无法读取或修改该 Space、私人 Conversation、Work 或 Machine inventory；
-- exact response-loss replay 收敛，different target/request 冲突；
-- removal 不删除历史作者、共享 Work 或私人 Conversation 内容，也不自动转交责任。
+- actor、target、可空 successor Membership 与当前 authority 在一个 PostgreSQL transaction 中重读；Space row 串行化同一 Space removal，same-target 或 cross-removal 只有有效 winner；
+- target 没有 Open Work 时 successor 必须为空；target 仍负责 Open Work 时 successor 必须是另一名准确 active Space member，完整 Open Work 集合与 Membership removal 全部提交或全部不提交；
+- Work create/removal、result acceptance/removal 与私人 message/reply removal races 由 Membership/Work lock 顺序裁决，不留下 inactive owner、部分 transfer 或 former-member commit；
+- Space 始终保留至少一名 active `can_manage_members` 与至少一名 active `can_enroll_machines` holder；同一 manager-removal command 可以移除自己但必须满足全部相同约束，普通成员 leave 不在本 Node；
+- removal 后旧 Browser/CLI credential 即使仍代表同一 User，也无法读取或修改该 Space、私人 Conversation、Work 或现有 Machine mutation surface；`/v1/me` 不再投影该 Space，其他 Space 与独立 Machine certificate 不受影响；
+- exact committed replay 绑定 actor、Space、target、successor 与 request digest，即使 actor 已移除自己也只返回同一结果；different target/successor/request 冲突；
+- removal 不删除历史作者、共享 Work、私人 Conversation、invitation 或 submission facts；pending invitation 保持 Node 9 固定期限与 grants，removed inviter 不能管理它，当前 manager 仍可显式 revoke；
+- Web 明确确认 target、Space、立即失去的访问、保留的历史/隐私、原子 Work successor 与不受影响的 Machine/User credential；Unknown retry 保留同一 command identity。
+
+### 明确不做
+
+通用或逐 Work transfer、普通成员 self-leave、permission editing、Role/Admin/Owner、Membership history/reason/reactivation、User suspension/deletion、全局 Browser/CLI logout、自动 invitation cancellation、Machine revoke/remote stop、通知或外部 I/O。Node 15 仍交付 current owner 主动发起的通用逐 Work transfer。
 
 ## 13. Node 11：Browser-approved member CLI
 
@@ -345,7 +351,7 @@ Node 进入实现前必须把研究授权和 provider submission 冻结为现有
 
 ### 用户结果
 
-当前负责人可以把一份 Open Work 明确转交给另一位 active Space member；新负责人可以理解共享 Work 当前事实并承担后续判断，私人 Conversation 不随转交泄漏。
+当前负责人可以把一份 Open Work 明确转交给另一位 active Space member；新负责人可以理解共享 Work 当前事实并承担后续判断，私人 Conversation 不随转交泄漏。这是通用、逐 Work、current-owner initiated journey，与 Node 10 仅在 member removal transaction 内由 manager 显式指定一个 successor 的批量 continuity consequence 不同。
 
 ### 关闭证据
 

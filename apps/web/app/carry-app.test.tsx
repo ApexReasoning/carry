@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, test, vi } from "vitest";
 
@@ -14,6 +14,101 @@ beforeEach(() => {
   window.localStorage.clear();
   window.sessionStorage.clear();
   window.history.replaceState(null, "", "/");
+});
+
+test("self-removal closes Settings and refreshes current User routing", async () => {
+  let removed = false;
+  let currentUserLoads = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request =
+        input instanceof Request ? input : new Request(input, init);
+      const path = new URL(request.url).pathname;
+      if (request.method === "GET" && path === "/v1/me") {
+        currentUserLoads++;
+        return json({
+          user_id: authenticatedMemberID,
+          display_name: "Alex Morgan",
+          spaces: removed
+            ? []
+            : [
+                {
+                  space_id: spaceID,
+                  name: "Research",
+                  can_manage_members: true,
+                  can_enroll_machines: true,
+                },
+              ],
+        });
+      }
+      if (isConversationList(request, path)) return json({ messages: [] });
+      if (request.method === "GET" && path === `/v1/spaces/${spaceID}/works`)
+        return json({ works: [], has_earlier_works: false });
+      if (request.method === "GET" && path.endsWith("/members"))
+        return json({
+          members: [
+            {
+              user_id: authenticatedMemberID,
+              display_name: "Alex Morgan",
+              can_manage_members: true,
+              can_enroll_machines: true,
+              open_work_count: 0,
+              joined_at: "2026-08-21T00:00:00Z",
+            },
+            {
+              user_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+              display_name: "Sam Lee",
+              can_manage_members: true,
+              can_enroll_machines: true,
+              open_work_count: 0,
+              joined_at: "2026-08-20T00:00:00Z",
+            },
+          ],
+          next_cursor: null,
+        });
+      if (
+        request.method === "GET" &&
+        path === `/v1/spaces/${spaceID}/invitations`
+      )
+        return json({ invitations: [] });
+      if (request.method === "POST" && path.endsWith("/remove")) {
+        expect(request.headers.get("Idempotency-Key")).toBeTruthy();
+        expect(await request.json()).toEqual({});
+        removed = true;
+        return new Response(null, { status: 204 });
+      }
+      if (request.method === "GET" && path === "/v1/invitations")
+        return json({ invitations: [], reauthentication_required: false });
+      throw new Error(`unexpected request: ${request.method} ${path}`);
+    }),
+  );
+
+  const user = userEvent.setup();
+  render(<App />);
+  await screen.findByRole("heading", {
+    name: "What should Carry keep moving?",
+  });
+  await user.click(screen.getByRole("button", { name: "Settings" }));
+  await user.click(screen.getByRole("button", { name: "Members" }));
+  const memberSettings = (
+    await screen.findByRole("heading", { name: "Members" })
+  ).closest("section") as HTMLElement;
+  const alex = within(memberSettings).getByText("Alex Morgan");
+  await user.click(
+    within(alex.closest("li") as HTMLElement).getByRole("button", {
+      name: "Remove from Space",
+    }),
+  );
+  await user.click(screen.getByRole("button", { name: "Remove Alex Morgan" }));
+
+  expect(
+    await screen.findByRole("heading", { name: "Create your Space" }),
+  ).toBeVisible();
+  expect(currentUserLoads).toBe(2);
+  expect(
+    screen.queryByRole("heading", { name: "Members" }),
+  ).not.toBeInTheDocument();
 });
 
 test("reopens Settings for a method callback failure", async () => {

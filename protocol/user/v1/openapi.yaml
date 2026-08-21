@@ -886,24 +886,76 @@ paths:
       operationId: listSpaceMembers
       security:
         - browserSession: []
+      parameters:
+        - name: after
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
       responses:
         "200":
-          description: Current active Space members
+          description: Bounded page of current active Space members
           content:
             application/json:
               schema:
                 type: object
                 additionalProperties: false
-                required: [members]
+                required: [members, next_cursor]
                 properties:
                   members:
                     type: array
-                    maxItems: 100
+                    maxItems: 50
                     items:
                       $ref: "#/components/schemas/SpaceMember"
+                  next_cursor:
+                    type: [string, "null"]
+                    format: uuid
+        "400":
+          $ref: "#/components/responses/Error"
         "401":
           $ref: "#/components/responses/Error"
         "403":
+          $ref: "#/components/responses/Error"
+  /v1/spaces/{spaceID}/members/{userID}/remove:
+    parameters:
+      - $ref: "#/components/parameters/SpaceID"
+      - name: userID
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      operationId: removeSpaceMember
+      security:
+        - browserSession: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                open_work_new_owner_user_id:
+                  type: [string, "null"]
+                  format: uuid
+      responses:
+        "204":
+          description: >-
+            Membership revoked with Open Work transferred, or exactly replayed
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
           $ref: "#/components/responses/Error"
   /v1/spaces/{spaceID}/invitations:
     parameters:
@@ -1262,6 +1314,7 @@ components:
           display_name,
           can_manage_members,
           can_enroll_machines,
+          open_work_count,
           joined_at,
         ]
       properties:
@@ -1274,6 +1327,10 @@ components:
           type: boolean
         can_enroll_machines:
           type: boolean
+        open_work_count:
+          type: integer
+          format: int64
+          minimum: 0
         joined_at:
           type: string
           format: date-time

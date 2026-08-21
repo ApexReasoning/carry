@@ -147,9 +147,19 @@ Space invitation 是 Space-owned、只为建立一份准确 Membership 服务的
 
 Issue 原子建立 invitation 与首个 immutable prepared submission；Resend 只为同一 pending invitation 建立新的 submission，六十秒 cooldown，不修改 expiry、recipient 或 grants。Concrete Resend I/O 在 transaction 外。submission 的 `prepared`、`accepted`、`rejected`、`unknown` 只描述 provider submission；Unknown 不猜测，也不盲目产生新 consequence。每个 issue、resend、revoke、accept command 都绑定 actor-scoped idempotency identity 与 canonical request digest。
 
-Acceptance、revoke 与 concurrent accepts 由 invitation row lock 和 conditional write 裁决一个 winner。already-active Membership 不被 invitation grants 覆盖；invitation 仍以准确 already-member acceptance result 终结。Committed replay 只在同一 actor、same digest 且 resulting Membership 仍 active 时返回原结果；后续 removal 不被 replay resurrect。成员移除、权限编辑、removed Membership reactivation 与 invitation reminder 属于后续 Node。
+Acceptance、revoke 与 concurrent accepts 由 invitation row lock 和 conditional write 裁决一个 winner。already-active Membership 不被 invitation grants 覆盖；invitation 仍以准确 already-member acceptance result 终结。Committed replay 只在同一 actor、same digest 且 resulting Membership 仍 active 时返回原结果；后续 removal 不被 replay resurrect。权限编辑、removed Membership reactivation 与 invitation reminder 属于后续 Node。
 
-### 5.3 Machine
+### 5.3 Membership removal
+
+Member removal 是 Space-owned 的当前 Membership transition，不删除 User，也不建立 Role、Membership history、reason、generation 或 `left`/`removed` 状态 framework。命令固定 Space、actor、target、可空的 active successor、actor-scoped idempotency identity 与 canonical digest。若 target 仍负责任何 Open Work，successor 必须显式提供；PostgreSQL 在一个事务中把 target 负责的全部 Open Work 转给该 successor 并设置 target Membership `revoked_at`，两种 consequence 不能部分成功。
+
+事务先锁准确 Space，再按稳定 user ID 顺序锁 actor、target 与可空 successor Membership，重读 actor 当前 `can_manage_members`、所有参与者 active 状态与两个 authority holder 数量，随后按稳定 Work ID 锁定 target 的完整 Open Work 集合。移除必须保留至少一名 active `can_manage_members` 与至少一名 active `can_enroll_machines` 成员。Work create/owner mutation 继续先锁 prospective owner 的 active Membership，因此 create/transfer 与 removal 只可能有一个有效顺序；同一 Space 的 removal 由 Space row 串行裁决。
+
+准确 committed replay 可以在 actor 已通过同一命令移除自己后返回同一成功，但只能匹配同一 actor、Space、target、successor 与 digest；different target/successor/request 冲突且不能重放任何 consequence。普通成员自行离开、通用 Work transfer、权限编辑和 Membership reactivation 不由这个入口提供。
+
+Removal 后 Browser Session 与过渡 CLI credential 仍只代表同一 User，Machine certificate 仍代表独立 Space Machine；它们都不缓存 Membership authority。所有 User Space operation 与私人 Conversation claim/renew/commit 继续重读 active Membership，因而 former member 不能再次读取或修改该 Space，而其他 Space 不受影响。历史作者、Work、Message、Conversation、invitation 与 submission facts 保留；已签发 pending invitation 不因 inviter 后来被移除而失效，当前 manager 可以使用既有 revoke 明确终止它。Machine 不因 `enrolled_by_user_id` 自动撤销，服务端也不声称远端进程或已复制数据已经停止或删除。
+
+### 5.4 Machine
 
 `carry host enroll` 由已登录成员发起。服务端在同一事务中验证 Membership 与 enrollment 权限，并签发独立 Machine certificate。
 
@@ -159,7 +169,7 @@ Machine 只保存 durable identity、Space、显示名、证书 serial、enrollm
 
 Space-enrolled Machine 是该 Space 的受信 Carry 执行基础设施。除了共享 Work，它可以在 exact Conversation reply claim、current fence 和 unexpired database-time lease 下读取生成一条私人回复所需的有界上下文。这个 authority 不提供通用 Conversation list/read，不跨 Space，不在成员 Membership 失效后继续，也不能把私人文本写入日志、Work 或 provider Session。要求连 Space 管理者控制的 Host 都无法读取私人内容，需要成员专属执行信任或端到端加密，是另一条尚未进入的旅程。
 
-### 5.4 Host 与本地 executor
+### 5.5 Host 与本地 executor
 
 Host 启动时在本地只读 Diagnose Pi 和 Codex，并选择一个可用的 concrete executor。选择发生在 claim 前并在 worker 生命周期内保持稳定；claim 后不切换 provider 或自动 fallback。
 
@@ -367,6 +377,7 @@ User API 只表达成员旅程：
 - 对需要成员选择的 Work 显式请求重新推进；
 - 以 Browser Session 管理准确 Space 的成员邀请，查看当前 pending invitations，并显式 resend/revoke；
 - 按当前 User 的准确 Email method 查询邀请，在 recent Email proof 后显式 accept；
+- 分页查看 active Space members，并在需要时显式选择一个 active successor，把目标负责的全部 Open Work 与 Membership removal 原子提交；
 - enrollment/revocation Machine。
 
 所有 credential-bearing User API 与 Host API 响应统一 `Cache-Control: no-store`。Work list 使用 Work UUID 作为 exclusive cursor，每页最多 50 条 summary；Work detail 的消息页使用 Message UUID cursor，同时最多 50 条且消息文本合计最多 256 KiB。cursor 必须属于准确 Space/Work。User API 返回 Identity 当前 display name 作为读取时 projection，不把名字复制成 Work 持久事实。
@@ -397,6 +408,7 @@ Web 使用 `protocol/user/v1/openapi.yaml` 生成 client。CLI 与 Web 不复制
 | 创建成员邀请 | actor Membership/authority attenuation、exact recipient/Space/grants、七天 expiry、issue replay、首个 prepared submission |
 | Resend/Revoke 邀请 | current manager authority、exact invitation、cooldown/terminal state、command replay、immutable submission 或 revoke fact |
 | 接受成员邀请 | active User/session、recent Email proof、exact email ownership、invitation/expiry、Membership、display name、accept replay |
+| 移除成员 | Space、actor/target/successor Membership、双 authority liveness、完整 Open Work 集合、原子 owner transfer、removal replay |
 | 创建 Work | Membership、目标、首任负责人、幂等身份、初始待应用状态 |
 | 追加 Work Message | Membership、Work lock、连续输入顺序、真实作者、幂等 |
 | 追加 private Conversation message | Membership、Conversation lock、请求重放、单一 outstanding turn、连续顺序、reply claim |

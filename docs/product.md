@@ -141,6 +141,10 @@ Space 不是文件夹。它决定哪些人和能力可以共同参与一份责�
 
 邀请只对当前 Carry User 准确关联的受邀 Email method 可见。接受还要求当前 Browser Session 在数据库时间十分钟内以 Email 完成 proof；Google/GitHub profile email、成功认证、打开邮件、关联邮箱或查看邀请都不会自动建立 Membership。成员查看 Space、邀请人和准确权限后显式接受，PostgreSQL 才原子建立 Membership。没有准确邮箱 proof 时不能加入，也不能通过同邮箱猜测、merge、管理员 impersonation 或私人 Conversation 访问绕过。
 
+持有 `can_manage_members` 的当前成员可以从 Members 中选择一名 active member 移出 Space。若目标仍负责 Open Work，管理者必须显式选择一名准确 active member；Carry 只在同一事务中把该目标负责的全部 Open Work 转给这名 successor 并撤销 Membership，绝不按职位、活跃度或最后发言自动猜测。Space 必须始终保留至少一名 `can_manage_members` 与至少一名 `can_enroll_machines` 成员；管理者移除自己也遵守相同规则，普通成员自行离开仍未进入。
+
+移除只终止该 Space 的当前 Membership authority。原 Browser/CLI credential 仍可识别 User 及其其他 Space，Space Machine 仍是独立 principal；后续对已移除 Space 的请求全部由当前 Membership fail closed。真实作者、共享 Work、私人 Conversation 与已经签发的固定期限 invitation 都不被改写或删除；其他成员不会因此获得私人 Conversation，当前 manager 仍可单独撤销 pending invitation。
+
 Space-enrolled Machine 是该 Space 的受信 Carry 执行基础设施，不是普通成员。它可以在准确、短期且可撤销的执行 authority 下处理完成当前责任所必需的 Space 内容，包括成员提交给 Carry 的有界私人 Conversation 上下文；enrollment 不授予通用内容浏览能力，也不能让 Machine 把私人内容写入共享 Work、日志或 provider Session。
 
 成员身份、浏览器会话、外部身份和执行机器身份必须分开。通过 Slack 或 Lark 验证的外部用户，不会因此自动成为 Space 成员。
@@ -204,7 +208,7 @@ Work Message 保存真实作者和来源。私人 Conversation 内容不会因�
 
 ### 负责人
 
-当前每个 Work 有且只有一名负责人，创建者是第一任负责人。M1 尚未提供转交；未来转交必须由成员明确发生，不能由 Carry 根据职位、活跃度或最后发言者推断。
+当前每个 Work 有且只有一名负责人，创建者是第一任负责人。成员移除时，管理者可以为目标名下全部 Open Work 显式选择一名 active successor；这次批量转交只作为撤销 Membership 的同事务前置后果，不能独立调用。通用逐 Work 转交仍属于后续 journey，任何转交都不能由 Carry 根据职位、活跃度或最后发言者推断。
 
 ### 当前生命周期
 
@@ -221,7 +225,7 @@ Review identity 是绑定内部 understanding version 与内容 digest 的不透
 ## 未来产品方向（当前尚未实现）
 
 - 官方云端是主要产品形态，自托管是同一产品的部署选项；两者共享 User、Space、Membership、Browser Session 与隐私语义，不以共享 token 或无用户模式换取部署简单；
-- 成员移除与权限编辑按 `docs/implementation.md` 后续 Node 进入；相同邮箱不能让 provider identity 自动关联、合并 User 或产生 Membership；
+- 权限编辑按 `docs/implementation.md` 后续 Node 进入；相同邮箱不能让 provider identity 自动关联、合并 User 或产生 Membership；
 - 只有独立结果确实需要历史正文、独立引用及接受、修改或撤回生命周期时，才考虑 Result identity；
 - 第一条未来继续优先是 Work 的一个明确时间条件，不预建 Timer；
 - Pause、Close、Reopen、负责人转交、渠道、第三方能力和外部 Action 按 `docs/implementation.md` 的后续 journey 逐条重新设计。

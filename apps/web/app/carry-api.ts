@@ -17,6 +17,7 @@ import {
   requestEmailCode as requestEmailCodeRequest,
   requestEmailLinkCode as requestEmailLinkCodeRequest,
   requestEmailReauthenticationCode as requestEmailReauthenticationCodeRequest,
+  removeSpaceMember as removeSpaceMemberRequest,
   resendSpaceInvitation as resendSpaceInvitationRequest,
   retryWork as retryWorkRequest,
   revokeSpaceInvitation as revokeSpaceInvitationRequest,
@@ -197,19 +198,43 @@ export async function createFirstSpace(
   );
 }
 
+export type SpaceMemberPage = {
+  members: Array<SpaceMember>;
+  next_cursor: string | null;
+};
+
 export async function spaceMembers(
   spaceID: string,
-): Promise<Array<SpaceMember>> {
+  after?: string,
+): Promise<SpaceMemberPage> {
   const result = await listSpaceMembersRequest({
     ...sameOrigin,
     path: { spaceID },
+    query: after ? { after } : undefined,
   });
   return requireData(
     result.data,
     result.response,
     result.error,
     "Load Space members",
-  ).members;
+  );
+}
+
+export async function removeMember(
+  spaceID: string,
+  userID: string,
+  successorUserID: string | undefined,
+  key: string,
+): Promise<void> {
+  const result = await removeSpaceMemberRequest({
+    ...sameOrigin,
+    path: { spaceID, userID },
+    headers: { "Idempotency-Key": key },
+    body: successorUserID
+      ? { open_work_new_owner_user_id: successorUserID }
+      : {},
+  });
+  requireMutationSuccess(result.response, result.error, "Remove Space member");
 }
 
 export async function managedInvitations(

@@ -16,15 +16,21 @@ import (
 type SpaceInvitations interface {
 	Issue(context.Context, space.IssueInvitationRequest) (space.IssuedInvitation, error)
 	Resend(context.Context, space.ResendInvitationRequest) (space.IssuedInvitation, error)
-	ListMembers(context.Context, string, string) ([]space.SpaceMember, error)
 	ListForSpace(context.Context, string, string) ([]space.ManagedInvitation, error)
 	ListForUser(context.Context, string, string) (space.InvitationInbox, error)
 	Revoke(context.Context, space.RevokeInvitationCommand) error
 	Accept(context.Context, space.AcceptInvitationCommand) (space.AcceptedInvitation, error)
 }
 
+// SpaceMembers is the complete Space-owned member list and removal use case consumed by HTTP.
+type SpaceMembers interface {
+	ListSpaceMembers(context.Context, space.ListMembersCommand) (space.MemberPage, error)
+	RemoveSpaceMember(context.Context, space.RemoveMemberCommand) error
+}
+
 type spaceInvitationAPI struct {
 	invitations SpaceInvitations
+	members     SpaceMembers
 	credentials identity.Credentials
 	origin      ExternalOrigin
 }
@@ -34,18 +40,59 @@ func (api spaceInvitationAPI) listMembers(response http.ResponseWriter, request 
 	if !ok {
 		return
 	}
-	members, err := api.invitations.ListMembers(request.Context(), user.UserID, chi.URLParam(request, "space_id"))
+	page, err := api.members.ListSpaceMembers(request.Context(), space.ListMembersCommand{
+		ActorUserID: user.UserID, SpaceID: chi.URLParam(request, "space_id"), AfterUserID: request.URL.Query().Get("after"),
+	})
 	if err != nil {
-		writeInvitationError(response, err)
+		writeMemberError(response, err)
 		return
 	}
-	wire := make([]spaceMemberWire, len(members))
-	for index, member := range members {
-		wire[index] = spaceMemberWire{UserID: member.UserID, DisplayName: member.DisplayName, CanManageMembers: member.CanManageMembers, CanEnrollMachines: member.CanEnrollMachines, JoinedAt: member.JoinedAt}
+	wire := make([]spaceMemberWire, len(page.Members))
+	for index, member := range page.Members {
+		wire[index] = spaceMemberWire{UserID: member.UserID, DisplayName: member.DisplayName, CanManageMembers: member.CanManageMembers, CanEnrollMachines: member.CanEnrollMachines, OpenWorkCount: member.OpenWorkCount, JoinedAt: member.JoinedAt}
+	}
+	var nextCursor *string
+	if page.NextCursor != "" {
+		nextCursor = &page.NextCursor
 	}
 	writeJSON(response, http.StatusOK, struct {
-		Members []spaceMemberWire `json:"members"`
-	}{wire})
+		Members    []spaceMemberWire `json:"members"`
+		NextCursor *string           `json:"next_cursor"`
+	}{wire, nextCursor})
+}
+
+func (api spaceInvitationAPI) removeMember(response http.ResponseWriter, request *http.Request) {
+	if !api.origin.acceptsSensitivePOST(request) {
+		writeAPIError(response, http.StatusBadRequest, "request origin is invalid")
+		return
+	}
+	user, ok := currentUser(response, request)
+	if !ok {
+		return
+	}
+	key, ok := requireIdempotencyKey(response, request)
+	if !ok {
+		return
+	}
+	var body struct {
+		SuccessorUserID string `json:"open_work_new_owner_user_id"`
+	}
+	if !decodeJSON(response, request, &body) {
+		return
+	}
+	command, err := space.NewRemoveMemberCommand(space.RemoveMemberRequest{
+		SpaceID: chi.URLParam(request, "space_id"), ActorUserID: user.UserID,
+		TargetUserID: chi.URLParam(request, "user_id"), SuccessorUserID: body.SuccessorUserID,
+		IdempotencyKey: key,
+	})
+	if err == nil {
+		err = api.members.RemoveSpaceMember(request.Context(), command)
+	}
+	if err != nil {
+		writeMemberError(response, err)
+		return
+	}
+	response.WriteHeader(http.StatusNoContent)
 }
 
 func (api spaceInvitationAPI) listManaged(response http.ResponseWriter, request *http.Request) {
@@ -228,6 +275,7 @@ type spaceMemberWire struct {
 	DisplayName       string    `json:"display_name"`
 	CanManageMembers  bool      `json:"can_manage_members"`
 	CanEnrollMachines bool      `json:"can_enroll_machines"`
+	OpenWorkCount     int64     `json:"open_work_count"`
 	JoinedAt          time.Time `json:"joined_at"`
 }
 type invitationSubmissionWire struct {
@@ -264,6 +312,25 @@ type acceptedInvitationWire struct {
 
 func managedInvitation(item space.IssuedInvitation) managedInvitationWire {
 	return managedInvitationWire{InvitationID: item.InvitationID, SpaceID: item.SpaceID, RecipientEmail: item.RecipientEmail, CanManageMembers: item.CanManageMembers, CanEnrollMachines: item.CanEnrollMachines, CreatedAt: item.CreatedAt, ExpiresAt: item.ExpiresAt, Submission: invitationSubmissionWire{State: string(item.Submission.State)}}
+}
+
+func writeMemberError(response http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, space.ErrForbidden):
+		writeAPIError(response, http.StatusForbidden, "member lacks permission")
+	case errors.Is(err, space.ErrInvalidMemberRemoval):
+		writeAPIError(response, http.StatusBadRequest, "member removal is invalid")
+	case errors.Is(err, space.ErrInvalidMemberCursor):
+		writeAPIError(response, http.StatusBadRequest, "member cursor is invalid")
+	case errors.Is(err, space.ErrMemberUnavailable):
+		writeAPIError(response, http.StatusNotFound, "member is unavailable")
+	case errors.Is(err, space.ErrRemovalSuccessorRequired), errors.Is(err, space.ErrRemovalSuccessorUnexpected),
+		errors.Is(err, space.ErrRemovalSuccessorInvalid), errors.Is(err, space.ErrLastMemberManager),
+		errors.Is(err, space.ErrLastMachineEnroller), errors.Is(err, space.ErrIdempotencyConflict):
+		writeAPIError(response, http.StatusConflict, err.Error())
+	default:
+		writeAPIError(response, http.StatusInternalServerError, "manage Space member")
+	}
 }
 
 func writeInvitationError(response http.ResponseWriter, err error) {

@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -23,7 +24,7 @@ func TestInvitationRoutesRequireBrowserOriginAndNeverMutateOnGET(t *testing.T) {
 		t.Fatalf("origin: %v", err)
 	}
 	behavior := &invitationBehaviorStub{}
-	routes, err := NewUserSpaceRoutesWithInvitations(firstSpaceStub{}, behavior, credentials, origin)
+	routes, err := NewUserSpaceRoutesWithInvitations(firstSpaceStub{}, behavior, behavior, credentials, origin)
 	if err != nil {
 		t.Fatalf("routes: %v", err)
 	}
@@ -74,6 +75,74 @@ func TestInvitationRoutesRequireBrowserOriginAndNeverMutateOnGET(t *testing.T) {
 	}
 }
 
+func TestRemoveMemberRouteRequiresOriginAndMapsRemovalOutcomes(t *testing.T) {
+	credentials, err := identity.NewCredentials(make([]byte, identity.IdentityRootBytes))
+	if err != nil {
+		t.Fatalf("credentials: %v", err)
+	}
+	origin, err := ParseExternalOrigin("https://carry.example")
+	if err != nil {
+		t.Fatalf("origin: %v", err)
+	}
+	behavior := &invitationBehaviorStub{}
+	routes, err := NewUserSpaceRoutesWithInvitations(firstSpaceStub{}, behavior, behavior, credentials, origin)
+	if err != nil {
+		t.Fatalf("routes: %v", err)
+	}
+	auth := userAuthenticator{sessions: invitationBrowserSessions{}, credentials: credentials}
+	router := chi.NewRouter()
+	router.Route("/v1", func(version chi.Router) {
+		version.Use(rejectMachinePrincipal)
+		version.Group(func(browser chi.Router) { browser.Use(auth.requireBrowserUser); routes.mount(browser) })
+	})
+	handler := noStoreV1(http.NewCrossOriginProtection().Handler(router))
+	credential, _ := credentials.BrowserSessionCredential("10000000-0000-0000-0000-000000000001")
+	request := func() *http.Request {
+		req := httptest.NewRequest(http.MethodPost, "https://carry.example/v1/spaces/20000000-0000-0000-0000-000000000001/members/40000000-0000-0000-0000-000000000001/remove", strings.NewReader(`{"open_work_new_owner_user_id":"50000000-0000-0000-0000-000000000001"}`))
+		req.Host = "carry.example"
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Idempotency-Key", "remove-member")
+		req.AddCookie(&http.Cookie{Name: browserSessionCookie, Value: credential})
+		return req
+	}
+
+	missingOrigin := request()
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, missingOrigin)
+	if response.Code != http.StatusBadRequest || behavior.removals != 0 {
+		t.Fatalf("missing Origin = %d, removals = %d", response.Code, behavior.removals)
+	}
+
+	success := request()
+	success.Header.Set("Origin", "https://carry.example")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, success)
+	if response.Code != http.StatusNoContent || behavior.removals != 1 || behavior.removalCommand.TargetUserID != "40000000-0000-0000-0000-000000000001" || behavior.removalCommand.SuccessorUserID != "50000000-0000-0000-0000-000000000001" {
+		t.Fatalf("success = %d, command = %#v", response.Code, behavior.removalCommand)
+	}
+
+	for name, test := range map[string]struct {
+		err    error
+		status int
+	}{
+		"forbidden": {space.ErrForbidden, http.StatusForbidden},
+		"invalid":   {space.ErrInvalidMemberRemoval, http.StatusBadRequest},
+		"missing":   {space.ErrMemberUnavailable, http.StatusNotFound},
+		"conflict":  {space.ErrLastMemberManager, http.StatusConflict},
+	} {
+		t.Run(name, func(t *testing.T) {
+			behavior.removalError = test.err
+			req := request()
+			req.Header.Set("Origin", "https://carry.example")
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, req)
+			if response.Code != test.status {
+				t.Fatalf("status = %d, want %d", response.Code, test.status)
+			}
+		})
+	}
+}
+
 type invitationBrowserSessions struct{}
 
 func (invitationBrowserSessions) AuthenticateBrowserSession(context.Context, string) (identity.AuthenticatedUser, error) {
@@ -87,7 +156,12 @@ func (firstSpaceStub) Create(context.Context, space.CreateFirstRequest) (space.C
 	return space.CreatedSpace{}, nil
 }
 
-type invitationBehaviorStub struct{ issues int }
+type invitationBehaviorStub struct {
+	issues         int
+	removals       int
+	removalCommand space.RemoveMemberCommand
+	removalError   error
+}
 
 func (stub *invitationBehaviorStub) Issue(context.Context, space.IssueInvitationRequest) (space.IssuedInvitation, error) {
 	stub.issues++
@@ -96,8 +170,13 @@ func (stub *invitationBehaviorStub) Issue(context.Context, space.IssueInvitation
 func (*invitationBehaviorStub) Resend(context.Context, space.ResendInvitationRequest) (space.IssuedInvitation, error) {
 	return space.IssuedInvitation{}, nil
 }
-func (*invitationBehaviorStub) ListMembers(context.Context, string, string) ([]space.SpaceMember, error) {
-	return []space.SpaceMember{{UserID: "30000000-0000-0000-0000-000000000001", DisplayName: "Member", JoinedAt: time.Now()}}, nil
+func (*invitationBehaviorStub) ListSpaceMembers(context.Context, space.ListMembersCommand) (space.MemberPage, error) {
+	return space.MemberPage{Members: []space.SpaceMember{{UserID: "30000000-0000-0000-0000-000000000001", DisplayName: "Member", JoinedAt: time.Now()}}}, nil
+}
+func (stub *invitationBehaviorStub) RemoveSpaceMember(_ context.Context, command space.RemoveMemberCommand) error {
+	stub.removals++
+	stub.removalCommand = command
+	return stub.removalError
 }
 func (*invitationBehaviorStub) ListForSpace(context.Context, string, string) ([]space.ManagedInvitation, error) {
 	return nil, nil

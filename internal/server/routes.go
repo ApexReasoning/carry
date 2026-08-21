@@ -100,12 +100,12 @@ func NewUserSpaceRoutes(firstSpace FirstSpace) (*UserSpaceRoutes, error) {
 	return &UserSpaceRoutes{spaces: spaceCreationAPI{creator: firstSpace}}, nil
 }
 
-func NewUserSpaceRoutesWithInvitations(firstSpace FirstSpace, invitations SpaceInvitations, credentials identity.Credentials, origin ExternalOrigin) (*UserSpaceRoutes, error) {
+func NewUserSpaceRoutesWithInvitations(firstSpace FirstSpace, invitations SpaceInvitations, members SpaceMembers, credentials identity.Credentials, origin ExternalOrigin) (*UserSpaceRoutes, error) {
 	routes, err := NewUserSpaceRoutes(firstSpace)
-	if err != nil || invitations == nil || origin.value == "" {
-		return nil, errors.New("User Space invitation route dependencies are required")
+	if err != nil || invitations == nil || members == nil || origin.value == "" {
+		return nil, errors.New("User Space member route dependencies are required")
 	}
-	api := &spaceInvitationAPI{invitations: invitations, credentials: credentials, origin: origin}
+	api := &spaceInvitationAPI{invitations: invitations, members: members, credentials: credentials, origin: origin}
 	routes.invitations = api
 	return routes, nil
 }
@@ -118,6 +118,7 @@ func (routes *UserSpaceRoutes) mount(router chi.Router) {
 	router.Get("/invitations", routes.invitations.inbox)
 	router.Post("/invitations/{invitation_id}/accept", routes.invitations.accept)
 	router.Get("/spaces/{space_id}/members", routes.invitations.listMembers)
+	router.Post("/spaces/{space_id}/members/{user_id}/remove", routes.invitations.removeMember)
 	router.Get("/spaces/{space_id}/invitations", routes.invitations.listManaged)
 	router.Post("/spaces/{space_id}/invitations", routes.invitations.issue)
 	router.Post("/spaces/{space_id}/invitations/{invitation_id}/resend", routes.invitations.resend)

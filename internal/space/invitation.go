@@ -58,7 +58,6 @@ type InvitationPersistence interface {
 	InvitationRecipient(context.Context, string, string, string) (string, error)
 	PrepareInvitationResend(context.Context, PrepareInvitationResendCommand) (IssuedInvitation, error)
 	RecordInvitationSubmission(context.Context, RecordInvitationSubmissionCommand) (InvitationSubmission, error)
-	ListSpaceMembers(context.Context, string, string) ([]SpaceMember, error)
 	ListSpaceInvitations(context.Context, string, string) ([]ManagedInvitation, error)
 	ListUserInvitations(context.Context, string, string) (InvitationInbox, error)
 	RevokeInvitation(context.Context, RevokeInvitationCommand) error
@@ -175,9 +174,6 @@ func (invitations *Invitations) submit(ctx context.Context, issued IssuedInvitat
 	return issued, nil
 }
 
-func (invitations *Invitations) ListMembers(ctx context.Context, userID, spaceID string) ([]SpaceMember, error) {
-	return invitations.persistence.ListSpaceMembers(ctx, userID, spaceID)
-}
 func (invitations *Invitations) ListForSpace(ctx context.Context, userID, spaceID string) ([]ManagedInvitation, error) {
 	return invitations.persistence.ListSpaceInvitations(ctx, userID, spaceID)
 }
@@ -243,11 +239,6 @@ type IssuedInvitation struct {
 	Submission                                                InvitationSubmission
 }
 type ManagedInvitation = IssuedInvitation
-type SpaceMember struct {
-	UserID, DisplayName                 string
-	CanManageMembers, CanEnrollMachines bool
-	JoinedAt                            time.Time
-}
 type RecipientInvitation struct {
 	InvitationID, SpaceID, SpaceName, InviterDisplayName string
 	CanManageMembers, CanEnrollMachines                  bool

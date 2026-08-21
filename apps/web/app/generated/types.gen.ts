@@ -36,6 +36,7 @@ export type SpaceMember = {
   display_name: string;
   can_manage_members: boolean;
   can_enroll_machines: boolean;
+  open_work_count: number;
   joined_at: string;
 };
 
@@ -1285,11 +1286,17 @@ export type ListSpaceMembersData = {
   path: {
     spaceID: string;
   };
-  query?: never;
+  query?: {
+    after?: string;
+  };
   url: "/v1/spaces/{spaceID}/members";
 };
 
 export type ListSpaceMembersErrors = {
+  /**
+   * Request rejected
+   */
+  400: ApiError;
   /**
    * Request rejected
    */
@@ -1305,15 +1312,67 @@ export type ListSpaceMembersError =
 
 export type ListSpaceMembersResponses = {
   /**
-   * Current active Space members
+   * Bounded page of current active Space members
    */
   200: {
     members: Array<SpaceMember>;
+    next_cursor: string | null;
   };
 };
 
 export type ListSpaceMembersResponse =
   ListSpaceMembersResponses[keyof ListSpaceMembersResponses];
+
+export type RemoveSpaceMemberData = {
+  body: {
+    open_work_new_owner_user_id?: string | null;
+  };
+  headers: {
+    "Idempotency-Key": string;
+  };
+  path: {
+    spaceID: string;
+    userID: string;
+  };
+  query?: never;
+  url: "/v1/spaces/{spaceID}/members/{userID}/remove";
+};
+
+export type RemoveSpaceMemberErrors = {
+  /**
+   * Request rejected
+   */
+  400: ApiError;
+  /**
+   * Request rejected
+   */
+  401: ApiError;
+  /**
+   * Request rejected
+   */
+  403: ApiError;
+  /**
+   * Request rejected
+   */
+  404: ApiError;
+  /**
+   * Request rejected
+   */
+  409: ApiError;
+};
+
+export type RemoveSpaceMemberError =
+  RemoveSpaceMemberErrors[keyof RemoveSpaceMemberErrors];
+
+export type RemoveSpaceMemberResponses = {
+  /**
+   * Membership revoked with Open Work transferred, or exactly replayed
+   */
+  204: void;
+};
+
+export type RemoveSpaceMemberResponse =
+  RemoveSpaceMemberResponses[keyof RemoveSpaceMemberResponses];
 
 export type ListManagedInvitationsData = {
   body?: never;

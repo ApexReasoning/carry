@@ -58,6 +58,9 @@ import type {
   LoadWorkData,
   LoadWorkErrors,
   LoadWorkResponses,
+  RemoveSpaceMemberData,
+  RemoveSpaceMemberErrors,
+  RemoveSpaceMemberResponses,
   RequestEmailCodeData,
   RequestEmailCodeErrors,
   RequestEmailCodeResponses,
@@ -126,6 +129,7 @@ import {
   zLoadCurrentUserResponse,
   zLoadIdentityMethodsResponse,
   zLoadWorkResponse,
+  zRemoveSpaceMemberResponse,
   zRequestEmailCodeResponse,
   zRequestEmailLinkCodeResponse,
   zRequestEmailReauthenticationCodeResponse,
@@ -849,6 +853,35 @@ export const listSpaceMembers = <ThrowOnError extends boolean = false>(
     ],
     url: "/v1/spaces/{spaceID}/members",
     ...options,
+  });
+
+export const removeSpaceMember = <ThrowOnError extends boolean = false>(
+  options: Options<RemoveSpaceMemberData, ThrowOnError>,
+): RequestResult<
+  RemoveSpaceMemberResponses,
+  RemoveSpaceMemberErrors,
+  ThrowOnError
+> =>
+  (options.client ?? client).post<
+    RemoveSpaceMemberResponses,
+    RemoveSpaceMemberErrors,
+    ThrowOnError
+  >({
+    responseValidator: async (data) =>
+      await zRemoveSpaceMemberResponse.parseAsync(data),
+    security: [
+      {
+        in: "cookie",
+        name: "__Host-carry_session",
+        type: "apiKey",
+      },
+    ],
+    url: "/v1/spaces/{spaceID}/members/{userID}/remove",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
   });
 
 export const listManagedInvitations = <ThrowOnError extends boolean = false>(

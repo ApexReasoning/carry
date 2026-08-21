@@ -213,43 +213,6 @@ func (s *Store) RecordInvitationSubmission(ctx context.Context, command space.Re
 	return restoreSubmission(row.SubmissionID, row.RecipientEmail, row.PayloadDigest, row.ProviderIdempotencyKey, row.State, row.ProviderMessageID, row.CreatedAt.Time), nil
 }
 
-func (s *Store) ListSpaceMembers(ctx context.Context, userID, spaceID string) ([]space.SpaceMember, error) {
-	if uuid.Validate(userID) != nil || uuid.Validate(spaceID) != nil {
-		return nil, space.ErrForbidden
-	}
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("begin Space member list: %w", err)
-	}
-	defer func() { _ = tx.Rollback(context.Background()) }()
-	q := s.queries.WithTx(tx)
-	if _, err := q.LockInvitationActorMembership(ctx, dbsqlc.LockInvitationActorMembershipParams{SpaceID: spaceID, UserID: userID}); errors.Is(err, pgx.ErrNoRows) {
-		return nil, space.ErrForbidden
-	} else if err != nil {
-		return nil, fmt.Errorf("lock member list authority: %w", err)
-	}
-	rows, err := q.ListActiveSpaceMembers(ctx, spaceID)
-	if err != nil {
-		return nil, fmt.Errorf("list active Space members: %w", err)
-	}
-	members := make([]space.SpaceMember, 0, len(rows))
-	for _, row := range rows {
-		displayName := ""
-		if row.DisplayName != nil {
-			displayName = *row.DisplayName
-		}
-		members = append(members, space.SpaceMember{
-			UserID: row.UserID, DisplayName: displayName,
-			CanManageMembers: row.CanManageMembers, CanEnrollMachines: row.CanEnrollMachines,
-			JoinedAt: row.JoinedAt.Time,
-		})
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("commit Space member list: %w", err)
-	}
-	return members, nil
-}
-
 func (s *Store) ListSpaceInvitations(ctx context.Context, userID, spaceID string) ([]space.ManagedInvitation, error) {
 	if uuid.Validate(userID) != nil || uuid.Validate(spaceID) != nil {
 		return nil, space.ErrForbidden

@@ -220,13 +220,17 @@ type SpaceInvitationSubmission struct {
 }
 
 type SpaceMembership struct {
-	SpaceID           string
-	UserID            string
-	CanEnrollMachines bool
-	Version           int64
-	CreatedAt         pgtype.Timestamptz
-	RevokedAt         pgtype.Timestamptz
-	CanManageMembers  bool
+	SpaceID                string
+	UserID                 string
+	CanEnrollMachines      bool
+	Version                int64
+	CreatedAt              pgtype.Timestamptz
+	RevokedAt              pgtype.Timestamptz
+	CanManageMembers       bool
+	RemovedByUserID        pgtype.UUID
+	RemovalSuccessorUserID pgtype.UUID
+	RemovalIdempotencyKey  *string
+	RemovalRequestDigest   []byte
 }
 
 type UserToken struct {

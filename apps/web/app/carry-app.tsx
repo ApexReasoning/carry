@@ -203,9 +203,15 @@ export function App() {
               <MemberSettings
                 key={currentSpace.space_id}
                 spaceID={currentSpace.space_id}
+                spaceName={currentSpace.name}
+                currentUserID={session.user.user_id}
                 canManage={currentSpace.can_manage_members}
                 canEnroll={currentSpace.can_enroll_machines}
                 onClose={() => setSettingsPanel(null)}
+                onRemoved={(removedSelf) => {
+                  if (removedSelf) setSettingsPanel(null);
+                  session.refresh();
+                }}
               />
             ) : null}
           </>

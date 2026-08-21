@@ -34,6 +34,12 @@ export const zSpaceMember = z.object({
   display_name: z.string(),
   can_manage_members: z.boolean(),
   can_enroll_machines: z.boolean(),
+  open_work_count: z.coerce
+    .bigint()
+    .gte(BigInt(0))
+    .max(BigInt("9223372036854775807"), {
+      error: "Invalid value: Expected int64 to be <= 9223372036854775807",
+    }),
   joined_at: z.iso.datetime({ offset: true }),
 });
 
@@ -469,12 +475,35 @@ export const zListSpaceMembersPath = z.object({
   spaceID: z.uuid(),
 });
 
+export const zListSpaceMembersQuery = z.object({
+  after: z.uuid().optional(),
+});
+
 /**
- * Current active Space members
+ * Bounded page of current active Space members
  */
 export const zListSpaceMembersResponse = z.object({
-  members: z.array(zSpaceMember).max(100),
+  members: z.array(zSpaceMember).max(50),
+  next_cursor: z.uuid().nullable(),
 });
+
+export const zRemoveSpaceMemberBody = z.object({
+  open_work_new_owner_user_id: z.uuid().nullish(),
+});
+
+export const zRemoveSpaceMemberHeaders = z.object({
+  "Idempotency-Key": z.string().min(1).max(255),
+});
+
+export const zRemoveSpaceMemberPath = z.object({
+  spaceID: z.uuid(),
+  userID: z.uuid(),
+});
+
+/**
+ * Membership revoked with Open Work transferred, or exactly replayed
+ */
+export const zRemoveSpaceMemberResponse = z.void();
 
 export const zListManagedInvitationsPath = z.object({
   spaceID: z.uuid(),

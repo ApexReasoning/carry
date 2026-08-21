@@ -281,7 +281,7 @@ func run(ctx context.Context, arguments []string, stdout io.Writer, stderr io.Wr
 	if err != nil {
 		return fmt.Errorf("compose User identity routes: %w", err)
 	}
-	userSpaceRoutes, err := carryserver.NewUserSpaceRoutesWithInvitations(firstSpace, spaceInvitations, credentials, parsed.externalOrigin)
+	userSpaceRoutes, err := carryserver.NewUserSpaceRoutesWithInvitations(firstSpace, spaceInvitations, store, credentials, parsed.externalOrigin)
 	if err != nil {
 		return fmt.Errorf("compose User Space routes: %w", err)
 	}

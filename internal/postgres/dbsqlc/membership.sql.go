@@ -11,6 +11,27 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countActiveSpaceAuthorities = `-- name: CountActiveSpaceAuthorities :one
+SELECT
+    count(*) FILTER (WHERE can_manage_members) AS member_managers,
+    count(*) FILTER (WHERE can_enroll_machines) AS machine_enrollers
+FROM space_memberships
+WHERE space_id = $1
+    AND revoked_at IS NULL
+`
+
+type CountActiveSpaceAuthoritiesRow struct {
+	MemberManagers   int64
+	MachineEnrollers int64
+}
+
+func (q *Queries) CountActiveSpaceAuthorities(ctx context.Context, spaceID string) (CountActiveSpaceAuthoritiesRow, error) {
+	row := q.db.QueryRow(ctx, countActiveSpaceAuthorities, spaceID)
+	var i CountActiveSpaceAuthoritiesRow
+	err := row.Scan(&i.MemberManagers, &i.MachineEnrollers)
+	return i, err
+}
+
 const getMachineEnrollmentPermission = `-- name: GetMachineEnrollmentPermission :one
 SELECT can_enroll_machines
 FROM space_memberships
@@ -35,14 +56,25 @@ func (q *Queries) GetMachineEnrollmentPermission(ctx context.Context, arg GetMac
 
 const listActiveSpaceMembers = `-- name: ListActiveSpaceMembers :many
 SELECT m.user_id, u.display_name, m.can_manage_members,
-    m.can_enroll_machines, m.created_at AS joined_at
+    m.can_enroll_machines, m.created_at AS joined_at,
+    (SELECT count(*) FROM works AS w
+        WHERE w.space_id = m.space_id
+            AND w.owner_user_id = m.user_id
+            AND w.lifecycle = 'open') AS open_work_count
 FROM space_memberships AS m
 INNER JOIN carry_users AS u ON u.user_id = m.user_id
 WHERE m.space_id = $1
     AND m.revoked_at IS NULL
+    AND (m.created_at, m.user_id) > ($2, $3::uuid)
 ORDER BY m.created_at, m.user_id
-LIMIT 100
+LIMIT 51
 `
+
+type ListActiveSpaceMembersParams struct {
+	SpaceID         string
+	CursorCreatedAt pgtype.Timestamptz
+	CursorUserID    string
+}
 
 type ListActiveSpaceMembersRow struct {
 	UserID            string
@@ -50,10 +82,11 @@ type ListActiveSpaceMembersRow struct {
 	CanManageMembers  bool
 	CanEnrollMachines bool
 	JoinedAt          pgtype.Timestamptz
+	OpenWorkCount     int64
 }
 
-func (q *Queries) ListActiveSpaceMembers(ctx context.Context, spaceID string) ([]ListActiveSpaceMembersRow, error) {
-	rows, err := q.db.Query(ctx, listActiveSpaceMembers, spaceID)
+func (q *Queries) ListActiveSpaceMembers(ctx context.Context, arg ListActiveSpaceMembersParams) ([]ListActiveSpaceMembersRow, error) {
+	rows, err := q.db.Query(ctx, listActiveSpaceMembers, arg.SpaceID, arg.CursorCreatedAt, arg.CursorUserID)
 	if err != nil {
 		return nil, err
 	}
@@ -67,6 +100,7 @@ func (q *Queries) ListActiveSpaceMembers(ctx context.Context, spaceID string) ([
 			&i.CanManageMembers,
 			&i.CanEnrollMachines,
 			&i.JoinedAt,
+			&i.OpenWorkCount,
 		); err != nil {
 			return nil, err
 		}
@@ -122,4 +156,191 @@ func (q *Queries) ListMemberships(ctx context.Context, userID string) ([]ListMem
 		return nil, err
 	}
 	return items, nil
+}
+
+const loadMemberRemovalReplay = `-- name: LoadMemberRemovalReplay :one
+SELECT user_id, removal_successor_user_id, removal_request_digest
+FROM space_memberships
+WHERE space_id = $1
+    AND removed_by_user_id = $2
+    AND removal_idempotency_key = $3
+`
+
+type LoadMemberRemovalReplayParams struct {
+	SpaceID        string
+	ActorUserID    pgtype.UUID
+	IdempotencyKey *string
+}
+
+type LoadMemberRemovalReplayRow struct {
+	UserID                 string
+	RemovalSuccessorUserID pgtype.UUID
+	RemovalRequestDigest   []byte
+}
+
+func (q *Queries) LoadMemberRemovalReplay(ctx context.Context, arg LoadMemberRemovalReplayParams) (LoadMemberRemovalReplayRow, error) {
+	row := q.db.QueryRow(ctx, loadMemberRemovalReplay, arg.SpaceID, arg.ActorUserID, arg.IdempotencyKey)
+	var i LoadMemberRemovalReplayRow
+	err := row.Scan(&i.UserID, &i.RemovalSuccessorUserID, &i.RemovalRequestDigest)
+	return i, err
+}
+
+const lockMembershipForRemoval = `-- name: LockMembershipForRemoval :one
+SELECT user_id, can_manage_members, can_enroll_machines, revoked_at
+FROM space_memberships
+WHERE space_id = $1
+    AND user_id = $2
+FOR UPDATE
+`
+
+type LockMembershipForRemovalParams struct {
+	SpaceID string
+	UserID  string
+}
+
+type LockMembershipForRemovalRow struct {
+	UserID            string
+	CanManageMembers  bool
+	CanEnrollMachines bool
+	RevokedAt         pgtype.Timestamptz
+}
+
+func (q *Queries) LockMembershipForRemoval(ctx context.Context, arg LockMembershipForRemovalParams) (LockMembershipForRemovalRow, error) {
+	row := q.db.QueryRow(ctx, lockMembershipForRemoval, arg.SpaceID, arg.UserID)
+	var i LockMembershipForRemovalRow
+	err := row.Scan(
+		&i.UserID,
+		&i.CanManageMembers,
+		&i.CanEnrollMachines,
+		&i.RevokedAt,
+	)
+	return i, err
+}
+
+const lockOpenWorksOwnedByMember = `-- name: LockOpenWorksOwnedByMember :many
+SELECT work_id
+FROM works
+WHERE space_id = $1
+    AND owner_user_id = $2
+    AND lifecycle = 'open'
+ORDER BY work_id
+FOR UPDATE
+`
+
+type LockOpenWorksOwnedByMemberParams struct {
+	SpaceID string
+	UserID  string
+}
+
+func (q *Queries) LockOpenWorksOwnedByMember(ctx context.Context, arg LockOpenWorksOwnedByMemberParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, lockOpenWorksOwnedByMember, arg.SpaceID, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var work_id string
+		if err := rows.Scan(&work_id); err != nil {
+			return nil, err
+		}
+		items = append(items, work_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockSpaceForMemberRemoval = `-- name: LockSpaceForMemberRemoval :one
+SELECT space_id
+FROM spaces
+WHERE space_id = $1
+FOR NO KEY UPDATE
+`
+
+func (q *Queries) LockSpaceForMemberRemoval(ctx context.Context, spaceID string) (string, error) {
+	row := q.db.QueryRow(ctx, lockSpaceForMemberRemoval, spaceID)
+	var space_id string
+	err := row.Scan(&space_id)
+	return space_id, err
+}
+
+const revokeSpaceMembership = `-- name: RevokeSpaceMembership :execrows
+UPDATE space_memberships
+SET revoked_at = transaction_timestamp(),
+    version = version + 1,
+    removed_by_user_id = $1,
+    removal_successor_user_id = $2,
+    removal_idempotency_key = $3,
+    removal_request_digest = $4
+WHERE space_id = $5
+    AND user_id = $6
+    AND revoked_at IS NULL
+`
+
+type RevokeSpaceMembershipParams struct {
+	ActorUserID     pgtype.UUID
+	SuccessorUserID pgtype.UUID
+	IdempotencyKey  *string
+	RequestDigest   []byte
+	SpaceID         string
+	TargetUserID    string
+}
+
+func (q *Queries) RevokeSpaceMembership(ctx context.Context, arg RevokeSpaceMembershipParams) (int64, error) {
+	result, err := q.db.Exec(ctx, revokeSpaceMembership,
+		arg.ActorUserID,
+		arg.SuccessorUserID,
+		arg.IdempotencyKey,
+		arg.RequestDigest,
+		arg.SpaceID,
+		arg.TargetUserID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const spaceMemberCursor = `-- name: SpaceMemberCursor :one
+SELECT created_at
+FROM space_memberships
+WHERE space_id = $1
+    AND user_id = $2
+    AND revoked_at IS NULL
+`
+
+type SpaceMemberCursorParams struct {
+	SpaceID string
+	UserID  string
+}
+
+func (q *Queries) SpaceMemberCursor(ctx context.Context, arg SpaceMemberCursorParams) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, spaceMemberCursor, arg.SpaceID, arg.UserID)
+	var created_at pgtype.Timestamptz
+	err := row.Scan(&created_at)
+	return created_at, err
+}
+
+const transferRemovedMemberOpenWorks = `-- name: TransferRemovedMemberOpenWorks :execrows
+UPDATE works
+SET owner_user_id = $1
+WHERE space_id = $2
+    AND owner_user_id = $3
+    AND lifecycle = 'open'
+`
+
+type TransferRemovedMemberOpenWorksParams struct {
+	SuccessorUserID string
+	SpaceID         string
+	TargetUserID    string
+}
+
+func (q *Queries) TransferRemovedMemberOpenWorks(ctx context.Context, arg TransferRemovedMemberOpenWorksParams) (int64, error) {
+	result, err := q.db.Exec(ctx, transferRemovedMemberOpenWorks, arg.SuccessorUserID, arg.SpaceID, arg.TargetUserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
