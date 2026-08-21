@@ -6,8 +6,8 @@ import (
 	"io"
 	"strings"
 
+	"github.com/ApexReasoning/carry/internal/cli/credentialfile"
 	"github.com/ApexReasoning/carry/internal/cli/userapi"
-	"github.com/ApexReasoning/carry/internal/identity/memberfile"
 	"github.com/ApexReasoning/carry/internal/space"
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
@@ -34,7 +34,7 @@ func NewCommand(configDirectory string, output io.Writer) *cobra.Command {
 }
 
 func connect(ctx context.Context, configDirectory string, requestedSpaceID string) (*userapi.Client, string, error) {
-	credential, err := memberfile.Load(configDirectory)
+	credential, err := credentialfile.Load(configDirectory)
 	if err != nil {
 		return nil, "", fmt.Errorf("load member login: %w", err)
 	}
@@ -45,6 +45,9 @@ func connect(ctx context.Context, configDirectory string, requestedSpaceID strin
 	info, err := client.LoadMember(ctx)
 	if err != nil {
 		return nil, "", fmt.Errorf("load current member: %w", err)
+	}
+	if strings.TrimSpace(requestedSpaceID) == "" {
+		requestedSpaceID = credential.DefaultSpaceID
 	}
 	spaceID, err := selectSpace(info.Spaces, requestedSpaceID)
 	if err != nil {

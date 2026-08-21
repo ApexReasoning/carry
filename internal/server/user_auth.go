@@ -11,15 +11,16 @@ import (
 
 const browserSessionCookie = "__Host-carry_session"
 
-// UserTokenAuthenticator validates the transitional CLI bearer without owning browser-session state.
-type UserTokenAuthenticator interface {
-	AuthenticateUserToken(context.Context, string) (identity.AuthenticatedUser, error)
+// CLICredentialAuthenticator validates the final Browser-approved CLI identity.
+type CLICredentialAuthenticator interface {
+	AuthenticateCLICredential(context.Context, string) (identity.AuthenticatedUser, error)
 }
 
 type userAuthenticator struct {
-	tokens      UserTokenAuthenticator
+	cli         CLICredentialAuthenticator
 	sessions    BrowserSessions
 	credentials identity.Credentials
+	origin      ExternalOrigin
 }
 
 type userContextKey struct{}
@@ -83,7 +84,12 @@ func (a userAuthenticator) authenticate(
 		return identity.AuthenticatedUser{}, false
 	}
 	if hasToken {
-		user, err := a.tokens.AuthenticateUserToken(request.Context(), token)
+		credentialID, valid := a.credentials.ParseCLICredential(token, a.origin.value)
+		if !valid {
+			writeAPIError(response, http.StatusUnauthorized, "User authentication is invalid")
+			return identity.AuthenticatedUser{}, false
+		}
+		user, err := a.cli.AuthenticateCLICredential(request.Context(), credentialID)
 		return authenticatedUserResult(response, user, err)
 	}
 	if hasSession {

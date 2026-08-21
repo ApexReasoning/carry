@@ -7,7 +7,6 @@ import (
 	"errors"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/ApexReasoning/carry/internal/conversation"
 	"github.com/ApexReasoning/carry/internal/space"
@@ -18,8 +17,8 @@ func TestConversationAdmissionIsIdempotentAndSerial(t *testing.T) {
 	ctx := context.Background()
 	pool := openMigratedTestPool(t, ctx)
 	store := NewStore(pool)
-	bootstrap, err := bootstrapForTest(ctx, store, BootstrapCommand{
-		DisplayName: "Nora", SpaceName: "Renewal Team", TokenExpiresAt: time.Now().Add(time.Hour),
+	bootstrap, err := createMemberForTest(ctx, store, testMemberCommand{
+		DisplayName: "Nora", SpaceName: "Renewal Team",
 	})
 	if err != nil {
 		t.Fatalf("bootstrap: %v", err)
@@ -90,8 +89,8 @@ func TestConversationReadRequiresTheExactCurrentMember(t *testing.T) {
 	ctx := context.Background()
 	pool := openMigratedTestPool(t, ctx)
 	store := NewStore(pool)
-	bootstrap, err := bootstrapForTest(ctx, store, BootstrapCommand{
-		DisplayName: "Mina", SpaceName: "Private Planning", TokenExpiresAt: time.Now().Add(time.Hour),
+	bootstrap, err := createMemberForTest(ctx, store, testMemberCommand{
+		DisplayName: "Mina", SpaceName: "Private Planning",
 	})
 	if err != nil {
 		t.Fatalf("bootstrap: %v", err)
@@ -166,8 +165,8 @@ func TestConversationReadUsesBoundedNewestBeforeAndAfterPages(t *testing.T) {
 	ctx := context.Background()
 	pool := openMigratedTestPool(t, ctx)
 	store := NewStore(pool)
-	bootstrap, err := bootstrapForTest(ctx, store, BootstrapCommand{
-		DisplayName: "Aya", SpaceName: "Long Research", TokenExpiresAt: time.Now().Add(time.Hour),
+	bootstrap, err := createMemberForTest(ctx, store, testMemberCommand{
+		DisplayName: "Aya", SpaceName: "Long Research",
 	})
 	if err != nil {
 		t.Fatalf("bootstrap: %v", err)

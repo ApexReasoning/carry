@@ -9,8 +9,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
-	"github.com/ApexReasoning/carry/internal/identity/memberfile"
+	"github.com/ApexReasoning/carry/internal/cli/credentialfile"
 )
 
 func TestRetryCommandReusesUnknownIdentityBeforeANewChoice(t *testing.T) {
@@ -56,8 +57,10 @@ func TestRetryCommandReusesUnknownIdentityBeforeANewChoice(t *testing.T) {
 
 	certificatePEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw})
 	configDirectory := t.TempDir()
-	if err := memberfile.Save(configDirectory, memberfile.Credential{
-		ServerURL: server.URL, Token: "member-secret", CACertificatePEM: string(certificatePEM), UserID: "member-1",
+	if err := credentialfile.Save(configDirectory, credentialfile.Credential{
+		ServerURL: server.URL, Credential: "carry_cli_33333333-3333-4333-8333-333333333333.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", CACertificatePEM: string(certificatePEM),
+		CredentialID: "33333333-3333-4333-8333-333333333333", UserID: "44444444-4444-4444-8444-444444444444",
+		DefaultSpaceID: spaceID, Label: "test CLI", ExpiresAt: time.Now().Add(time.Hour),
 	}); err != nil {
 		t.Fatalf("save member credential: %v", err)
 	}

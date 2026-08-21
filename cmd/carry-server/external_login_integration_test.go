@@ -750,12 +750,16 @@ func composeExternalLoginTestAPI(
 	if err != nil {
 		t.Fatalf("compose first Space: %v", err)
 	}
-	authentication, err := carryserver.NewUserAuthentication(store, store, credentials)
+	cliLogin, err := identity.NewCLILogin(store, credentials, origin.String())
+	if err != nil {
+		t.Fatalf("compose CLI login: %v", err)
+	}
+	authentication, err := carryserver.NewUserAuthentication(store, store, credentials, origin)
 	if err != nil {
 		t.Fatalf("compose User authentication: %v", err)
 	}
 	identityRoutes, err := carryserver.NewUserIdentityRoutes(
-		emailLogin, externalLogin, identityMethods, store, credentials,
+		emailLogin, externalLogin, identityMethods, store, cliLogin, credentials,
 		origin, carryserver.NewRequestSource(nil), store,
 	)
 	if err != nil {

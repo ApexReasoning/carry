@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ApexReasoning/carry/internal/cli/credentialfile"
 )
 
 func TestOwnerReviewsResultProducedThroughNativeExecution(t *testing.T) {
@@ -32,17 +34,16 @@ func TestOwnerReviewsResultProducedThroughNativeExecution(t *testing.T) {
 
 	pkiDirectory := filepath.Join(temporary, "pki")
 	run(t, root, nil, carryServer, "pki", "init", "--dir", pkiDirectory, "--hosts", "localhost,127.0.0.1")
-	bootstrapOutput := bootstrapCarry(t, root, carryServer, databaseURL)
+	testMemberOutput := prepareTestMember(t, databaseURL)
 	resetProductJourneyFacts(t, databaseURL)
-	var bootstrap struct {
-		UserID    string `json:"user_id"`
-		SpaceID   string `json:"space_id"`
-		UserToken string `json:"user_token"`
+	var member struct {
+		UserID  string `json:"user_id"`
+		SpaceID string `json:"space_id"`
 	}
-	if err := json.Unmarshal([]byte(bootstrapOutput), &bootstrap); err != nil {
-		t.Fatalf("decode bootstrap: %v", err)
+	if err := json.Unmarshal([]byte(testMemberOutput), &member); err != nil {
+		t.Fatalf("decode member: %v", err)
 	}
-	attachTestEmailIdentity(t, databaseURL, bootstrap.UserID, "reviewer@example.com")
+	attachTestEmailIdentity(t, databaseURL, member.UserID, "reviewer@example.com")
 
 	address := freeAddress(t)
 	stopServer, serverLog, emailCaptureFile := startServer(t, root, carryServer, address, databaseURL, pkiDirectory)
@@ -52,15 +53,11 @@ func TestOwnerReviewsResultProducedThroughNativeExecution(t *testing.T) {
 
 	configDirectory := filepath.Join(temporary, "config")
 	clientEnvironment := []string{"CARRY_CONFIG_DIR=" + configDirectory}
-	run(
-		t, root, clientEnvironment, carry, "login",
-		"--server", serverURL,
-		"--ca-cert", filepath.Join(pkiDirectory, "ca.pem"),
-		"--token", bootstrap.UserToken,
-	)
+	loginCarryCLI(t, root, carry, databaseURL, serverURL, filepath.Join(pkiDirectory, "ca.pem"),
+		configDirectory, member.UserID, member.SpaceID, "native-execution-cli")
 	run(
 		t, root, clientEnvironment, carry, "host", "enroll",
-		"--space", bootstrap.SpaceID,
+		"--space", member.SpaceID,
 		"--name", "native-execution-host",
 	)
 	createdOutput := run(
@@ -142,13 +139,17 @@ func TestOwnerReviewsResultProducedThroughNativeExecution(t *testing.T) {
 			if err != nil {
 				t.Fatalf("build test HTTP client: %v", err)
 			}
+			cliCredential, err := credentialfile.Load(configDirectory)
+			if err != nil {
+				t.Fatalf("load CLI credential: %v", err)
+			}
 			memberRequest := func(method string, path string, idempotencyKey string) (int, []byte) {
 				t.Helper()
 				request, err := http.NewRequestWithContext(t.Context(), method, serverURL+path, nil)
 				if err != nil {
 					t.Fatalf("build member request: %v", err)
 				}
-				request.Header.Set("Authorization", "Bearer "+bootstrap.UserToken)
+				request.Header.Set("Authorization", "Bearer "+cliCredential.Credential)
 				if idempotencyKey != "" {
 					request.Header.Set("Idempotency-Key", idempotencyKey)
 				}
@@ -166,7 +167,7 @@ func TestOwnerReviewsResultProducedThroughNativeExecution(t *testing.T) {
 
 			status, body := memberRequest(
 				http.MethodGet,
-				"/v1/spaces/"+bootstrap.SpaceID+"/works?needs_you=true",
+				"/v1/spaces/"+member.SpaceID+"/works?needs_you=true",
 				"",
 			)
 			var needsYou struct {
@@ -202,7 +203,7 @@ func TestOwnerReviewsResultProducedThroughNativeExecution(t *testing.T) {
 
 			status, body = memberRequest(
 				http.MethodGet,
-				"/v1/spaces/"+bootstrap.SpaceID+"/works/"+workID,
+				"/v1/spaces/"+member.SpaceID+"/works/"+workID,
 				"",
 			)
 			var accepted struct {
@@ -218,7 +219,7 @@ func TestOwnerReviewsResultProducedThroughNativeExecution(t *testing.T) {
 
 			status, body = memberRequest(
 				http.MethodGet,
-				"/v1/spaces/"+bootstrap.SpaceID+"/works?needs_you=true",
+				"/v1/spaces/"+member.SpaceID+"/works?needs_you=true",
 				"",
 			)
 			if status != http.StatusOK || json.Unmarshal(body, &needsYou) != nil || len(needsYou.Works) != 0 {

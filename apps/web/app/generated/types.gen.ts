@@ -8,6 +8,48 @@ export type ApiError = {
   error: string;
 };
 
+export type BegunCliLogin = {
+  request_id: string;
+  user_code: string;
+  poll_secret: string;
+  verification_path: "/cli-login";
+  expires_at: string;
+  interval_seconds: number;
+};
+
+export type RedeemedCliCredential = {
+  credential_id: string;
+  credential: string;
+  user_id: string;
+  space_id: string;
+  label: string;
+  expires_at: string;
+};
+
+export type CliLoginPreview = {
+  request_id: string;
+  user_code: string;
+  label: string;
+  server: string;
+  proposed_replacement_credential_id?: string;
+  approved_space_id?: string;
+  created_at: string;
+  expires_at: string;
+  approved: boolean;
+  denied: boolean;
+  cancelled: boolean;
+  redeemed: boolean;
+};
+
+export type CliCredential = {
+  credential_id: string;
+  label: string;
+  approved_space_id: string;
+  approved_space_name: string;
+  created_at: string;
+  expires_at: string;
+};
+
 export type EmailChallenge = {
   challenge_id: string;
   expires_at: string;
@@ -174,6 +216,8 @@ export type ReviewId = string;
 
 export type IdempotencyKey = string;
 
+export type CliPollProof = string;
+
 export type BeforeConversationMessage = string;
 
 export type AfterConversationMessage = string;
@@ -183,6 +227,357 @@ export type BeforeWork = string;
 export type BeforeWorkMessage = string;
 
 export type NeedsYou = boolean;
+
+export type BeginCliLoginData = {
+  body: {
+    request_id: string;
+    label: string;
+    proposed_replacement_credential_id?: string;
+  };
+  headers: {
+    "Idempotency-Key": string;
+  };
+  path?: never;
+  query?: never;
+  url: "/v1/cli-logins";
+};
+
+export type BeginCliLoginErrors = {
+  /**
+   * Request rejected
+   */
+  400: ApiError;
+  /**
+   * Request rejected
+   */
+  409: ApiError;
+  /**
+   * Request rejected
+   */
+  429: ApiError;
+};
+
+export type BeginCliLoginError = BeginCliLoginErrors[keyof BeginCliLoginErrors];
+
+export type BeginCliLoginResponses = {
+  /**
+   * Short-lived Browser approval ceremony created or exactly replayed
+   */
+  201: BegunCliLogin;
+};
+
+export type BeginCliLoginResponse =
+  BeginCliLoginResponses[keyof BeginCliLoginResponses];
+
+export type PollCliLoginData = {
+  body?: never;
+  headers: {
+    "X-Carry-CLI-Poll": string;
+  };
+  path?: never;
+  query?: never;
+  url: "/v1/cli-logins/poll";
+};
+
+export type PollCliLoginErrors = {
+  /**
+   * Request rejected
+   */
+  401: ApiError;
+  /**
+   * Request rejected
+   */
+  403: ApiError;
+  /**
+   * Request rejected
+   */
+  409: ApiError;
+  /**
+   * Request rejected
+   */
+  410: ApiError;
+  /**
+   * Request rejected
+   */
+  429: ApiError;
+};
+
+export type PollCliLoginError = PollCliLoginErrors[keyof PollCliLoginErrors];
+
+export type PollCliLoginResponses = {
+  /**
+   * The one final CLI credential, including exact committed replay
+   */
+  200: RedeemedCliCredential;
+  /**
+   * Awaiting explicit Browser decision
+   */
+  202: unknown;
+};
+
+export type PollCliLoginResponse =
+  PollCliLoginResponses[keyof PollCliLoginResponses];
+
+export type CancelCliLoginData = {
+  body?: never;
+  headers: {
+    "X-Carry-CLI-Poll": string;
+  };
+  path?: never;
+  query?: never;
+  url: "/v1/cli-logins/cancel";
+};
+
+export type CancelCliLoginErrors = {
+  /**
+   * Request rejected
+   */
+  401: ApiError;
+  /**
+   * Request rejected
+   */
+  409: ApiError;
+  /**
+   * Request rejected
+   */
+  410: ApiError;
+};
+
+export type CancelCliLoginError =
+  CancelCliLoginErrors[keyof CancelCliLoginErrors];
+
+export type CancelCliLoginResponses = {
+  /**
+   * Pending or approved-unredeemed request cancelled
+   */
+  204: void;
+};
+
+export type CancelCliLoginResponse =
+  CancelCliLoginResponses[keyof CancelCliLoginResponses];
+
+export type LookupCliLoginData = {
+  body: {
+    user_code: string;
+  };
+  path?: never;
+  query?: never;
+  url: "/v1/cli-logins/lookup";
+};
+
+export type LookupCliLoginErrors = {
+  /**
+   * Request rejected
+   */
+  404: ApiError;
+  /**
+   * Request rejected
+   */
+  429: ApiError;
+};
+
+export type LookupCliLoginError =
+  LookupCliLoginErrors[keyof LookupCliLoginErrors];
+
+export type LookupCliLoginResponses = {
+  /**
+   * Exact Browser-reviewable CLI login request
+   */
+  200: CliLoginPreview;
+};
+
+export type LookupCliLoginResponse =
+  LookupCliLoginResponses[keyof LookupCliLoginResponses];
+
+export type ApproveCliLoginData = {
+  body: {
+    request_id: string;
+    user_code: string;
+    space_id: string;
+    replacement_credential_id?: string;
+  };
+  headers: {
+    "Idempotency-Key": string;
+  };
+  path?: never;
+  query?: never;
+  url: "/v1/cli-logins/approve";
+};
+
+export type ApproveCliLoginErrors = {
+  /**
+   * Request rejected
+   */
+  400: ApiError;
+  /**
+   * Request rejected
+   */
+  401: ApiError;
+  /**
+   * Request rejected
+   */
+  403: ApiError;
+  /**
+   * Request rejected
+   */
+  409: ApiError;
+  /**
+   * Request rejected
+   */
+  410: ApiError;
+};
+
+export type ApproveCliLoginError =
+  ApproveCliLoginErrors[keyof ApproveCliLoginErrors];
+
+export type ApproveCliLoginResponses = {
+  /**
+   * Browser approval recorded without exposing a CLI credential
+   */
+  204: void;
+};
+
+export type ApproveCliLoginResponse =
+  ApproveCliLoginResponses[keyof ApproveCliLoginResponses];
+
+export type DenyCliLoginData = {
+  body: {
+    request_id: string;
+    user_code: string;
+  };
+  headers: {
+    "Idempotency-Key": string;
+  };
+  path?: never;
+  query?: never;
+  url: "/v1/cli-logins/deny";
+};
+
+export type DenyCliLoginErrors = {
+  /**
+   * Request rejected
+   */
+  400: ApiError;
+  /**
+   * Request rejected
+   */
+  401: ApiError;
+  /**
+   * Request rejected
+   */
+  409: ApiError;
+};
+
+export type DenyCliLoginError = DenyCliLoginErrors[keyof DenyCliLoginErrors];
+
+export type DenyCliLoginResponses = {
+  /**
+   * CLI login explicitly denied
+   */
+  204: void;
+};
+
+export type DenyCliLoginResponse =
+  DenyCliLoginResponses[keyof DenyCliLoginResponses];
+
+export type ListCliCredentialsData = {
+  body?: never;
+  path?: never;
+  query?: never;
+  url: "/v1/identity/cli-credentials";
+};
+
+export type ListCliCredentialsErrors = {
+  /**
+   * Request rejected
+   */
+  401: ApiError;
+};
+
+export type ListCliCredentialsError =
+  ListCliCredentialsErrors[keyof ListCliCredentialsErrors];
+
+export type ListCliCredentialsResponses = {
+  /**
+   * Active CLI credentials for the current User
+   */
+  200: {
+    credentials: Array<CliCredential>;
+  };
+};
+
+export type ListCliCredentialsResponse =
+  ListCliCredentialsResponses[keyof ListCliCredentialsResponses];
+
+export type RevokeCliCredentialData = {
+  body?: never;
+  headers: {
+    "Idempotency-Key": string;
+  };
+  path: {
+    credentialID: string;
+  };
+  query?: never;
+  url: "/v1/identity/cli-credentials/{credentialID}/revoke";
+};
+
+export type RevokeCliCredentialErrors = {
+  /**
+   * Request rejected
+   */
+  401: ApiError;
+  /**
+   * Request rejected
+   */
+  409: ApiError;
+};
+
+export type RevokeCliCredentialError =
+  RevokeCliCredentialErrors[keyof RevokeCliCredentialErrors];
+
+export type RevokeCliCredentialResponses = {
+  /**
+   * Exact CLI credential revoked
+   */
+  204: void;
+};
+
+export type RevokeCliCredentialResponse =
+  RevokeCliCredentialResponses[keyof RevokeCliCredentialResponses];
+
+export type RevokeCurrentCliCredentialData = {
+  body?: never;
+  headers: {
+    "Idempotency-Key": string;
+  };
+  path?: never;
+  query?: never;
+  url: "/v1/cli-credentials/current/revoke";
+};
+
+export type RevokeCurrentCliCredentialErrors = {
+  /**
+   * Request rejected
+   */
+  401: ApiError;
+  /**
+   * Request rejected
+   */
+  409: ApiError;
+};
+
+export type RevokeCurrentCliCredentialError =
+  RevokeCurrentCliCredentialErrors[keyof RevokeCurrentCliCredentialErrors];
+
+export type RevokeCurrentCliCredentialResponses = {
+  /**
+   * Current CLI credential revoked or exactly replayed
+   */
+  204: void;
+};
+
+export type RevokeCurrentCliCredentialResponse =
+  RevokeCurrentCliCredentialResponses[keyof RevokeCurrentCliCredentialResponses];
 
 export type RequestEmailCodeData = {
   body: {

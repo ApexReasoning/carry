@@ -158,7 +158,7 @@ Carry Cloud MVP 的截止点是 M5：一个团队通过三种首发认证之一�
 
 当前基线明确不包含 native Session recovery、Agent credential/API、provider routing、Work Offer、queued private turns、retention lifecycle、Work/Conversation target union、独立 Result/Attention owner、结果历史正文或 accept-and-continue。
 
-Node 6 进入前仍保留一个明确迁移约束：旧 token-to-browser 与 CLI bearer 只是 Node 0–5 的过渡基线，不扩展成长期产品合同。后续每个 Node 从当时用户旅程、至少五个一手产品比较与 Loop 只读考古重新推导；详细源码只在该 Node entry 调研，本次产品路线不作为代码模板。
+Node 6 进入前的旧 token-to-browser 与可粘贴 CLI bearer 只是 Node 0–5 的过渡基线，已由 Node 11 的 Browser-approved User CLI credential 完整替换；没有兼容 issuance、operator bootstrap 或 secret migration。后续每个 Node 从当时用户旅程、至少五个一手产品比较与 Loop 只读考古重新推导；详细源码只在该 Node entry 调研，本次产品路线不作为代码模板。
 
 ## 8. Node 6：Production email identity and first Space
 
@@ -179,7 +179,7 @@ Node 6 同时纠正服务端 owner boundary：`cmd/carry-server` 只静态组合
 - 不存在与存在的邮箱返回一致响应，限流保护地址、来源与投递信誉，验证码不进入日志或 browser storage；
 - Browser Session 由 Carry 签发、HttpOnly、可 logout/revoke，并在 stale cookie 下 fail closed；
 - Space 创建必须由用户显式发生，creator 获得当前旅程需要的 `can_manage_members` 与 `can_enroll_machines`，不建立 generic admin role；并发创建/重放不制造重复 Space；
-- 旧 token-to-browser bootstrap 不再是正常 Cloud human login truth；Browser exchange 和 token-entry UI 删除，现有 bearer/bootstrap 只为 CLI 过渡保留到 Node 11。
+- 旧 token-to-browser bootstrap 不再是正常 Cloud human login truth；Browser exchange 和 token-entry UI 删除，过渡 bearer/bootstrap 在 Node 11 纵向删除。
 
 ### 明确不做
 
@@ -280,16 +280,16 @@ member removal、permission editing、Role、bulk/domain invite、bearer invitat
 
 ### 用户结果
 
-成员运行 `carry login`，在已登录 Browser 中检查准确 server、device context 与 Space 后批准这次 installation；随后可以用现有 `carry work` 命令创建、读取和补充准确 Space 的 Work，credential 丢失或撤销后只能安全替换，不能恢复旧 secret。
+成员运行 `carry login`，在已登录 Browser 中检查准确 server、CLI label 与 Space 后批准这次 CLI access；随后可以用现有 `carry work` 命令创建、读取和补充准确 Space 的 Work，credential 丢失或撤销后只能安全替换，不能恢复旧 secret。
 
 ### 关闭证据
 
-- approval、deny、expiry、cancel、poll interval、single redeem、并发与 response-loss replay 直接可见；
-- user code、poll secret 与 final CLI credential 分离，终端不接收邮箱验证码、provider token 或 Browser Session；
-- final credential 绑定准确 User/server，Space context 可检查但不因 CLI login 自动扩大 Membership；
+- 十五分钟 approval request、明确 deny、database-time expiry、cancel、五秒起始且最多三十秒的 server-enforced poll interval、single redeem、并发与 response-loss replay 直接可见；
+- 十位 unambiguous user code、poll/cancel secret 与 final CLI credential 使用不同 audience/MAC domain，固定 `/cli-login` URL 不带 code；终端不接收邮箱验证码、provider token 或 Browser Session；
+- final credential 绑定准确 User/configured canonical server、九十天 database-time expiry 且没有 refresh/自动续期；Space context 可检查并保存为本地默认，但不成为 scope，也不因 CLI login 自动扩大 Membership；
 - `carry work create/list/show/message` 通过 Browser-approved credential 完成真实 journey，所有 Space/Work authority 仍由服务端当前 Membership 裁决；
-- revoke 后旧 CLI credential 立即失败；
-- CLI credential 与 Machine certificate 永不混用，旧 member bearer 路径被删除。
+- Browser revoke、准确 replacement 与 `carry logout` confirmed self-revoke 后旧 CLI credential 立即失败；响应丢失时保留 private `cli.json` 供准确重试，unsafe/symlink/permissive file fail closed；
+- CLI credential 与 Machine certificate 永不混用，旧 member bearer、`member.json`、operator bootstrap、`user_tokens` 与 `--token` 路径被删除；既有 `carry host enroll/revoke` 只继续消费新的 User credential，Browser approval 本身不 enroll Machine。
 
 ### 明确不做
 

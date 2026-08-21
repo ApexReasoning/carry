@@ -10,7 +10,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/ApexReasoning/carry/internal/conversation"
 	"github.com/ApexReasoning/carry/internal/machine"
@@ -100,8 +99,8 @@ func TestConversationReplyContextIsFixedAcrossRecoveryAndBounded(t *testing.T) {
 			ctx := context.Background()
 			pool := openMigratedTestPool(t, ctx)
 			store := NewStore(pool)
-			bootstrap, err := bootstrapForTest(ctx, store, BootstrapCommand{
-				DisplayName: "Context Member", SpaceName: "Context Space", TokenExpiresAt: time.Now().Add(time.Hour),
+			bootstrap, err := createMemberForTest(ctx, store, testMemberCommand{
+				DisplayName: "Context Member", SpaceName: "Context Space",
 			})
 			if err != nil {
 				t.Fatalf("bootstrap: %v", err)
@@ -424,10 +423,10 @@ func replyFixture(
 	pool *pgxpool.Pool,
 	store *Store,
 	name string,
-) (BootstrapResult, string, string) {
+) (testMember, string, string) {
 	t.Helper()
-	bootstrap, err := bootstrapForTest(ctx, store, BootstrapCommand{
-		DisplayName: name + " Member", SpaceName: name + " Space", TokenExpiresAt: time.Now().Add(time.Hour),
+	bootstrap, err := createMemberForTest(ctx, store, testMemberCommand{
+		DisplayName: name + " Member", SpaceName: name + " Space",
 	})
 	if err != nil {
 		t.Fatalf("bootstrap: %v", err)

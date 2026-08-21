@@ -18,6 +18,15 @@ import type {
   AppendWorkMessageData,
   AppendWorkMessageErrors,
   AppendWorkMessageResponses,
+  ApproveCliLoginData,
+  ApproveCliLoginErrors,
+  ApproveCliLoginResponses,
+  BeginCliLoginData,
+  BeginCliLoginErrors,
+  BeginCliLoginResponses,
+  CancelCliLoginData,
+  CancelCliLoginErrors,
+  CancelCliLoginResponses,
   CompleteGitHubLoginData,
   CompleteGitHubLoginErrors,
   CompleteGoogleLoginData,
@@ -28,12 +37,18 @@ import type {
   CreateWorkData,
   CreateWorkErrors,
   CreateWorkResponses,
+  DenyCliLoginData,
+  DenyCliLoginErrors,
+  DenyCliLoginResponses,
   EnrollMachineData,
   EnrollMachineErrors,
   EnrollMachineResponses,
   IssueSpaceInvitationData,
   IssueSpaceInvitationErrors,
   IssueSpaceInvitationResponses,
+  ListCliCredentialsData,
+  ListCliCredentialsErrors,
+  ListCliCredentialsResponses,
   ListConversationMessagesData,
   ListConversationMessagesErrors,
   ListConversationMessagesResponses,
@@ -58,6 +73,12 @@ import type {
   LoadWorkData,
   LoadWorkErrors,
   LoadWorkResponses,
+  LookupCliLoginData,
+  LookupCliLoginErrors,
+  LookupCliLoginResponses,
+  PollCliLoginData,
+  PollCliLoginErrors,
+  PollCliLoginResponses,
   RemoveSpaceMemberData,
   RemoveSpaceMemberErrors,
   RemoveSpaceMemberResponses,
@@ -76,9 +97,15 @@ import type {
   RetryWorkData,
   RetryWorkErrors,
   RetryWorkResponses,
+  RevokeCliCredentialData,
+  RevokeCliCredentialErrors,
+  RevokeCliCredentialResponses,
   RevokeCurrentBrowserSessionData,
   RevokeCurrentBrowserSessionErrors,
   RevokeCurrentBrowserSessionResponses,
+  RevokeCurrentCliCredentialData,
+  RevokeCurrentCliCredentialErrors,
+  RevokeCurrentCliCredentialResponses,
   RevokeMachineData,
   RevokeMachineErrors,
   RevokeMachineResponses,
@@ -117,10 +144,15 @@ import {
   zAcceptSpaceInvitationResponse,
   zAcceptWorkReviewResponse,
   zAppendWorkMessageResponse,
+  zApproveCliLoginResponse,
+  zBeginCliLoginResponse,
+  zCancelCliLoginResponse,
   zCreateFirstSpaceResponse,
   zCreateWorkResponse,
+  zDenyCliLoginResponse,
   zEnrollMachineResponse,
   zIssueSpaceInvitationResponse,
+  zListCliCredentialsResponse,
   zListConversationMessagesResponse,
   zListInvitationInboxResponse,
   zListManagedInvitationsResponse,
@@ -129,13 +161,17 @@ import {
   zLoadCurrentUserResponse,
   zLoadIdentityMethodsResponse,
   zLoadWorkResponse,
+  zLookupCliLoginResponse,
+  zPollCliLoginResponse,
   zRemoveSpaceMemberResponse,
   zRequestEmailCodeResponse,
   zRequestEmailLinkCodeResponse,
   zRequestEmailReauthenticationCodeResponse,
   zResendSpaceInvitationResponse,
   zRetryWorkResponse,
+  zRevokeCliCredentialResponse,
   zRevokeCurrentBrowserSessionResponse,
+  zRevokeCurrentCliCredentialResponse,
   zRevokeMachineResponse,
   zRevokeSpaceInvitationResponse,
   zSendConversationMessageResponse,
@@ -162,6 +198,202 @@ export type Options<
    */
   meta?: keyof ClientMeta extends never ? Record<string, unknown> : ClientMeta;
 };
+
+export const beginCliLogin = <ThrowOnError extends boolean = false>(
+  options: Options<BeginCliLoginData, ThrowOnError>,
+): RequestResult<BeginCliLoginResponses, BeginCliLoginErrors, ThrowOnError> =>
+  (options.client ?? client).post<
+    BeginCliLoginResponses,
+    BeginCliLoginErrors,
+    ThrowOnError
+  >({
+    responseValidator: async (data) =>
+      await zBeginCliLoginResponse.parseAsync(data),
+    url: "/v1/cli-logins",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+
+export const pollCliLogin = <ThrowOnError extends boolean = false>(
+  options: Options<PollCliLoginData, ThrowOnError>,
+): RequestResult<PollCliLoginResponses, PollCliLoginErrors, ThrowOnError> =>
+  (options.client ?? client).post<
+    PollCliLoginResponses,
+    PollCliLoginErrors,
+    ThrowOnError
+  >({
+    responseValidator: async (data) =>
+      await zPollCliLoginResponse.parseAsync(data),
+    url: "/v1/cli-logins/poll",
+    ...options,
+  });
+
+export const cancelCliLogin = <ThrowOnError extends boolean = false>(
+  options: Options<CancelCliLoginData, ThrowOnError>,
+): RequestResult<CancelCliLoginResponses, CancelCliLoginErrors, ThrowOnError> =>
+  (options.client ?? client).post<
+    CancelCliLoginResponses,
+    CancelCliLoginErrors,
+    ThrowOnError
+  >({
+    responseValidator: async (data) =>
+      await zCancelCliLoginResponse.parseAsync(data),
+    url: "/v1/cli-logins/cancel",
+    ...options,
+  });
+
+export const lookupCliLogin = <ThrowOnError extends boolean = false>(
+  options: Options<LookupCliLoginData, ThrowOnError>,
+): RequestResult<LookupCliLoginResponses, LookupCliLoginErrors, ThrowOnError> =>
+  (options.client ?? client).post<
+    LookupCliLoginResponses,
+    LookupCliLoginErrors,
+    ThrowOnError
+  >({
+    responseValidator: async (data) =>
+      await zLookupCliLoginResponse.parseAsync(data),
+    security: [
+      {
+        in: "cookie",
+        name: "__Host-carry_session",
+        type: "apiKey",
+      },
+    ],
+    url: "/v1/cli-logins/lookup",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+
+export const approveCliLogin = <ThrowOnError extends boolean = false>(
+  options: Options<ApproveCliLoginData, ThrowOnError>,
+): RequestResult<
+  ApproveCliLoginResponses,
+  ApproveCliLoginErrors,
+  ThrowOnError
+> =>
+  (options.client ?? client).post<
+    ApproveCliLoginResponses,
+    ApproveCliLoginErrors,
+    ThrowOnError
+  >({
+    responseValidator: async (data) =>
+      await zApproveCliLoginResponse.parseAsync(data),
+    security: [
+      {
+        in: "cookie",
+        name: "__Host-carry_session",
+        type: "apiKey",
+      },
+    ],
+    url: "/v1/cli-logins/approve",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+
+export const denyCliLogin = <ThrowOnError extends boolean = false>(
+  options: Options<DenyCliLoginData, ThrowOnError>,
+): RequestResult<DenyCliLoginResponses, DenyCliLoginErrors, ThrowOnError> =>
+  (options.client ?? client).post<
+    DenyCliLoginResponses,
+    DenyCliLoginErrors,
+    ThrowOnError
+  >({
+    responseValidator: async (data) =>
+      await zDenyCliLoginResponse.parseAsync(data),
+    security: [
+      {
+        in: "cookie",
+        name: "__Host-carry_session",
+        type: "apiKey",
+      },
+    ],
+    url: "/v1/cli-logins/deny",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+
+export const listCliCredentials = <ThrowOnError extends boolean = false>(
+  options?: Options<ListCliCredentialsData, ThrowOnError>,
+): RequestResult<
+  ListCliCredentialsResponses,
+  ListCliCredentialsErrors,
+  ThrowOnError
+> =>
+  (options?.client ?? client).get<
+    ListCliCredentialsResponses,
+    ListCliCredentialsErrors,
+    ThrowOnError
+  >({
+    responseValidator: async (data) =>
+      await zListCliCredentialsResponse.parseAsync(data),
+    security: [
+      {
+        in: "cookie",
+        name: "__Host-carry_session",
+        type: "apiKey",
+      },
+    ],
+    url: "/v1/identity/cli-credentials",
+    ...options,
+  });
+
+export const revokeCliCredential = <ThrowOnError extends boolean = false>(
+  options: Options<RevokeCliCredentialData, ThrowOnError>,
+): RequestResult<
+  RevokeCliCredentialResponses,
+  RevokeCliCredentialErrors,
+  ThrowOnError
+> =>
+  (options.client ?? client).post<
+    RevokeCliCredentialResponses,
+    RevokeCliCredentialErrors,
+    ThrowOnError
+  >({
+    responseValidator: async (data) =>
+      await zRevokeCliCredentialResponse.parseAsync(data),
+    security: [
+      {
+        in: "cookie",
+        name: "__Host-carry_session",
+        type: "apiKey",
+      },
+    ],
+    url: "/v1/identity/cli-credentials/{credentialID}/revoke",
+    ...options,
+  });
+
+export const revokeCurrentCliCredential = <
+  ThrowOnError extends boolean = false,
+>(
+  options: Options<RevokeCurrentCliCredentialData, ThrowOnError>,
+): RequestResult<
+  RevokeCurrentCliCredentialResponses,
+  RevokeCurrentCliCredentialErrors,
+  ThrowOnError
+> =>
+  (options.client ?? client).post<
+    RevokeCurrentCliCredentialResponses,
+    RevokeCurrentCliCredentialErrors,
+    ThrowOnError
+  >({
+    responseValidator: async (data) =>
+      await zRevokeCurrentCliCredentialResponse.parseAsync(data),
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/v1/cli-credentials/current/revoke",
+    ...options,
+  });
 
 export const requestEmailCode = <ThrowOnError extends boolean = false>(
   options: Options<RequestEmailCodeData, ThrowOnError>,

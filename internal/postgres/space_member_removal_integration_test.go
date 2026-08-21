@@ -22,9 +22,9 @@ func TestListSpaceMembersPaginatesEveryActiveRemovalTarget(t *testing.T) {
 	ctx := context.Background()
 	pool := openMigratedTestPool(t, ctx)
 	store := NewStore(pool)
-	manager := bootstrapInvitationManager(t, ctx, store)
+	manager := invitationManagerFixture(t, ctx, store)
 	var finalTarget string
-	for index := 0; index < 105; index++ {
+	for range 105 {
 		finalTarget = seedRemovalMember(t, ctx, pool, manager.SpaceID, false, false)
 	}
 	seen := map[string]bool{}
@@ -57,7 +57,7 @@ func TestListSpaceMembersRejectsFormerAndNeverMemberCursorsIdentically(t *testin
 	ctx := context.Background()
 	pool := openMigratedTestPool(t, ctx)
 	store := NewStore(pool)
-	manager := bootstrapInvitationManager(t, ctx, store)
+	manager := invitationManagerFixture(t, ctx, store)
 	formerMember := seedRemovalMember(t, ctx, pool, manager.SpaceID, false, false)
 	if err := store.RemoveSpaceMember(ctx, removalCommand(t, space.RemoveMemberRequest{
 		SpaceID: manager.SpaceID, ActorUserID: manager.UserID, TargetUserID: formerMember, IdempotencyKey: "remove-cursor-member",
@@ -81,7 +81,7 @@ func TestRemoveSpaceMemberWorklessTransferReplayAndRetention(t *testing.T) {
 	ctx := context.Background()
 	pool := openMigratedTestPool(t, ctx)
 	store := NewStore(pool)
-	manager := bootstrapInvitationManager(t, ctx, store)
+	manager := invitationManagerFixture(t, ctx, store)
 	target := seedRemovalMember(t, ctx, pool, manager.SpaceID, true, true)
 	successor := seedRemovalMember(t, ctx, pool, manager.SpaceID, true, true)
 	otherSpace := uuid.NewString()
@@ -176,7 +176,7 @@ func TestRemoveSpaceMemberTransfersAllOpenWorkAtomically(t *testing.T) {
 	ctx := context.Background()
 	pool := openMigratedTestPool(t, ctx)
 	store := NewStore(pool)
-	manager := bootstrapInvitationManager(t, ctx, store)
+	manager := invitationManagerFixture(t, ctx, store)
 	target := seedRemovalMember(t, ctx, pool, manager.SpaceID, false, false)
 	successor := seedRemovalMember(t, ctx, pool, manager.SpaceID, true, true)
 	works := make([]work.Work, 2)
@@ -228,7 +228,7 @@ func TestRemoveSpaceMemberRejectsInvalidSuccessorAndFinalAuthorities(t *testing.
 	ctx := context.Background()
 	pool := openMigratedTestPool(t, ctx)
 	store := NewStore(pool)
-	manager := bootstrapInvitationManager(t, ctx, store)
+	manager := invitationManagerFixture(t, ctx, store)
 	ordinary := seedRemovalMember(t, ctx, pool, manager.SpaceID, false, false)
 	otherSpace := uuid.NewString()
 	crossSpace := seedRemovalSpaceMember(t, ctx, pool, otherSpace, false, false)
@@ -275,7 +275,7 @@ func TestRemoveSpaceMemberSelfReplayAndConcurrentRemovalSafety(t *testing.T) {
 	ctx := context.Background()
 	pool := openMigratedTestPool(t, ctx)
 	store := NewStore(pool)
-	manager := bootstrapInvitationManager(t, ctx, store)
+	manager := invitationManagerFixture(t, ctx, store)
 	other := seedRemovalMember(t, ctx, pool, manager.SpaceID, true, true)
 	self := removalCommand(t, space.RemoveMemberRequest{SpaceID: manager.SpaceID, ActorUserID: manager.UserID, TargetUserID: manager.UserID, IdempotencyKey: "self-remove"})
 	if err := store.RemoveSpaceMember(ctx, self); err != nil {
@@ -393,7 +393,7 @@ func TestPrivateMessageAndRemovalHaveOneValidOrder(t *testing.T) {
 	ctx := context.Background()
 	pool := openMigratedTestPool(t, ctx)
 	store := NewStore(pool)
-	manager := bootstrapInvitationManager(t, ctx, store)
+	manager := invitationManagerFixture(t, ctx, store)
 	target := seedRemovalMember(t, ctx, pool, manager.SpaceID, false, false)
 	_ = seedRemovalMember(t, ctx, pool, manager.SpaceID, true, true)
 	start := make(chan struct{})
@@ -608,7 +608,7 @@ func TestWorkCreationCanFinishWhileRemovalWaitsForMembership(t *testing.T) {
 	defer cancel()
 	pool := openMigratedTestPool(t, ctx)
 	store := NewStore(pool)
-	manager := bootstrapInvitationManager(t, ctx, store)
+	manager := invitationManagerFixture(t, ctx, store)
 	target := seedRemovalMember(t, ctx, pool, manager.SpaceID, false, false)
 
 	creation, err := pool.Begin(ctx)

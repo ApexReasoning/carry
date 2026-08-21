@@ -140,7 +140,7 @@ func TestFirstSpaceRejectsTransitionalBearerBeforeSpaceBehavior(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, "/v1/spaces", bytes.NewBufferString(
 		`{"display_name":"Ada","name":"Research"}`,
 	))
-	request.Header.Set("Authorization", "Bearer member-token")
+	request.Header.Set("Authorization", "Bearer "+testCLIBearer(t))
 	request.Header.Set("Idempotency-Key", "bearer-first-space")
 	response := httptest.NewRecorder()
 
@@ -223,7 +223,7 @@ func emailTestAPIWithSources(
 	}
 	sessions := &recordingBrowserSessions{user: identity.AuthenticatedUser{UserID: "user-5"}}
 	member := testUserRoutes(t, authority)
-	authentication, err := NewUserAuthentication(&recordingUserTokens{}, sessions, credentials)
+	authentication, err := NewUserAuthentication(&recordingCLICredentials{}, sessions, credentials, testExternalOrigin(t))
 	if err != nil {
 		t.Fatalf("compose User authentication: %v", err)
 	}
@@ -232,6 +232,7 @@ func emailTestAPIWithSources(
 		unavailableExternalLogin{},
 		unavailableIdentityMethods{},
 		sessions,
+		&recordingCLILogins{},
 		credentials,
 		testExternalOrigin(t),
 		requestSources,

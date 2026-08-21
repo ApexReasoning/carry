@@ -179,7 +179,7 @@ func TestMachineConversationRoutesRejectMemberCredentialsAndMapReplyErrors(t *te
 	t.Parallel()
 	authority, certificate := testMachineCertificate(t, "machine-private-3")
 	memberRequest := httptest.NewRequest(http.MethodPost, "/v1/host/conversation-replies/claim", nil)
-	memberRequest.Header.Set("Authorization", "Bearer member-token")
+	memberRequest.Header.Set("Authorization", "Bearer "+testCLIBearer(t))
 	memberRequest.TLS = verifiedMachineTLS(certificate)
 	memberResponse := httptest.NewRecorder()
 	store := &recordingMachineConversations{}

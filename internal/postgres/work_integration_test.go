@@ -21,8 +21,8 @@ func TestConcurrentWorkCreationReturnsOneDurableWork(t *testing.T) {
 	ctx := context.Background()
 	pool := openMigratedTestPool(t, ctx)
 	store := NewStore(pool)
-	bootstrap, err := bootstrapForTest(ctx, store, BootstrapCommand{
-		DisplayName: "Mae", SpaceName: "Supply Operations", TokenExpiresAt: time.Now().Add(time.Hour),
+	bootstrap, err := createMemberForTest(ctx, store, testMemberCommand{
+		DisplayName: "Mae", SpaceName: "Supply Operations",
 	})
 	if err != nil {
 		t.Fatalf("bootstrap: %v", err)
@@ -106,9 +106,8 @@ func TestWorkQueriesUseBoundedCursorPagesAndDisplayNames(t *testing.T) {
 		ctx := context.Background()
 		pool := openMigratedTestPool(t, ctx)
 		store := NewStore(pool)
-		bootstrap, err := bootstrapForTest(ctx, store, BootstrapCommand{
+		bootstrap, err := createMemberForTest(ctx, store, testMemberCommand{
 			DisplayName: "Pagination Member", SpaceName: "Bounded Work Space",
-			TokenExpiresAt: time.Now().Add(time.Hour),
 		})
 		if err != nil {
 			t.Fatalf("bootstrap: %v", err)
@@ -158,9 +157,8 @@ func TestWorkQueriesUseBoundedCursorPagesAndDisplayNames(t *testing.T) {
 		ctx := context.Background()
 		pool := openMigratedTestPool(t, ctx)
 		store := NewStore(pool)
-		bootstrap, err := bootstrapForTest(ctx, store, BootstrapCommand{
+		bootstrap, err := createMemberForTest(ctx, store, testMemberCommand{
 			DisplayName: "Message Author", SpaceName: "Bounded Message Space",
-			TokenExpiresAt: time.Now().Add(time.Hour),
 		})
 		if err != nil {
 			t.Fatalf("bootstrap: %v", err)
@@ -231,8 +229,8 @@ func TestConcurrentWorkMessagesReceiveContinuousInputSequence(t *testing.T) {
 	ctx := context.Background()
 	pool := openMigratedTestPool(t, ctx)
 	store := NewStore(pool)
-	bootstrap, err := bootstrapForTest(ctx, store, BootstrapCommand{
-		DisplayName: "Lillian", SpaceName: "Customer Research", TokenExpiresAt: time.Now().Add(time.Hour),
+	bootstrap, err := createMemberForTest(ctx, store, testMemberCommand{
+		DisplayName: "Lillian", SpaceName: "Customer Research",
 	})
 	if err != nil {
 		t.Fatalf("bootstrap: %v", err)
@@ -322,8 +320,8 @@ func TestLoadWorkHoldsAConsistentHeadAndMessageSnapshot(t *testing.T) {
 	ctx := context.Background()
 	pool := openMigratedTestPool(t, ctx)
 	store := NewStore(pool)
-	bootstrap, err := bootstrapForTest(ctx, store, BootstrapCommand{
-		DisplayName: "June", SpaceName: "Renewal Planning", TokenExpiresAt: time.Now().Add(time.Hour),
+	bootstrap, err := createMemberForTest(ctx, store, testMemberCommand{
+		DisplayName: "June", SpaceName: "Renewal Planning",
 	})
 	if err != nil {
 		t.Fatalf("bootstrap: %v", err)
@@ -396,8 +394,8 @@ func TestWorkAccessRequiresCurrentSpaceMembership(t *testing.T) {
 	ctx := context.Background()
 	pool := openMigratedTestPool(t, ctx)
 	store := NewStore(pool)
-	bootstrap, err := bootstrapForTest(ctx, store, BootstrapCommand{
-		DisplayName: "Annie", SpaceName: "Field Research", TokenExpiresAt: time.Now().Add(time.Hour),
+	bootstrap, err := createMemberForTest(ctx, store, testMemberCommand{
+		DisplayName: "Annie", SpaceName: "Field Research",
 	})
 	if err != nil {
 		t.Fatalf("bootstrap: %v", err)

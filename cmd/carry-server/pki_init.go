@@ -38,7 +38,7 @@ func parsePKIInitConfig(arguments []string, stderr io.Writer) (pkiInitConfig, er
 
 func initializePKI(parsed pkiInitConfig) error {
 	var serverNames []string
-	for _, name := range strings.Split(parsed.hosts, ",") {
+	for name := range strings.SplitSeq(parsed.hosts, ",") {
 		name = strings.TrimSpace(name)
 		if name != "" {
 			serverNames = append(serverNames, name)

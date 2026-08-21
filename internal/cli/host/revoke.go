@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/ApexReasoning/carry/internal/cli/credentialfile"
 	"github.com/ApexReasoning/carry/internal/cli/userapi"
-	"github.com/ApexReasoning/carry/internal/identity/memberfile"
 	"github.com/ApexReasoning/carry/internal/machine/machinefile"
 	"github.com/spf13/cobra"
 )
@@ -28,7 +28,7 @@ func runRevoke(ctx context.Context, configDirectory string, output io.Writer) er
 		return err
 	}
 	if !serverConfirmed {
-		member, err := memberfile.Load(configDirectory)
+		member, err := credentialfile.Load(configDirectory)
 		if err != nil {
 			return err
 		}

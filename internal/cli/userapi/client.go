@@ -16,16 +16,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ApexReasoning/carry/internal/identity/memberfile"
+	"github.com/ApexReasoning/carry/internal/cli/credentialfile"
 	"github.com/ApexReasoning/carry/internal/space"
 )
 
 const maxResponseBytes = 4 << 20
 
 type Client struct {
-	origin *url.URL
-	token  string
-	client *http.Client
+	origin     *url.URL
+	credential string
+	client     *http.Client
 }
 
 type Member struct {
@@ -103,18 +103,21 @@ func (err *OutcomeUnknownError) Error() string {
 
 func (err *OutcomeUnknownError) Unwrap() error { return err.cause }
 
-func New(serverURL string, caCertificatePEM string, token string) (*Client, error) {
+func New(serverURL string, caCertificatePEM string, credential string) (*Client, error) {
 	origin, err := ParseServerURL(serverURL)
 	if err != nil {
 		return nil, err
 	}
-	roots := x509.NewCertPool()
-	if !roots.AppendCertsFromPEM([]byte(caCertificatePEM)) {
-		return nil, errors.New("member credential contains an invalid CA certificate")
+	var roots *x509.CertPool
+	if strings.TrimSpace(caCertificatePEM) != "" {
+		roots = x509.NewCertPool()
+		if !roots.AppendCertsFromPEM([]byte(caCertificatePEM)) {
+			return nil, errors.New("CLI credential contains an invalid CA certificate")
+		}
 	}
 	return &Client{
-		origin: origin,
-		token:  token,
+		origin:     origin,
+		credential: credential,
 		client: &http.Client{
 			Timeout: 30 * time.Second,
 			CheckRedirect: func(*http.Request, []*http.Request) error {
@@ -128,8 +131,8 @@ func New(serverURL string, caCertificatePEM string, token string) (*Client, erro
 	}, nil
 }
 
-func FromCredential(credential memberfile.Credential) (*Client, error) {
-	return New(credential.ServerURL, credential.CACertificatePEM, credential.Token)
+func FromCredential(credential credentialfile.Credential) (*Client, error) {
+	return New(credential.ServerURL, credential.CACertificatePEM, credential.Credential)
 }
 
 func ParseServerURL(raw string) (*url.URL, error) {
@@ -254,12 +257,12 @@ func (client *Client) send(
 	if replayAfterResponseLoss && idempotencyKey != "" {
 		attempts = 2
 	}
-	for attempt := 0; attempt < attempts; attempt++ {
+	for attempt := range attempts {
 		request, err := http.NewRequestWithContext(ctx, method, client.origin.String()+path, bytes.NewReader(encoded))
 		if err != nil {
 			return fmt.Errorf("build User API request: %w", err)
 		}
-		request.Header.Set("Authorization", "Bearer "+client.token)
+		request.Header.Set("Authorization", "Bearer "+client.credential)
 		if body != nil {
 			request.Header.Set("Content-Type", "application/json")
 		}

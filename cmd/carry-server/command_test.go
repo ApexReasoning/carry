@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 )
 
 func TestInitializePKIWritesPrivateKeysOnce(t *testing.T) {
@@ -56,69 +55,5 @@ func TestParseTrustedProxyCIDRsAcceptsIPv4AndIPv6AndRejectsMalformedValues(t *te
 		if _, err := parseTrustedProxyCIDRs(invalid); err == nil {
 			t.Fatalf("invalid trusted proxy CIDRs %q were accepted", invalid)
 		}
-	}
-}
-
-func TestConcurrentBootstrapCredentialPublicationConverges(t *testing.T) {
-	t.Parallel()
-
-	path := filepath.Join(t.TempDir(), "bootstrap.json")
-	expiresAt := time.Now().Add(time.Hour)
-	start := make(chan struct{})
-	type result struct {
-		userID string
-		err    error
-	}
-	results := make(chan result, 8)
-	for range 8 {
-		go func() {
-			<-start
-			command, err := loadOrCreateBootstrapCredential(path, "Ada", "Research", expiresAt)
-			results <- result{userID: command.UserID, err: err}
-		}()
-	}
-	close(start)
-
-	var winner string
-	for range 8 {
-		result := <-results
-		if result.err != nil {
-			t.Fatalf("publish matching bootstrap credential: %v", result.err)
-		}
-		if winner == "" {
-			winner = result.userID
-		}
-		if result.userID != winner {
-			t.Fatalf("bootstrap credential user = %s, want %s", result.userID, winner)
-		}
-	}
-}
-
-func TestConcurrentBootstrapCredentialPublicationRejectsDifferentNames(t *testing.T) {
-	t.Parallel()
-
-	path := filepath.Join(t.TempDir(), "bootstrap.json")
-	expiresAt := time.Now().Add(time.Hour)
-	start := make(chan struct{})
-	results := make(chan error, 2)
-	for _, names := range [][2]string{{"Ada", "Research"}, {"Grace", "Operations"}} {
-		go func() {
-			<-start
-			_, err := loadOrCreateBootstrapCredential(path, names[0], names[1], expiresAt)
-			results <- err
-		}()
-	}
-	close(start)
-
-	var succeeded, rejected int
-	for range 2 {
-		if err := <-results; err == nil {
-			succeeded++
-		} else {
-			rejected++
-		}
-	}
-	if succeeded != 1 || rejected != 1 {
-		t.Fatalf("bootstrap publication outcomes = %d succeeded, %d rejected", succeeded, rejected)
 	}
 }

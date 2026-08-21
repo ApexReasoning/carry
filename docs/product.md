@@ -127,7 +127,11 @@ Google 和 GitHub 与邮箱方法最终只建立或找回 User，并签发同一
 
 待关联 identity 已属于另一 User 时明确拒绝，绝不移动或合并 User。移除一种方式只要求最近确认仍可使用的另一种方式，并必须在并发下保留至少一种方式；无法再使用任何已关联方式时没有弱人工绕过。每次成功关联或移除都撤销所有旧 Browser Sessions，为当前浏览器原子签发一个 replacement Session；其他设备退出而当前旅程继续。response loss 的准确重放只恢复同一个仍有效 replacement Session，不制造新 session 或 resurrect 已撤销 credential。
 
-provider login 成功后的无 Membership User 继续现有显式创建首个 Space 旅程，不建立默认 Space。当前 logout 只撤销准确 Browser Session；旧 cookie fail closed。现有 member bearer 和 operator bootstrap 只为已发布 CLI 过渡保留到 Node 11，不再是 Browser、Settings 或官方 Cloud onboarding truth。
+provider login 成功后的无 Membership User 继续现有显式创建首个 Space 旅程，不建立默认 Space。当前 Browser logout 只撤销准确 Browser Session；旧 cookie fail closed。
+
+成员 CLI 不接受可粘贴 token、邮箱验证码、provider token 或 Browser Session。成员对一个显式 HTTPS Carry server 运行 `carry login`，终端显示准确 server、有限的 CLI label、十五分钟有效的人类 code 与固定 `/cli-login` 页面；已登录 Browser 重复显示相同 code 和 server，成员选择一个当前 Space 后明确批准或拒绝。所选 Space 只是本地默认 context，不成为 credential scope，也不创建或扩大 Membership。
+
+人类 code、仅供 CLI poll/cancel 的 secret 与最终 `carry_cli_` credential 是三个不同 audience。首次有效 poll 才原子建立一个九十天有效的 User CLI credential；response loss 的有界准确重放只恢复同一个仍有效 secret，不建立第二个 credential。credential 只识别准确 User 与 server，每个 Work 或既有 Machine enrollment/revocation 请求仍由当前 Membership 裁决。Browser Settings 可以查看并撤销自己的 active CLI access；`carry logout` 先确认服务端撤销，再删除 private `cli.json`。丢失、过期或撤销后只能重新批准，不能恢复旧 secret。旧 member bearer、operator bootstrap 与 `member.json` 不再是产品入口或兼容路径。
 
 ## Space
 

@@ -10,6 +10,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ApexReasoning/carry/internal/cli/credentialfile"
+	"github.com/ApexReasoning/carry/internal/cli/userapi"
 )
 
 func TestMemberCreatesMessagesAndReloadsDurableWork(t *testing.T) {
@@ -29,29 +32,46 @@ func TestMemberCreatesMessagesAndReloadsDurableWork(t *testing.T) {
 
 	pkiDirectory := filepath.Join(temporary, "pki")
 	run(t, root, nil, carryServer, "pki", "init", "--dir", pkiDirectory, "--hosts", "localhost,127.0.0.1")
-	bootstrapOutput := bootstrapCarry(t, root, carryServer, databaseURL)
+	testMemberOutput := prepareTestMember(t, databaseURL)
 	resetProductJourneyFacts(t, databaseURL)
-	var bootstrap struct {
-		UserToken string `json:"user_token"`
+	var member struct {
+		UserID  string `json:"user_id"`
+		SpaceID string `json:"space_id"`
 	}
-	if err := json.Unmarshal([]byte(bootstrapOutput), &bootstrap); err != nil {
-		t.Fatalf("decode bootstrap: %v", err)
+	if err := json.Unmarshal([]byte(testMemberOutput), &member); err != nil {
+		t.Fatalf("decode member: %v", err)
 	}
+	const cliLoginEmail = "cli-member@example.com"
+	attachTestEmailIdentity(t, databaseURL, member.UserID, cliLoginEmail)
 
 	address := freeAddress(t)
-	stopServer, serverLog, _ := startServer(t, root, carryServer, address, databaseURL, pkiDirectory)
+	apiURL := "https://" + address
+	webAddress := freeAddress(t)
+	webURL := "https://" + webAddress
+	stopServer, serverLog, emailCaptureFile := startServerWithOrigin(t, root, carryServer, address, databaseURL, pkiDirectory, webURL)
 	defer func() { stopServer() }()
-	serverURL := "https://" + address
-	waitForServer(t, serverURL, filepath.Join(pkiDirectory, "ca.pem"), serverLog)
+	waitForServer(t, apiURL, filepath.Join(pkiDirectory, "ca.pem"), serverLog)
+	run(t, root, nil, "pnpm", "--dir", "apps/web", "build")
+	stopWeb, webLog := startWeb(t, root, webAddress, apiURL, pkiDirectory)
+	defer stopWeb()
+	waitForServer(t, webURL, filepath.Join(pkiDirectory, "ca.pem"), webLog)
 
 	configDirectory := filepath.Join(temporary, "config")
 	environment := []string{"CARRY_CONFIG_DIR=" + configDirectory}
-	run(
-		t, root, environment, carry, "login",
-		"--server", serverURL,
-		"--ca-cert", filepath.Join(pkiDirectory, "ca.pem"),
-		"--token", bootstrap.UserToken,
-	)
+	const cliLabel = "durable-work-cli"
+	pendingLogin := startCarryCLILogin(t, root, carry, configDirectory, webURL, filepath.Join(pkiDirectory, "ca.pem"), cliLabel)
+	browserOutput, browserErr := runError(root, []string{
+		"CARRY_WEB_URL=" + webURL,
+		"CARRY_EMAIL_CAPTURE_FILE=" + emailCaptureFile,
+		"CARRY_LOGIN_EMAIL=" + cliLoginEmail,
+		"CARRY_CLI_LOGIN_CODE=" + pendingLogin.code,
+		"CARRY_CLI_SERVER_ORIGIN=" + webURL,
+		"CARRY_CLI_LABEL=" + cliLabel,
+	}, "pnpm", "--dir", "apps/web", "exec", "playwright", "test", "e2e/cli-login.spec.ts")
+	if browserErr != nil || !strings.Contains(browserOutput, "1 passed") {
+		t.Fatalf("run Browser-approved CLI journey: %v\n%s", browserErr, browserOutput)
+	}
+	finishCarryCLILogin(t, pendingLogin)
 	createdOutput := run(
 		t, root, environment, carry, "work", "create",
 		"--goal", "Track recurring customer renewal questions",
@@ -77,14 +97,35 @@ func TestMemberCreatesMessagesAndReloadsDurableWork(t *testing.T) {
 	if !strings.Contains(messageOutput, "Added message to Work "+workID) {
 		t.Fatalf("message output = %q", messageOutput)
 	}
+	if logged := serverLog.String(); strings.Contains(logged, pendingLogin.code) || strings.Contains(logged, "carry_cli_") {
+		t.Fatalf("server log contains CLI login secret: %s", logged)
+	}
 
 	stopServer()
-	stopServer, serverLog, _ = startServer(t, root, carryServer, address, databaseURL, pkiDirectory)
-	waitForServer(t, serverURL, filepath.Join(pkiDirectory, "ca.pem"), serverLog)
+	stopServer, serverLog, _ = startServerWithOrigin(t, root, carryServer, address, databaseURL, pkiDirectory, webURL)
+	waitForServer(t, apiURL, filepath.Join(pkiDirectory, "ca.pem"), serverLog)
 	restarted := run(t, root, environment, carry, "work", "show", workID)
 	if !strings.Contains(restarted, "Track recurring customer renewal questions") ||
 		!strings.Contains(restarted, "Enterprise customers ask for a 60-day notice period") {
 		t.Fatalf("Work after server restart = %q", restarted)
+	}
+	oldCredential, err := credentialfile.Load(configDirectory)
+	if err != nil {
+		t.Fatalf("load CLI credential before revoke: %v", err)
+	}
+	logout := run(t, root, environment, carry, "logout")
+	if !strings.Contains(logout, "Revoked CLI access") {
+		t.Fatalf("logout output = %q", logout)
+	}
+	oldClient, err := userapi.FromCredential(oldCredential)
+	if err != nil {
+		t.Fatalf("recreate old CLI client: %v", err)
+	}
+	if _, err := oldClient.LoadMember(t.Context()); err == nil || !strings.Contains(err.Error(), "401") {
+		t.Fatalf("revoked CLI credential still authenticated: %v", err)
+	}
+	if output, err := runError(root, environment, carry, "work", "show", workID); err == nil || !strings.Contains(output, "read CLI credential") {
+		t.Fatalf("Work after local CLI cleanup = %q, %v", output, err)
 	}
 }
 
@@ -102,7 +143,7 @@ func TestBrowserCreatesDurableWorkWithoutStoringBearer(t *testing.T) {
 	build(t, root, carryServer, "./cmd/carry-server")
 	pkiDirectory := filepath.Join(temporary, "pki")
 	run(t, root, nil, carryServer, "pki", "init", "--dir", pkiDirectory, "--hosts", "localhost,127.0.0.1")
-	_ = bootstrapCarry(t, root, carryServer, databaseURL)
+	_ = prepareTestMember(t, databaseURL)
 	resetProductJourneyFacts(t, databaseURL)
 
 	serverAddress := freeAddress(t)

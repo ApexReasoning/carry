@@ -72,7 +72,7 @@ func TestExternalLoginStartRejectsWrongHostCrossSiteAndAuthenticatedPrincipals(t
 			request.Header.Set("Origin", "https://attacker.example")
 			request.Header.Set("Sec-Fetch-Site", "cross-site")
 		}},
-		{name: "bearer", configure: func(request *http.Request) { request.Header.Set("Authorization", "Bearer member") }},
+		{name: "bearer", configure: func(request *http.Request) { request.Header.Set("Authorization", "Bearer "+testCLIBearer(t)) }},
 		{name: "Browser Session", configure: func(request *http.Request) {
 			request.AddCookie(&http.Cookie{Name: browserSessionCookie, Value: validSession})
 		}},
@@ -224,12 +224,12 @@ func externalLoginTestAPI(t *testing.T, external ExternalLogin, sessions Browser
 		t.Fatalf("compose email login: %v", err)
 	}
 	member := testUserRoutes(t, testAuthority(t))
-	authentication, err := NewUserAuthentication(&recordingUserTokens{}, sessions, credentials)
+	authentication, err := NewUserAuthentication(&recordingCLICredentials{}, sessions, credentials, testExternalOrigin(t))
 	if err != nil {
 		t.Fatalf("compose User authentication: %v", err)
 	}
 	identityRoutes, err := NewUserIdentityRoutes(
-		emailLogin, external, unavailableIdentityMethods{}, sessions, credentials,
+		emailLogin, external, unavailableIdentityMethods{}, sessions, &recordingCLILogins{}, credentials,
 		testExternalOrigin(t), NewRequestSource(nil), emptyMemberships{},
 	)
 	if err != nil {

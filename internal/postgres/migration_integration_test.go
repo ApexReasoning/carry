@@ -5,7 +5,6 @@ package postgres
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/ApexReasoning/carry/internal/conversation"
 	"github.com/ApexReasoning/carry/internal/work"
@@ -24,7 +23,9 @@ func TestMigrateCreatesCurrentFactsAndRejectsUnearnedWorkLifecycle(t *testing.T)
 		"carry_users",
 		"spaces",
 		"space_memberships",
-		"user_tokens",
+		"cli_login_requests",
+		"cli_login_lookup_failures",
+		"cli_credentials",
 		"machines",
 		"conversations",
 		"conversation_messages",
@@ -53,7 +54,7 @@ func TestMigrateCreatesCurrentFactsAndRejectsUnearnedWorkLifecycle(t *testing.T)
 		}
 	}
 
-	for _, removed := range []string{"machine_runtime_observations", "coordinator_runs", "work_understanding_revisions"} {
+	for _, removed := range []string{"user_tokens", "machine_runtime_observations", "coordinator_runs", "work_understanding_revisions"} {
 		var exists bool
 		if err := pool.QueryRow(ctx, `select to_regclass('public.' || $1) is not null`, removed).Scan(&exists); err != nil {
 			t.Fatalf("find removed table %s: %v", removed, err)
@@ -64,9 +65,8 @@ func TestMigrateCreatesCurrentFactsAndRejectsUnearnedWorkLifecycle(t *testing.T)
 	}
 
 	store := NewStore(pool)
-	bootstrap, err := bootstrapForTest(ctx, store, BootstrapCommand{
+	bootstrap, err := createMemberForTest(ctx, store, testMemberCommand{
 		DisplayName: "Migration Owner", SpaceName: "Migration Space",
-		TokenExpiresAt: time.Now().Add(time.Hour),
 	})
 	if err != nil {
 		t.Fatalf("bootstrap lifecycle fixture: %v", err)
@@ -95,9 +95,8 @@ func TestConversationReplySchemaRejectsInvalidSourceAndReplyShapes(t *testing.T)
 	ctx := context.Background()
 	pool := openMigratedTestPool(t, ctx)
 	store := NewStore(pool)
-	bootstrap, err := bootstrapForTest(ctx, store, BootstrapCommand{
+	bootstrap, err := createMemberForTest(ctx, store, testMemberCommand{
 		DisplayName: "Reply Constraint Owner", SpaceName: "Reply Constraint Space",
-		TokenExpiresAt: time.Now().Add(time.Hour),
 	})
 	if err != nil {
 		t.Fatalf("bootstrap constraint fixture: %v", err)

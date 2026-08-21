@@ -62,6 +62,7 @@ func newRoot(
 	root.SetErr(streams.ErrorOutput)
 	root.AddCommand(
 		login.NewCommand(configDirectory, streams.Output),
+		login.NewLogoutCommand(configDirectory, streams.Output),
 		workcmd.NewCommand(configDirectory, streams.Output),
 		hostcmd.NewCommand(configDirectory, streams.Output, piExecutor, codexExecutor),
 	)

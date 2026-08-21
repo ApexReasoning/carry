@@ -55,7 +55,7 @@ func TestWorkMutationRetriesResponseLossWithSameIdentityAndBytes(t *testing.T) {
 		}`), nil
 	})
 	origin, _ := url.Parse("https://carry.example")
-	client := Client{origin: origin, token: "member-secret", client: &http.Client{Transport: transport}}
+	client := Client{origin: origin, credential: "member-secret", client: &http.Client{Transport: transport}}
 
 	created, err := client.CreateWork(context.Background(), "22222222-2222-4222-8222-222222222222", "Review renewals", "stable-create-key")
 	if err != nil {
@@ -82,7 +82,7 @@ func TestWorkMutationReportsUnknownAfterResponsesRemainLost(t *testing.T) {
 	t.Parallel()
 	attempts := 0
 	origin, _ := url.Parse("https://carry.example")
-	client := Client{origin: origin, token: "member-secret", client: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+	client := Client{origin: origin, credential: "member-secret", client: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 		attempts++
 		return nil, errors.New("response lost")
 	})}}
@@ -99,7 +99,7 @@ func TestMachineEnrollmentDoesNotHideResponseLoss(t *testing.T) {
 	t.Parallel()
 	attempts := 0
 	origin, _ := url.Parse("https://carry.example")
-	client := Client{origin: origin, token: "member-secret", client: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+	client := Client{origin: origin, credential: "member-secret", client: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 		attempts++
 		return nil, errors.New("response lost")
 	})}}

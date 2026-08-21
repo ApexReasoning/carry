@@ -3,15 +3,19 @@ import {
   acceptWorkReview as acceptWorkReviewRequest,
   appendWorkMessage as appendWorkMessageRequest,
   acceptSpaceInvitation as acceptSpaceInvitationRequest,
+  approveCliLogin as approveCliLoginRequest,
   createFirstSpace as createFirstSpaceRequest,
   createWork as createWorkRequest,
+  denyCliLogin as denyCliLoginRequest,
   issueSpaceInvitation as issueSpaceInvitationRequest,
+  listCliCredentials as listCliCredentialsRequest,
   listConversationMessages as listConversationMessagesRequest,
   listInvitationInbox as listInvitationInboxRequest,
   listManagedInvitations as listManagedInvitationsRequest,
   listSpaceMembers as listSpaceMembersRequest,
   listWorks as listWorksRequest,
   loadCurrentUser,
+  lookupCliLogin as lookupCliLoginRequest,
   loadIdentityMethods as loadIdentityMethodsRequest,
   loadWork as loadWorkRequest,
   requestEmailCode as requestEmailCodeRequest,
@@ -20,6 +24,7 @@ import {
   removeSpaceMember as removeSpaceMemberRequest,
   resendSpaceInvitation as resendSpaceInvitationRequest,
   retryWork as retryWorkRequest,
+  revokeCliCredential as revokeCliCredentialRequest,
   revokeSpaceInvitation as revokeSpaceInvitationRequest,
   revokeCurrentBrowserSession,
   sendConversationMessage as sendConversationMessageRequest,
@@ -30,6 +35,8 @@ import {
 } from "./generated/sdk.gen";
 import type {
   AcceptedInvitation,
+  CliCredential,
+  CliLoginPreview,
   ConversationMessage,
   EmailChallenge,
   IdentityMethods,
@@ -71,6 +78,74 @@ client.setConfig({
 });
 
 const sameOrigin = { credentials: "same-origin" as const };
+
+export async function lookupCliLogin(
+  userCode: string,
+): Promise<CliLoginPreview> {
+  const result = await lookupCliLoginRequest({
+    ...sameOrigin,
+    body: { user_code: userCode },
+  });
+  return requireData(
+    result.data,
+    result.response,
+    result.error,
+    "Find CLI login",
+  );
+}
+
+export async function approveCliLogin(
+  preview: CliLoginPreview,
+  spaceID: string,
+  replacementCredentialID: string | undefined,
+  key: string,
+): Promise<void> {
+  const result = await approveCliLoginRequest({
+    ...sameOrigin,
+    headers: { "Idempotency-Key": key },
+    body: {
+      request_id: preview.request_id,
+      user_code: preview.user_code,
+      space_id: spaceID,
+      replacement_credential_id: replacementCredentialID,
+    },
+  });
+  requireMutationSuccess(result.response, result.error, "Approve CLI login");
+}
+
+export async function denyCliLogin(
+  preview: CliLoginPreview,
+  key: string,
+): Promise<void> {
+  const result = await denyCliLoginRequest({
+    ...sameOrigin,
+    headers: { "Idempotency-Key": key },
+    body: { request_id: preview.request_id, user_code: preview.user_code },
+  });
+  requireMutationSuccess(result.response, result.error, "Deny CLI login");
+}
+
+export async function cliCredentials(): Promise<Array<CliCredential>> {
+  const result = await listCliCredentialsRequest(sameOrigin);
+  return requireData(
+    result.data,
+    result.response,
+    result.error,
+    "Load CLI access",
+  ).credentials;
+}
+
+export async function revokeCliCredential(
+  credentialID: string,
+  key: string,
+): Promise<void> {
+  const result = await revokeCliCredentialRequest({
+    ...sameOrigin,
+    headers: { "Idempotency-Key": key },
+    path: { credentialID },
+  });
+  requireMutationSuccess(result.response, result.error, "Revoke CLI access");
+}
 
 export async function requestEmailCode(
   email: string,

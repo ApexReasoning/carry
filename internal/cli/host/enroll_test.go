@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/ApexReasoning/carry/internal/identity/memberfile"
+	"github.com/ApexReasoning/carry/internal/cli/credentialfile"
 	"github.com/ApexReasoning/carry/internal/space"
 )
 
@@ -14,7 +14,7 @@ func TestPendingEnrollmentReusesIdentityAfterResponseLoss(t *testing.T) {
 	t.Parallel()
 
 	directory := t.TempDir()
-	member := memberfile.Credential{
+	member := credentialfile.Credential{
 		ServerURL: "https://carry.example.com", CACertificatePEM: "test-ca", UserID: "user-1",
 	}
 	memberships := []space.Membership{{SpaceID: "space-1", CanEnrollMachines: true}}
@@ -45,7 +45,7 @@ func TestPendingEnrollmentRejectsChangedCommand(t *testing.T) {
 	t.Parallel()
 
 	directory := t.TempDir()
-	member := memberfile.Credential{
+	member := credentialfile.Credential{
 		ServerURL: "https://carry.example.com", CACertificatePEM: "test-ca", UserID: "user-1",
 	}
 	memberships := []space.Membership{{SpaceID: "space-1", CanEnrollMachines: true}}

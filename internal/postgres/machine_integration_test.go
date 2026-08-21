@@ -8,7 +8,6 @@ import (
 	"errors"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/ApexReasoning/carry/internal/machine"
 	"github.com/ApexReasoning/carry/internal/postgres/dbsqlc"
@@ -21,10 +20,9 @@ func TestMachineEnrollmentRequiresPermissionAndIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 	pool := openMigratedTestPool(t, ctx)
 	store := NewStore(pool)
-	bootstrap, err := bootstrapForTest(ctx, store, BootstrapCommand{
-		DisplayName:    "Dorothy",
-		SpaceName:      "Compiler Research",
-		TokenExpiresAt: time.Now().Add(time.Hour),
+	bootstrap, err := createMemberForTest(ctx, store, testMemberCommand{
+		DisplayName: "Dorothy",
+		SpaceName:   "Compiler Research",
 	})
 	if err != nil {
 		t.Fatalf("bootstrap: %v", err)
@@ -89,8 +87,8 @@ func TestConcurrentMachineEnrollmentReturnsTheDurableWinner(t *testing.T) {
 	ctx := context.Background()
 	pool := openMigratedTestPool(t, ctx)
 	store := NewStore(pool)
-	bootstrap, err := bootstrapForTest(ctx, store, BootstrapCommand{
-		DisplayName: "Margaret", SpaceName: "Materials Lab", TokenExpiresAt: time.Now().Add(time.Hour),
+	bootstrap, err := createMemberForTest(ctx, store, testMemberCommand{
+		DisplayName: "Margaret", SpaceName: "Materials Lab",
 	})
 	if err != nil {
 		t.Fatalf("bootstrap: %v", err)
@@ -147,8 +145,8 @@ func TestMachineEnrollmentPermissionLockSerializesRevocation(t *testing.T) {
 	ctx := context.Background()
 	pool := openMigratedTestPool(t, ctx)
 	store := NewStore(pool)
-	bootstrap, err := bootstrapForTest(ctx, store, BootstrapCommand{
-		DisplayName: "Katherine", SpaceName: "Flight Controls", TokenExpiresAt: time.Now().Add(time.Hour),
+	bootstrap, err := createMemberForTest(ctx, store, testMemberCommand{
+		DisplayName: "Katherine", SpaceName: "Flight Controls",
 	})
 	if err != nil {
 		t.Fatalf("bootstrap: %v", err)

@@ -13,24 +13,26 @@ type UserAuthentication struct {
 }
 
 func NewUserAuthentication(
-	tokens UserTokenAuthenticator,
+	cli CLICredentialAuthenticator,
 	sessions BrowserSessions,
 	credentials identity.Credentials,
+	origin ExternalOrigin,
 ) (*UserAuthentication, error) {
-	if tokens == nil || sessions == nil {
+	if cli == nil || sessions == nil || origin.value == "" {
 		return nil, errors.New("User authentication dependencies are required")
 	}
 	return &UserAuthentication{authenticator: userAuthenticator{
-		tokens: tokens, sessions: sessions, credentials: credentials,
+		cli: cli, sessions: sessions, credentials: credentials, origin: origin,
 	}}, nil
 }
 
-// UserIdentityRoutes owns login, Browser Session, and current-User HTTP routes.
+// UserIdentityRoutes owns login, Browser Session, CLI access, and current-User HTTP routes.
 type UserIdentityRoutes struct {
 	email    emailLoginAPI
 	external externalLoginAPI
 	methods  identityMethodsAPI
 	sessions browserSessionAPI
+	cli      cliLoginAPI
 	user     userAPI
 }
 
@@ -39,13 +41,15 @@ func NewUserIdentityRoutes(
 	externalLogin ExternalLogin,
 	methods IdentityMethods,
 	sessions BrowserSessions,
+	cliLogins CLILogins,
 	credentials identity.Credentials,
 	externalOrigin ExternalOrigin,
 	requestSources RequestSource,
 	memberships MembershipReader,
 ) (*UserIdentityRoutes, error) {
-	if emailLogin == nil || externalLogin == nil || methods == nil || sessions == nil || memberships == nil || externalOrigin.value == "" {
-		return nil, errors.New("User identity route dependencies are required")
+	if emailLogin == nil || externalLogin == nil || methods == nil || sessions == nil || cliLogins == nil ||
+		memberships == nil || externalOrigin.value == "" {
+		return nil, errors.New("User Identity route dependencies are required")
 	}
 	return &UserIdentityRoutes{
 		email: emailLoginAPI{
@@ -56,7 +60,10 @@ func NewUserIdentityRoutes(
 		},
 		methods:  identityMethodsAPI{methods: methods, credentials: credentials, origin: externalOrigin},
 		sessions: browserSessionAPI{sessions: sessions, credentials: credentials},
-		user:     userAPI{memberships: memberships},
+		cli: cliLoginAPI{
+			logins: cliLogins, credentials: credentials, origin: externalOrigin, requestSources: requestSources,
+		},
+		user: userAPI{memberships: memberships},
 	}, nil
 }
 
@@ -71,6 +78,10 @@ func (routes *UserIdentityRoutes) mountPublic(router chi.Router) {
 	router.Post("/identity/methods/email/challenges/{challenge_id}/verify", routes.email.verifyLinkCode)
 	router.Delete("/identity/methods/{method}", routes.methods.unlink)
 	router.Delete("/browser/sessions/current", routes.sessions.revokeCurrent)
+	router.Post("/cli-logins", routes.cli.begin)
+	router.Post("/cli-logins/poll", routes.cli.poll)
+	router.Post("/cli-logins/cancel", routes.cli.cancel)
+	router.Post("/cli-credentials/current/revoke", routes.cli.revokeCurrent)
 }
 
 func (routes *UserIdentityRoutes) mountBrowser(router chi.Router) {
@@ -81,6 +92,11 @@ func (routes *UserIdentityRoutes) mountBrowser(router chi.Router) {
 	router.Post("/identity/methods/email/challenges", routes.email.requestLinkCode)
 	router.Post("/identity/methods/google/start", routes.external.startGoogleLink)
 	router.Post("/identity/methods/github/start", routes.external.startGitHubLink)
+	router.Post("/cli-logins/lookup", routes.cli.lookup)
+	router.Post("/cli-logins/approve", routes.cli.approve)
+	router.Post("/cli-logins/deny", routes.cli.deny)
+	router.Get("/identity/cli-credentials", routes.cli.listCredentials)
+	router.Post("/identity/cli-credentials/{credential_id}/revoke", routes.cli.revokeFromBrowser)
 }
 
 func (routes *UserIdentityRoutes) mountUser(router chi.Router) {

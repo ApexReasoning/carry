@@ -1,6 +1,8 @@
 import { useState } from "react";
 
 import { ConversationPanel } from "./features/conversation/conversation-panel";
+import { CliCredentialSettings } from "./features/user-session/cli-credential-settings";
+import { CliLoginPage } from "./features/user-session/cli-login";
 import { FirstSpace } from "./features/user-session/first-space";
 import { IdentityMethodSettings } from "./features/user-session/identity-methods";
 import { InvitationInboxView } from "./features/user-session/invitation-inbox";
@@ -14,7 +16,7 @@ import { WorkList } from "./features/works/work-list";
 
 export function App() {
   const [settingsPanel, setSettingsPanel] = useState<
-    "identity" | "members" | null
+    "identity" | "cli" | "members" | null
   >(hasIdentityChangeStatus() ? "identity" : null);
   const session = useUserSession();
   const board = useWorkBoard(session.user);
@@ -114,6 +116,10 @@ export function App() {
     return null;
   }
 
+  if (window.location.pathname === "/cli-login") {
+    return <CliLoginPage user={session.user} />;
+  }
+
   const currentSpace = session.user.spaces.find(
     (space) => space.space_id === board.spaceID,
   );
@@ -186,6 +192,13 @@ export function App() {
               >
                 Sign-in methods
               </button>
+              <button
+                className="ghost-button"
+                type="button"
+                onClick={() => setSettingsPanel("cli")}
+              >
+                CLI access
+              </button>
               {currentSpace ? (
                 <button
                   className="ghost-button"
@@ -198,6 +211,9 @@ export function App() {
             </nav>
             {settingsPanel === "identity" ? (
               <IdentityMethodSettings onClose={() => setSettingsPanel(null)} />
+            ) : null}
+            {settingsPanel === "cli" ? (
+              <CliCredentialSettings onClose={() => setSettingsPanel(null)} />
             ) : null}
             {settingsPanel === "members" && currentSpace ? (
               <MemberSettings

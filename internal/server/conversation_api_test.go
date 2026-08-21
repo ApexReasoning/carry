@@ -32,7 +32,7 @@ func TestSendConversationMessageUsesAuthenticatedMember(t *testing.T) {
 		"/v1/spaces/"+conversationSpaceID+"/conversation/messages",
 		strings.NewReader(`{"text":"How should I prepare the renewal?"}`),
 	)
-	request.Header.Set("Authorization", "Bearer member-token")
+	request.Header.Set("Authorization", "Bearer "+testCLIBearer(t))
 	request.Header.Set("Idempotency-Key", "private-request-1")
 	response := httptest.NewRecorder()
 
@@ -64,7 +64,7 @@ func TestSendConversationMessageRejectsCallerNominatedParticipant(t *testing.T) 
 		"/v1/spaces/"+conversationSpaceID+"/conversation/messages",
 		bytes.NewBufferString(`{"text":"private","member_user_id":"another-member"}`),
 	)
-	request.Header.Set("Authorization", "Bearer member-token")
+	request.Header.Set("Authorization", "Bearer "+testCLIBearer(t))
 	request.Header.Set("Idempotency-Key", "private-request-2")
 	response := httptest.NewRecorder()
 
@@ -90,7 +90,7 @@ func TestListConversationMessagesUsesOnlyValidatedCursors(t *testing.T) {
 		"/v1/spaces/"+conversationSpaceID+"/conversation/messages?before="+before,
 		nil,
 	)
-	request.Header.Set("Authorization", "Bearer member-token")
+	request.Header.Set("Authorization", "Bearer "+testCLIBearer(t))
 	response := httptest.NewRecorder()
 
 	handler.ServeHTTP(response, request)
@@ -119,7 +119,7 @@ func TestListConversationMessagesUsesOnlyValidatedCursors(t *testing.T) {
 			"/v1/spaces/"+conversationSpaceID+"/conversation/messages"+target,
 			nil,
 		)
-		invalid.Header.Set("Authorization", "Bearer member-token")
+		invalid.Header.Set("Authorization", "Bearer "+testCLIBearer(t))
 		invalidResponse := httptest.NewRecorder()
 		handler.ServeHTTP(invalidResponse, invalid)
 		if invalidResponse.Code != http.StatusBadRequest {
@@ -150,7 +150,7 @@ func TestConversationStoreErrorsRemainDistinct(t *testing.T) {
 				"/v1/spaces/"+conversationSpaceID+"/conversation/messages",
 				strings.NewReader(`{"text":"private question"}`),
 			)
-			request.Header.Set("Authorization", "Bearer member-token")
+			request.Header.Set("Authorization", "Bearer "+testCLIBearer(t))
 			request.Header.Set("Idempotency-Key", "private-request-error")
 			response := httptest.NewRecorder()
 			handler.ServeHTTP(response, request)
@@ -178,9 +178,10 @@ func conversationTestAPI(
 	authority := testAuthority(t)
 	member := testUserRoutes(t, authority)
 	authentication, err := NewUserAuthentication(
-		&recordingUserTokens{user: identity.AuthenticatedUser{UserID: "member-private"}},
+		&recordingCLICredentials{user: identity.AuthenticatedUser{UserID: "member-private"}},
 		unavailableBrowserSessions{},
 		testIdentityCredentials(t),
+		testExternalOrigin(t),
 	)
 	if err != nil {
 		t.Fatalf("compose User authentication: %v", err)

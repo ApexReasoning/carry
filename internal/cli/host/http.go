@@ -105,8 +105,7 @@ func controlPlaneRequestError(action string, err error) error {
 }
 
 func isTemporaryControlPlaneTransportError(err error) bool {
-	var requestError *url.Error
-	if errors.As(err, &requestError) {
+	if requestError, ok := errors.AsType[*url.Error](err); ok {
 		err = requestError.Err
 	}
 	if errors.Is(err, context.DeadlineExceeded) ||
@@ -114,8 +113,7 @@ func isTemporaryControlPlaneTransportError(err error) bool {
 		errors.Is(err, io.ErrUnexpectedEOF) {
 		return true
 	}
-	var operationError *net.OpError
-	if errors.As(err, &operationError) {
+	if _, ok := errors.AsType[*net.OpError](err); ok {
 		return true
 	}
 	var dnsError *net.DNSError

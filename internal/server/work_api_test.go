@@ -32,7 +32,7 @@ func TestCreateWorkTakesOwnerFromAuthenticatedMember(t *testing.T) {
 		"/v1/spaces/"+spaceID+"/works",
 		bytes.NewBufferString(`{"goal":"Prepare the renewal analysis"}`),
 	)
-	request.Header.Set("Authorization", "Bearer member-token")
+	request.Header.Set("Authorization", "Bearer "+testCLIBearer(t))
 	request.Header.Set("Idempotency-Key", "renewal-analysis")
 	response := httptest.NewRecorder()
 
@@ -61,7 +61,7 @@ func TestCreateWorkRejectsCallerNominatedOwner(t *testing.T) {
 		"/v1/spaces/"+spaceID+"/works",
 		bytes.NewBufferString(`{"goal":"Prepare the renewal analysis","owner_user_id":"other-member"}`),
 	)
-	request.Header.Set("Authorization", "Bearer member-token")
+	request.Header.Set("Authorization", "Bearer "+testCLIBearer(t))
 	request.Header.Set("Idempotency-Key", "renewal-analysis")
 	response := httptest.NewRecorder()
 
@@ -93,7 +93,7 @@ func TestAppendWorkMessageUsesAuthenticatedAuthor(t *testing.T) {
 		"/v1/spaces/"+spaceID+"/works/"+workID+"/messages",
 		bytes.NewBufferString(`{"text":"The renewal date is 30 September"}`),
 	)
-	request.Header.Set("Authorization", "Bearer member-token")
+	request.Header.Set("Authorization", "Bearer "+testCLIBearer(t))
 	request.Header.Set("Idempotency-Key", "renewal-date")
 	response := httptest.NewRecorder()
 
@@ -130,7 +130,7 @@ func TestAppendWorkMessageAcceptsWorstCaseEscapedValidEnvelope(t *testing.T) {
 		"/v1/spaces/"+spaceID+"/works/"+workID+"/messages",
 		bytes.NewReader(body),
 	)
-	request.Header.Set("Authorization", "Bearer member-token")
+	request.Header.Set("Authorization", "Bearer "+testCLIBearer(t))
 	request.Header.Set("Idempotency-Key", "escaped-message")
 	response := httptest.NewRecorder()
 
@@ -158,7 +158,7 @@ func TestWorkReadCursorsAreBoundedAndExact(t *testing.T) {
 	}}
 	handler := workTestAPI(t, &recordingWorkCommands{}, queries)
 	request := httptest.NewRequest(http.MethodGet, "/v1/spaces/"+spaceID+"/works?before="+cursorID, nil)
-	request.Header.Set("Authorization", "Bearer member-token")
+	request.Header.Set("Authorization", "Bearer "+testCLIBearer(t))
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || queries.listCommand.Before != cursorID ||
@@ -169,7 +169,7 @@ func TestWorkReadCursorsAreBoundedAndExact(t *testing.T) {
 	assertNoStore(t, response)
 
 	request = httptest.NewRequest(http.MethodGet, "/v1/spaces/"+spaceID+"/works/"+workID+"?before="+cursorID, nil)
-	request.Header.Set("Authorization", "Bearer member-token")
+	request.Header.Set("Authorization", "Bearer "+testCLIBearer(t))
 	response = httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || queries.loadCommand.BeforeMessage != cursorID {
@@ -177,7 +177,7 @@ func TestWorkReadCursorsAreBoundedAndExact(t *testing.T) {
 	}
 
 	request = httptest.NewRequest(http.MethodGet, "/v1/spaces/"+spaceID+"/works?before="+cursorID+"&before="+workID, nil)
-	request.Header.Set("Authorization", "Bearer member-token")
+	request.Header.Set("Authorization", "Bearer "+testCLIBearer(t))
 	response = httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusBadRequest {
@@ -194,7 +194,7 @@ func TestNeedsYouQueryIsExplicitAndOwnerScoped(t *testing.T) {
 	}}}}
 	handler := workTestAPI(t, &recordingWorkCommands{}, queries)
 	request := httptest.NewRequest(http.MethodGet, "/v1/spaces/"+spaceID+"/works?needs_you=true", nil)
-	request.Header.Set("Authorization", "Bearer member-token")
+	request.Header.Set("Authorization", "Bearer "+testCLIBearer(t))
 	response := httptest.NewRecorder()
 
 	handler.ServeHTTP(response, request)
@@ -206,7 +206,7 @@ func TestNeedsYouQueryIsExplicitAndOwnerScoped(t *testing.T) {
 
 	for _, rawQuery := range []string{"needs_you=maybe", "needs_you=true&needs_you=false"} {
 		request = httptest.NewRequest(http.MethodGet, "/v1/spaces/"+spaceID+"/works?"+rawQuery, nil)
-		request.Header.Set("Authorization", "Bearer member-token")
+		request.Header.Set("Authorization", "Bearer "+testCLIBearer(t))
 		response = httptest.NewRecorder()
 		handler.ServeHTTP(response, request)
 		if response.Code != http.StatusBadRequest {
@@ -229,7 +229,7 @@ func TestWorkDetailBindsCurrentReviewIdentityToCurrentContent(t *testing.T) {
 	}}}
 	handler := workTestAPI(t, &recordingWorkCommands{}, queries)
 	request := httptest.NewRequest(http.MethodGet, "/v1/spaces/"+spaceID+"/works/"+workID, nil)
-	request.Header.Set("Authorization", "Bearer member-token")
+	request.Header.Set("Authorization", "Bearer "+testCLIBearer(t))
 	response := httptest.NewRecorder()
 
 	handler.ServeHTTP(response, request)
@@ -256,7 +256,7 @@ func TestAcceptWorkReviewUsesAuthenticatedOwnerAndIdempotency(t *testing.T) {
 		"/v1/spaces/"+spaceID+"/works/"+workID+"/reviews/"+reviewID+"/accept",
 		nil,
 	)
-	request.Header.Set("Authorization", "Bearer member-token")
+	request.Header.Set("Authorization", "Bearer "+testCLIBearer(t))
 	request.Header.Set("Idempotency-Key", "accept-renewal-result")
 	response := httptest.NewRecorder()
 
@@ -277,7 +277,7 @@ func TestWorkStoreCursorErrorsAreBadRequests(t *testing.T) {
 	const spaceID = "2ba3dd27-1b41-453c-8057-91f31a0d13b1"
 	handler := workTestAPI(t, &recordingWorkCommands{}, &recordingWorkQueries{listErr: work.ErrInvalidCursor})
 	request := httptest.NewRequest(http.MethodGet, "/v1/spaces/"+spaceID+"/works", nil)
-	request.Header.Set("Authorization", "Bearer member-token")
+	request.Header.Set("Authorization", "Bearer "+testCLIBearer(t))
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusBadRequest {
@@ -294,7 +294,7 @@ func TestRetryWorkUsesAuthenticatedMemberAndIdempotency(t *testing.T) {
 	commands := &recordingWorkCommands{}
 	handler := workTestAPI(t, commands, &recordingWorkQueries{})
 	request := httptest.NewRequest(http.MethodPost, "/v1/spaces/"+spaceID+"/works/"+workID+"/retry", nil)
-	request.Header.Set("Authorization", "Bearer member-token")
+	request.Header.Set("Authorization", "Bearer "+testCLIBearer(t))
 	request.Header.Set("Idempotency-Key", "retry-renewal")
 	response := httptest.NewRecorder()
 
@@ -314,9 +314,10 @@ func workTestAPI(t *testing.T, commands WorkCommands, queries WorkQueries) http.
 	authority := testAuthority(t)
 	member := testUserRoutes(t, authority)
 	authentication, err := NewUserAuthentication(
-		&recordingUserTokens{user: identity.AuthenticatedUser{UserID: "member-9"}},
+		&recordingCLICredentials{user: identity.AuthenticatedUser{UserID: "member-9"}},
 		unavailableBrowserSessions{},
 		testIdentityCredentials(t),
+		testExternalOrigin(t),
 	)
 	if err != nil {
 		t.Fatalf("compose User authentication: %v", err)

@@ -49,7 +49,7 @@ func (s *Store) ListSpaceMembers(ctx context.Context, command space.ListMembersC
 		return space.MemberPage{}, fmt.Errorf("lock member list authority: %w", err)
 	}
 	cursorTime := pgtype.Timestamptz{Time: time.Unix(0, 0), Valid: true}
-	cursorUserID := "00000000-0000-0000-0000-000000000000"
+	cursorUserID := uuid.Nil.String()
 	if command.AfterUserID != "" {
 		cursorTime, err = q.SpaceMemberCursor(ctx, dbsqlc.SpaceMemberCursorParams{SpaceID: command.SpaceID, UserID: command.AfterUserID})
 		if errors.Is(err, pgx.ErrNoRows) {

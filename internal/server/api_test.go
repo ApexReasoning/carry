@@ -34,7 +34,7 @@ func TestEnrollMachineUsesAuthenticatedMemberAuthority(t *testing.T) {
 	)
 
 	authority := testAuthority(t)
-	tokens := &recordingUserTokens{user: identity.AuthenticatedUser{UserID: memberID}}
+	tokens := &recordingCLICredentials{user: identity.AuthenticatedUser{UserID: memberID}}
 	machines := &recordingMachineEnrollments{enrollment: machine.MachineEnrollment{
 		MachineID: machineID, SpaceID: spaceID, CertificatePEM: []byte("machine-certificate"),
 	}}
@@ -51,7 +51,7 @@ func TestEnrollMachineUsesAuthenticatedMemberAuthority(t *testing.T) {
 		base64.StdEncoding.EncodeToString(publicKeyDER),
 	)
 	request := httptest.NewRequest(http.MethodPost, "/v1/machines/enroll", bytes.NewBufferString(body))
-	request.Header.Set("Authorization", "Bearer member-token")
+	request.Header.Set("Authorization", "Bearer "+testCLIBearer(t))
 	request.Header.Set("Idempotency-Key", "enroll-research-mac")
 	response := httptest.NewRecorder()
 
@@ -60,8 +60,8 @@ func TestEnrollMachineUsesAuthenticatedMemberAuthority(t *testing.T) {
 	if response.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want %d; body = %s", response.Code, http.StatusCreated, response.Body.String())
 	}
-	if tokens.authenticatedToken != "member-token" {
-		t.Fatalf("authenticated token = %q", tokens.authenticatedToken)
+	if tokens.authenticatedCredentialID != testCLICredentialID {
+		t.Fatalf("authenticated CLI credential = %q", tokens.authenticatedCredentialID)
 	}
 	if machines.command.EnrolledByUserID != memberID || machines.command.SpaceID != spaceID {
 		t.Fatalf("enrollment command = %#v", machines.command)
@@ -71,14 +71,14 @@ func TestEnrollMachineUsesAuthenticatedMemberAuthority(t *testing.T) {
 	}
 }
 
-func TestEnrollMachineRejectsMissingMemberToken(t *testing.T) {
+func TestEnrollMachineRejectsMissingCLICredential(t *testing.T) {
 	t.Parallel()
 
 	machines := &recordingMachineEnrollments{}
 	request := httptest.NewRequest(http.MethodPost, "/v1/machines/enroll", bytes.NewBufferString(`{}`))
 	response := httptest.NewRecorder()
 
-	testAPI(t, testAuthority(t), &recordingUserTokens{}, machines, &recordingMachineRuns{}).
+	testAPI(t, testAuthority(t), &recordingCLICredentials{}, machines, &recordingMachineRuns{}).
 		ServeHTTP(response, request)
 
 	if response.Code != http.StatusUnauthorized {
@@ -104,7 +104,7 @@ func TestMachineClaimReturnsCompleteWorkContextWithoutSecondCredential(t *testin
 	request.TLS = verifiedMachineTLS(machineCertificate)
 	response := httptest.NewRecorder()
 
-	testAPI(t, authority, &recordingUserTokens{}, &recordingMachineEnrollments{}, runs).
+	testAPI(t, authority, &recordingCLICredentials{}, &recordingMachineEnrollments{}, runs).
 		ServeHTTP(response, request)
 
 	if response.Code != http.StatusOK {
@@ -137,7 +137,7 @@ func TestMachineCommitBindsCertificateIdentity(t *testing.T) {
 	request.TLS = verifiedMachineTLS(machineCertificate)
 	response := httptest.NewRecorder()
 
-	testAPI(t, authority, &recordingUserTokens{}, &recordingMachineEnrollments{}, runs).
+	testAPI(t, authority, &recordingCLICredentials{}, &recordingMachineEnrollments{}, runs).
 		ServeHTTP(response, request)
 
 	if response.Code != http.StatusNoContent {
@@ -161,7 +161,7 @@ func TestMachineMutationRejectsMalformedAuthorityPath(t *testing.T) {
 	)
 	request.TLS = verifiedMachineTLS(machineCertificate)
 	response := httptest.NewRecorder()
-	testAPI(t, authority, &recordingUserTokens{}, &recordingMachineEnrollments{}, runs).
+	testAPI(t, authority, &recordingCLICredentials{}, &recordingMachineEnrollments{}, runs).
 		ServeHTTP(response, request)
 	if response.Code != http.StatusBadRequest || runs.renewRunID != "" {
 		t.Fatalf("malformed authority response = %d %s; renew Run = %q", response.Code, response.Body.String(), runs.renewRunID)
@@ -179,13 +179,13 @@ func verifiedMachineTLS(certificate *x509.Certificate) *tls.ConnectionState {
 func testAPI(
 	t *testing.T,
 	authority *machine.CertificateAuthority,
-	tokens UserTokenAuthenticator,
+	tokens CLICredentialAuthenticator,
 	machines machine.EnrollmentPersistence,
 	runs *recordingMachineRuns,
 ) http.Handler {
 	t.Helper()
 	user := testUserRoutes(t, authority)
-	authentication, err := NewUserAuthentication(tokens, unavailableBrowserSessions{}, testIdentityCredentials(t))
+	authentication, err := NewUserAuthentication(tokens, unavailableBrowserSessions{}, testIdentityCredentials(t), testExternalOrigin(t))
 	if err != nil {
 		t.Fatalf("compose User authentication: %v", err)
 	}
@@ -261,13 +261,13 @@ func testMachineCertificate(t *testing.T, machineID string) (*machine.Certificat
 	return authority, certificate
 }
 
-type recordingUserTokens struct {
-	user               identity.AuthenticatedUser
-	authenticatedToken string
+type recordingCLICredentials struct {
+	user                      identity.AuthenticatedUser
+	authenticatedCredentialID string
 }
 
-func (store *recordingUserTokens) AuthenticateUserToken(_ context.Context, token string) (identity.AuthenticatedUser, error) {
-	store.authenticatedToken = token
+func (store *recordingCLICredentials) AuthenticateCLICredential(_ context.Context, credentialID string) (identity.AuthenticatedUser, error) {
+	store.authenticatedCredentialID = credentialID
 	if store.user.UserID == "" {
 		return identity.AuthenticatedUser{}, identity.ErrUnauthenticated
 	}
@@ -328,6 +328,17 @@ func testIdentityCredentials(t *testing.T) identity.Credentials {
 	return credentials
 }
 
+const testCLICredentialID = "24c970b5-2929-4875-8882-6c392f5cf4a5"
+
+func testCLIBearer(t *testing.T) string {
+	t.Helper()
+	credential, err := testIdentityCredentials(t).CLICredential(testCLICredentialID, testExternalOrigin(t).String())
+	if err != nil {
+		t.Fatalf("create test CLI credential: %v", err)
+	}
+	return credential
+}
+
 func testUserRoutes(t *testing.T, authority *machine.CertificateAuthority) *UserRoutes {
 	t.Helper()
 	credentials := testIdentityCredentials(t)
@@ -341,7 +352,7 @@ func testUserRoutes(t *testing.T, authority *machine.CertificateAuthority) *User
 		t.Fatalf("compose test first Space: %v", err)
 	}
 	machines := &recordingMachineEnrollments{}
-	authentication, err := NewUserAuthentication(&recordingUserTokens{}, sessions, credentials)
+	authentication, err := NewUserAuthentication(&recordingCLICredentials{}, sessions, credentials, testExternalOrigin(t))
 	if err != nil {
 		t.Fatalf("compose test User authentication: %v", err)
 	}
@@ -350,6 +361,7 @@ func testUserRoutes(t *testing.T, authority *machine.CertificateAuthority) *User
 		unavailableExternalLogin{},
 		unavailableIdentityMethods{},
 		sessions,
+		&recordingCLILogins{},
 		credentials,
 		testExternalOrigin(t),
 		NewRequestSource(nil),

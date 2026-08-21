@@ -59,7 +59,7 @@ func TestInvitationRoutesRequireBrowserOriginAndNeverMutateOnGET(t *testing.T) {
 	}
 
 	bearer := request(http.MethodGet, "/v1/invitations")
-	bearer.Header.Set("Authorization", "Bearer transitional")
+	bearer.Header.Set("Authorization", "Bearer "+testCLIBearer(t))
 	response = httptest.NewRecorder()
 	handler.ServeHTTP(response, bearer)
 	if response.Code != http.StatusUnauthorized {

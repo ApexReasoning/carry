@@ -39,14 +39,14 @@ func TestInterruptedHostWorkContinuesWithNewAttempt(t *testing.T) {
 
 	pkiDirectory := filepath.Join(temporary, "pki")
 	run(t, root, nil, carryServer, "pki", "init", "--dir", pkiDirectory, "--hosts", "localhost,127.0.0.1")
-	bootstrapOutput := bootstrapCarry(t, root, carryServer, databaseURL)
+	testMemberOutput := prepareTestMember(t, databaseURL)
 	resetProductJourneyFacts(t, databaseURL)
-	var bootstrap struct {
-		SpaceID   string `json:"space_id"`
-		UserToken string `json:"user_token"`
+	var member struct {
+		UserID  string `json:"user_id"`
+		SpaceID string `json:"space_id"`
 	}
-	if err := json.Unmarshal([]byte(bootstrapOutput), &bootstrap); err != nil {
-		t.Fatalf("decode bootstrap: %v", err)
+	if err := json.Unmarshal([]byte(testMemberOutput), &member); err != nil {
+		t.Fatalf("decode member: %v", err)
 	}
 
 	address := freeAddress(t)
@@ -57,13 +57,10 @@ func TestInterruptedHostWorkContinuesWithNewAttempt(t *testing.T) {
 
 	configDirectory := filepath.Join(temporary, "config")
 	clientEnvironment := []string{"CARRY_CONFIG_DIR=" + configDirectory}
-	run(t, root, clientEnvironment, carry, "login",
-		"--server", serverURL,
-		"--ca-cert", filepath.Join(pkiDirectory, "ca.pem"),
-		"--token", bootstrap.UserToken,
-	)
+	loginCarryCLI(t, root, carry, databaseURL, serverURL, filepath.Join(pkiDirectory, "ca.pem"),
+		configDirectory, member.UserID, member.SpaceID, "recovery-cli")
 	run(t, root, clientEnvironment, carry, "host", "enroll",
-		"--space", bootstrap.SpaceID, "--name", "recovery-host",
+		"--space", member.SpaceID, "--name", "recovery-host",
 	)
 	created := run(t, root, clientEnvironment, carry, "work", "create",
 		"--goal", "Recover this Work after its Host disappears",
@@ -140,13 +137,10 @@ func TestInterruptedHostWorkContinuesWithNewAttempt(t *testing.T) {
 
 	replacementConfigDirectory := filepath.Join(temporary, "replacement-config")
 	replacementClientEnvironment := []string{"CARRY_CONFIG_DIR=" + replacementConfigDirectory}
-	run(t, root, replacementClientEnvironment, carry, "login",
-		"--server", serverURL,
-		"--ca-cert", filepath.Join(pkiDirectory, "ca.pem"),
-		"--token", bootstrap.UserToken,
-	)
+	loginCarryCLI(t, root, carry, databaseURL, serverURL, filepath.Join(pkiDirectory, "ca.pem"),
+		replacementConfigDirectory, member.UserID, member.SpaceID, "replacement-recovery-cli")
 	run(t, root, replacementClientEnvironment, carry, "host", "enroll",
-		"--space", bootstrap.SpaceID, "--name", "replacement-recovery-host",
+		"--space", member.SpaceID, "--name", "replacement-recovery-host",
 	)
 	replacementHostEnvironment := append(append([]string{}, replacementClientEnvironment...), agentEnvironment...)
 	secondContext, cancelSecond := context.WithCancel(context.Background())

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -38,14 +37,6 @@ type config struct {
 	resendAPIURL       string
 	emailFrom          string
 	trustedProxyCIDRs  []netip.Prefix
-}
-
-type bootstrapConfig struct {
-	databaseURL    string
-	displayName    string
-	spaceName      string
-	tokenTTL       time.Duration
-	credentialFile string
 }
 
 func main() {
@@ -140,40 +131,6 @@ func parseTrustedProxyCIDRs(value string) ([]netip.Prefix, error) {
 	return prefixes, nil
 }
 
-func parseBootstrapConfig(arguments []string, stderr io.Writer) (bootstrapConfig, error) {
-	flags := flag.NewFlagSet("carry-server bootstrap", flag.ContinueOnError)
-	flags.SetOutput(stderr)
-
-	var parsed bootstrapConfig
-	flags.StringVar(&parsed.databaseURL, "database-url", os.Getenv("CARRY_DATABASE_URL"), "PostgreSQL connection URL")
-	flags.StringVar(&parsed.displayName, "display-name", "", "initial member display name")
-	flags.StringVar(&parsed.spaceName, "space", "", "initial Space name")
-	flags.DurationVar(&parsed.tokenTTL, "token-ttl", 90*24*time.Hour, "initial member token lifetime")
-	flags.StringVar(&parsed.credentialFile, "credential-file", "", "durable initial member credential file")
-	if err := flags.Parse(arguments); err != nil {
-		return bootstrapConfig{}, fmt.Errorf("parse bootstrap flags: %w", err)
-	}
-	if flags.NArg() != 0 {
-		return bootstrapConfig{}, fmt.Errorf("unexpected bootstrap arguments: %v", flags.Args())
-	}
-	if strings.TrimSpace(parsed.databaseURL) == "" {
-		return bootstrapConfig{}, errors.New("database URL is required through --database-url or CARRY_DATABASE_URL")
-	}
-	if strings.TrimSpace(parsed.displayName) == "" {
-		return bootstrapConfig{}, errors.New("--display-name is required")
-	}
-	if strings.TrimSpace(parsed.spaceName) == "" {
-		return bootstrapConfig{}, errors.New("--space is required")
-	}
-	if parsed.tokenTTL <= 0 {
-		return bootstrapConfig{}, errors.New("--token-ttl must be positive")
-	}
-	if strings.TrimSpace(parsed.credentialFile) == "" {
-		return bootstrapConfig{}, errors.New("--credential-file is required")
-	}
-	return parsed, nil
-}
-
 func run(ctx context.Context, arguments []string, stdout io.Writer, stderr io.Writer) error {
 	if len(arguments) >= 2 && arguments[0] == "pki" && arguments[1] == "init" {
 		parsed, err := parsePKIInitConfig(arguments[2:], stderr)
@@ -181,13 +138,6 @@ func run(ctx context.Context, arguments []string, stdout io.Writer, stderr io.Wr
 			return err
 		}
 		return initializePKI(parsed)
-	}
-	if len(arguments) != 0 && arguments[0] == "bootstrap" {
-		parsed, err := parseBootstrapConfig(arguments[1:], stderr)
-		if err != nil {
-			return err
-		}
-		return bootstrap(ctx, parsed, stdout)
 	}
 	if len(arguments) != 0 && arguments[0] == "serve" {
 		arguments = arguments[1:]
@@ -252,6 +202,10 @@ func run(ctx context.Context, arguments []string, stdout io.Writer, stderr io.Wr
 	if err != nil {
 		return fmt.Errorf("compose Identity methods: %w", err)
 	}
+	cliLogin, err := identity.NewCLILogin(store, credentials, parsed.externalOrigin.String())
+	if err != nil {
+		return fmt.Errorf("compose CLI login: %w", err)
+	}
 	firstSpace, err := space.NewFirstSpace(store)
 	if err != nil {
 		return fmt.Errorf("compose first Space: %w", err)
@@ -264,7 +218,7 @@ func run(ctx context.Context, arguments []string, stdout io.Writer, stderr io.Wr
 	if err != nil {
 		return fmt.Errorf("compose Machine enrollment: %w", err)
 	}
-	userAuthentication, err := carryserver.NewUserAuthentication(store, store, credentials)
+	userAuthentication, err := carryserver.NewUserAuthentication(store, store, credentials, parsed.externalOrigin)
 	if err != nil {
 		return fmt.Errorf("compose User authentication: %w", err)
 	}
@@ -273,6 +227,7 @@ func run(ctx context.Context, arguments []string, stdout io.Writer, stderr io.Wr
 		externalLogin,
 		identityMethods,
 		store,
+		cliLogin,
 		credentials,
 		parsed.externalOrigin,
 		carryserver.NewRequestSource(parsed.trustedProxyCIDRs),
@@ -353,38 +308,4 @@ func run(ctx context.Context, arguments []string, stdout io.Writer, stderr io.Wr
 		}
 	}
 	return result
-}
-
-func bootstrap(ctx context.Context, parsed bootstrapConfig, stdout io.Writer) error {
-	command, err := loadOrCreateBootstrapCredential(
-		parsed.credentialFile, parsed.displayName, parsed.spaceName, time.Now().Add(parsed.tokenTTL),
-	)
-	if err != nil {
-		return fmt.Errorf("prepare bootstrap credential: %w", err)
-	}
-	pool, err := carrypostgres.Open(ctx, parsed.databaseURL)
-	if err != nil {
-		return fmt.Errorf("open PostgreSQL for bootstrap: %w", err)
-	}
-	defer pool.Close()
-	if err := carrypostgres.Migrate(ctx, pool); err != nil {
-		return fmt.Errorf("migrate PostgreSQL for bootstrap: %w", err)
-	}
-
-	result, err := carrypostgres.NewStore(pool).Bootstrap(ctx, command)
-	if err != nil {
-		return fmt.Errorf("bootstrap Carry: %w", err)
-	}
-	if err := json.NewEncoder(stdout).Encode(struct {
-		UserID    string `json:"user_id"`
-		SpaceID   string `json:"space_id"`
-		UserToken string `json:"user_token"`
-	}{
-		UserID:    result.UserID,
-		SpaceID:   result.SpaceID,
-		UserToken: result.UserToken,
-	}); err != nil {
-		return fmt.Errorf("write bootstrap credential: %w", err)
-	}
-	return nil
 }

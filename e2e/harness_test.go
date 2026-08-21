@@ -18,85 +18,224 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/ApexReasoning/carry/internal/identity"
+	carrypostgres "github.com/ApexReasoning/carry/internal/postgres"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-var sharedBootstrap struct {
+var sharedTestMember struct {
 	once   sync.Once
 	output string
 	err    error
 }
 
-func bootstrapCarry(t *testing.T, root string, carryServer string, databaseURL string) string {
+// prepareTestMember is test-only database setup. Production has no operator
+// bootstrap or reusable member bearer after Node 11.
+func prepareTestMember(t *testing.T, databaseURL string) string {
 	t.Helper()
-	sharedBootstrap.once.Do(func() {
-		credentialFile := filepath.Join(filepath.Dir(carryServer), "bootstrap-credential.json")
-		arguments := []string{
-			"bootstrap",
-			"--display-name", "Carry Member",
-			"--space", "Carry Space",
-			"--credential-file", credentialFile,
-		}
-		// Discard the first stdout result after the database commit. The durable
-		// credential must make the exact retry recoverable.
-		_, sharedBootstrap.err = runError(
-			root, []string{"CARRY_DATABASE_URL=" + databaseURL}, carryServer, arguments...,
-		)
-		if sharedBootstrap.err != nil {
-			return
-		}
-		credential, err := os.ReadFile(credentialFile)
+	sharedTestMember.once.Do(func() {
+		ctx := context.Background()
+		pool, err := carrypostgres.Open(ctx, databaseURL)
 		if err != nil {
-			sharedBootstrap.err = fmt.Errorf("read durable bootstrap credential: %w", err)
+			sharedTestMember.err = err
 			return
 		}
-		var durable struct {
-			UserID    string `json:"user_id"`
-			SpaceID   string `json:"space_id"`
-			UserToken string `json:"user_token"`
-		}
-		if err := json.Unmarshal(credential, &durable); err != nil {
-			sharedBootstrap.err = fmt.Errorf("decode durable bootstrap credential: %w", err)
+		defer pool.Close()
+		if err := carrypostgres.Migrate(ctx, pool); err != nil {
+			sharedTestMember.err = err
 			return
 		}
-		replayed, replayErr := runError(
-			root, []string{"CARRY_DATABASE_URL=" + databaseURL}, carryServer, arguments...,
-		)
-		if replayErr != nil {
-			sharedBootstrap.err = replayErr
-			return
-		}
-		var replayedResult struct {
-			UserID    string `json:"user_id"`
-			SpaceID   string `json:"space_id"`
-			UserToken string `json:"user_token"`
-		}
-		if err := json.Unmarshal([]byte(replayed), &replayedResult); err != nil {
-			sharedBootstrap.err = fmt.Errorf("decode replayed bootstrap result: %w", err)
-			return
-		}
-		if replayedResult != durable {
-			sharedBootstrap.err = fmt.Errorf("replayed bootstrap result differs from durable credential")
-			return
-		}
-		sharedBootstrap.output = string(credential)
-		info, err := os.Stat(credentialFile)
+		userID, spaceID := uuid.NewString(), uuid.NewString()
+		tx, err := pool.Begin(ctx)
 		if err != nil {
-			sharedBootstrap.err = fmt.Errorf("stat bootstrap credential: %w", err)
+			sharedTestMember.err = err
 			return
 		}
-		if info.Mode().Perm() != 0o600 {
-			sharedBootstrap.err = fmt.Errorf("bootstrap credential mode = %o, want 600", info.Mode().Perm())
+		defer func() { _ = tx.Rollback(ctx) }()
+		if _, err := tx.Exec(ctx, `insert into carry_users (user_id, display_name) values ($1, 'Carry Member')`, userID); err != nil {
+			sharedTestMember.err = err
+			return
 		}
+		if _, err := tx.Exec(ctx, `insert into spaces (space_id, name) values ($1, 'Carry Space')`, spaceID); err != nil {
+			sharedTestMember.err = err
+			return
+		}
+		if _, err := tx.Exec(ctx, `insert into space_memberships (space_id, user_id, can_enroll_machines, can_manage_members) values ($1, $2, true, true)`, spaceID, userID); err != nil {
+			sharedTestMember.err = err
+			return
+		}
+		if err := tx.Commit(ctx); err != nil {
+			sharedTestMember.err = err
+			return
+		}
+		encoded, err := json.Marshal(struct {
+			UserID  string `json:"user_id"`
+			SpaceID string `json:"space_id"`
+		}{UserID: userID, SpaceID: spaceID})
+		if err != nil {
+			sharedTestMember.err = err
+			return
+		}
+		sharedTestMember.output = string(encoded)
 	})
-	if sharedBootstrap.err != nil {
-		t.Fatalf("bootstrap Carry: %v\n%s", sharedBootstrap.err, sharedBootstrap.output)
+	if sharedTestMember.err != nil {
+		t.Fatalf("prepare Carry test member: %v", sharedTestMember.err)
 	}
-	return sharedBootstrap.output
+	return sharedTestMember.output
+}
+
+type pendingCLILogin struct {
+	command *exec.Cmd
+	log     *lockedBuffer
+	code    string
+	done    chan error
+}
+
+func startCarryCLILogin(
+	t *testing.T,
+	root string,
+	carry string,
+	configDirectory string,
+	serverURL string,
+	caCertificatePath string,
+	label string,
+) pendingCLILogin {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	t.Cleanup(cancel)
+	command := exec.CommandContext(ctx, carry, "login", "--server", serverURL, "--ca-cert", caCertificatePath, "--name", label)
+	command.Dir = root
+	command.Env = append(os.Environ(), "CARRY_CONFIG_DIR="+configDirectory)
+	log := &lockedBuffer{}
+	command.Stdout, command.Stderr = log, log
+	if err := command.Start(); err != nil {
+		t.Fatalf("start Browser-approved carry login: %v", err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- command.Wait() }()
+	pattern := regexp.MustCompile(`Code: ([BCDFGHJKLMNPQRSTVWXZ-]+)`)
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if match := pattern.FindStringSubmatch(log.String()); len(match) == 2 {
+			return pendingCLILogin{command: command, log: log, code: match[1], done: done}
+		}
+		select {
+		case err := <-done:
+			t.Fatalf("carry login stopped before showing a code: %v\n%s", err, log.String())
+		default:
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("carry login did not show a code\n%s", log.String())
+	return pendingCLILogin{}
+}
+
+func approveCarryCLILoginHTTP(
+	t *testing.T,
+	databaseURL string,
+	serverURL string,
+	caCertificatePath string,
+	userID string,
+	spaceID string,
+	code string,
+) {
+	t.Helper()
+	sessionID := uuid.NewString()
+	pool, err := pgxpool.New(t.Context(), databaseURL)
+	if err != nil {
+		t.Fatalf("open CLI approval fixture database: %v", err)
+	}
+	defer pool.Close()
+	if _, err := pool.Exec(t.Context(), `insert into browser_sessions (session_id, user_id, identity_proof_method, expires_at) values ($1, $2, 'email', transaction_timestamp() + interval '1 hour')`, sessionID, userID); err != nil {
+		t.Fatalf("create CLI approval Browser Session: %v", err)
+	}
+	caPEM, err := os.ReadFile(caCertificatePath)
+	if err != nil {
+		t.Fatalf("read CLI approval CA: %v", err)
+	}
+	client, err := testHTTPClient(caPEM)
+	if err != nil {
+		t.Fatalf("create CLI approval client: %v", err)
+	}
+	identityCredentials, err := identity.NewCredentials(bytes.Repeat([]byte{3}, identity.IdentityRootBytes))
+	if err != nil {
+		t.Fatalf("create CLI approval Identity credentials: %v", err)
+	}
+	cookie, err := identityCredentials.BrowserSessionCredential(sessionID)
+	if err != nil {
+		t.Fatalf("create CLI approval Browser cookie: %v", err)
+	}
+	post := func(path string, body any, key string, destination any) {
+		t.Helper()
+		encoded, err := json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, serverURL+path, bytes.NewReader(encoded))
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Origin", serverURL)
+		if key != "" {
+			request.Header.Set("Idempotency-Key", key)
+		}
+		request.AddCookie(&http.Cookie{Name: "__Host-carry_session", Value: cookie})
+		response, err := client.Do(request)
+		if err != nil {
+			t.Fatalf("send CLI Browser approval: %v", err)
+		}
+		defer response.Body.Close()
+		if response.StatusCode < 200 || response.StatusCode >= 300 {
+			failure, _ := io.ReadAll(response.Body)
+			t.Fatalf("CLI Browser approval %s = %d: %s", path, response.StatusCode, failure)
+		}
+		if destination != nil && json.NewDecoder(response.Body).Decode(destination) != nil {
+			t.Fatalf("decode CLI Browser approval %s", path)
+		}
+	}
+	var preview struct {
+		RequestID string `json:"request_id"`
+		UserCode  string `json:"user_code"`
+	}
+	post("/v1/cli-logins/lookup", map[string]string{"user_code": code}, "", &preview)
+	if preview.UserCode != code {
+		t.Fatalf("Browser code = %q, terminal code = %q", preview.UserCode, code)
+	}
+	post("/v1/cli-logins/approve", map[string]string{
+		"request_id": preview.RequestID, "user_code": code, "space_id": spaceID,
+	}, uuid.NewString(), nil)
+}
+
+func finishCarryCLILogin(t *testing.T, pending pendingCLILogin) string {
+	t.Helper()
+	select {
+	case err := <-pending.done:
+		if err != nil {
+			t.Fatalf("complete Browser-approved carry login: %v\n%s", err, pending.log.String())
+		}
+	case <-time.After(20 * time.Second):
+		_ = pending.command.Process.Kill()
+		t.Fatalf("Browser-approved carry login timed out\n%s", pending.log.String())
+	}
+	output := pending.log.String()
+	if !strings.Contains(output, "Logged in to ") || !strings.Contains(output, "Default Space:") {
+		t.Fatalf("CLI login completion output = %q", output)
+	}
+	return output
+}
+
+func loginCarryCLI(t *testing.T, root, carry, databaseURL, serverURL, caCertificatePath, configDirectory, userID, spaceID, label string) string {
+	t.Helper()
+	pending := startCarryCLILogin(t, root, carry, configDirectory, serverURL, caCertificatePath, label)
+	approveCarryCLILoginHTTP(t, databaseURL, serverURL, caCertificatePath, userID, spaceID, pending.code)
+	return finishCarryCLILogin(t, pending)
 }
 
 func startServer(
@@ -106,6 +245,19 @@ func startServer(
 	address string,
 	databaseURL string,
 	pkiDirectory string,
+) (func(), *lockedBuffer, string) {
+	t.Helper()
+	return startServerWithOrigin(t, root, carryServer, address, databaseURL, pkiDirectory, "https://"+address)
+}
+
+func startServerWithOrigin(
+	t *testing.T,
+	root string,
+	carryServer string,
+	address string,
+	databaseURL string,
+	pkiDirectory string,
+	externalOrigin string,
 ) (func(), *lockedBuffer, string) {
 	t.Helper()
 	captureFile := filepath.Join(t.TempDir(), "latest-email-code")
@@ -119,7 +271,7 @@ func startServer(
 		"CARRY_DATABASE_URL="+databaseURL,
 		"CARRY_PKI_DIR="+pkiDirectory,
 		"CARRY_IDENTITY_ROOT="+identityRoot,
-		"CARRY_EXTERNAL_ORIGIN=https://"+address,
+		"CARRY_EXTERNAL_ORIGIN="+externalOrigin,
 		"CARRY_GOOGLE_CLIENT_ID=test-google-client",
 		"CARRY_GOOGLE_CLIENT_SECRET=test-google-secret",
 		"CARRY_GITHUB_CLIENT_ID=test-github-client",
@@ -286,6 +438,7 @@ func resetProductJourneyFacts(t *testing.T, databaseURL string) {
 	}
 	defer func() { _ = transaction.Rollback(t.Context()) }()
 	for _, table := range []string{
+		"cli_login_lookup_failures",
 		"email_login_attempts",
 		"email_login_challenges",
 		"conversation_reply_claims",

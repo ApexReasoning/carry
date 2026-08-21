@@ -20,7 +20,7 @@ func TestBrowserTokenExchangeWasRemoved(t *testing.T) {
 	t.Parallel()
 	handler := browserTestAPI(t, &recordingBrowserSessions{})
 	request := httptest.NewRequest(http.MethodPost, "/v1/browser/sessions", nil)
-	request.Header.Set("Authorization", "Bearer member-token")
+	request.Header.Set("Authorization", "Bearer "+testCLIBearer(t))
 	response := httptest.NewRecorder()
 
 	handler.ServeHTTP(response, request)
@@ -119,11 +119,11 @@ func TestBrowserSessionAuthenticatesUserWithoutMembership(t *testing.T) {
 func TestUserSurfaceRejectsMachineCertificateBeforeCredentials(t *testing.T) {
 	t.Parallel()
 	authority, certificate := testMachineCertificate(t, "machine-18")
-	tokens := &recordingUserTokens{user: identity.AuthenticatedUser{UserID: "user-18"}}
+	tokens := &recordingCLICredentials{user: identity.AuthenticatedUser{UserID: "user-18"}}
 	sessions := &recordingBrowserSessions{}
 	handler := memberSurfaceTestAPI(t, authority, tokens, sessions)
 	request := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
-	request.Header.Set("Authorization", "Bearer member-token")
+	request.Header.Set("Authorization", "Bearer "+testCLIBearer(t))
 	request.TLS = &tls.ConnectionState{
 		PeerCertificates: []*x509.Certificate{certificate}, VerifiedChains: [][]*x509.Certificate{{certificate}},
 	}
@@ -131,8 +131,8 @@ func TestUserSurfaceRejectsMachineCertificateBeforeCredentials(t *testing.T) {
 
 	handler.ServeHTTP(response, request)
 
-	if response.Code != http.StatusUnauthorized || tokens.authenticatedToken != "" {
-		t.Fatalf("status = %d, token reached store = %q", response.Code, tokens.authenticatedToken)
+	if response.Code != http.StatusUnauthorized || tokens.authenticatedCredentialID != "" {
+		t.Fatalf("status = %d, CLI credential reached store = %q", response.Code, tokens.authenticatedCredentialID)
 	}
 }
 
@@ -143,7 +143,7 @@ func TestMachineRouteRejectsUserCredentialsEvenWithValidCertificate(t *testing.T
 		name string
 		add  func(*http.Request)
 	}{
-		{name: "bearer", add: func(request *http.Request) { request.Header.Set("Authorization", "Bearer member-token") }},
+		{name: "bearer", add: func(request *http.Request) { request.Header.Set("Authorization", "Bearer "+testCLIBearer(t)) }},
 		{name: "browser session", add: func(request *http.Request) {
 			request.AddCookie(&http.Cookie{Name: browserSessionCookie, Value: "credential"})
 		}},
@@ -172,7 +172,7 @@ func TestMachineRouteRejectsUserCredentialsEvenWithValidCertificate(t *testing.T
 func memberSurfaceTestAPI(
 	t *testing.T,
 	authority *machine.CertificateAuthority,
-	tokens UserTokenAuthenticator,
+	tokens CLICredentialAuthenticator,
 	sessions BrowserSessions,
 ) http.Handler {
 	t.Helper()
@@ -182,7 +182,7 @@ func memberSurfaceTestAPI(
 		t.Fatalf("compose test email login: %v", err)
 	}
 	member := testUserRoutes(t, authority)
-	authentication, err := NewUserAuthentication(tokens, sessions, credentials)
+	authentication, err := NewUserAuthentication(tokens, sessions, credentials, testExternalOrigin(t))
 	if err != nil {
 		t.Fatalf("compose User authentication: %v", err)
 	}
@@ -191,6 +191,7 @@ func memberSurfaceTestAPI(
 		unavailableExternalLogin{},
 		unavailableIdentityMethods{},
 		sessions,
+		&recordingCLILogins{},
 		credentials,
 		testExternalOrigin(t),
 		NewRequestSource(nil),
@@ -210,7 +211,7 @@ func memberSurfaceTestAPI(
 
 func browserTestAPI(t *testing.T, sessions BrowserSessions) http.Handler {
 	t.Helper()
-	return memberSurfaceTestAPI(t, testAuthority(t), &recordingUserTokens{}, sessions)
+	return memberSurfaceTestAPI(t, testAuthority(t), &recordingCLICredentials{}, sessions)
 }
 
 type recordingBrowserSessions struct {

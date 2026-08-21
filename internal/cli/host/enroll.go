@@ -7,8 +7,8 @@ import (
 	"io"
 	"os"
 
+	"github.com/ApexReasoning/carry/internal/cli/credentialfile"
 	"github.com/ApexReasoning/carry/internal/cli/userapi"
-	"github.com/ApexReasoning/carry/internal/identity/memberfile"
 	"github.com/ApexReasoning/carry/internal/machine/machinefile"
 	"github.com/ApexReasoning/carry/internal/space"
 	"github.com/google/uuid"
@@ -47,7 +47,7 @@ func runEnroll(ctx context.Context, configDirectory string, output io.Writer, fl
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	member, err := memberfile.Load(configDirectory)
+	member, err := credentialfile.Load(configDirectory)
 	if err != nil {
 		return err
 	}
@@ -61,6 +61,9 @@ func runEnroll(ctx context.Context, configDirectory string, output io.Writer, fl
 	}
 	if info.UserID != member.UserID {
 		return errors.New("current member identity does not match the saved login")
+	}
+	if flags.spaceID == "" {
+		flags.spaceID = member.DefaultSpaceID
 	}
 	pending, err := loadOrCreatePendingEnrollment(configDirectory, member, info.Spaces, flags)
 	if err != nil {
@@ -92,7 +95,7 @@ func runEnroll(ctx context.Context, configDirectory string, output io.Writer, fl
 
 func loadOrCreatePendingEnrollment(
 	configDirectory string,
-	member memberfile.Credential,
+	member credentialfile.Credential,
 	memberships []space.Membership,
 	flags enrollFlags,
 ) (machinefile.PendingEnrollment, error) {

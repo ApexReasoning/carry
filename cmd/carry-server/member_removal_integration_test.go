@@ -62,13 +62,14 @@ func TestRemovedMemberCredentialsRetainUserButLoseExactSpaceHTTPAccess(t *testin
 	retainedSpaceID := uuid.NewString()
 	managerSessionID := uuid.NewString()
 	targetSessionID := uuid.NewString()
-	targetToken, err := identity.NewUserToken()
+	targetCredentialID := uuid.NewString()
+	targetCredential, err := credentials.CLICredential(targetCredentialID, origin.String())
 	if err != nil {
-		t.Fatalf("create target bearer: %v", err)
+		t.Fatalf("create target CLI credential: %v", err)
 	}
 	seedMemberRemovalHTTPFixture(
 		t, ctx, pool, managerID, targetID, removedSpaceID, retainedSpaceID,
-		managerSessionID, targetSessionID, targetToken.Hash[:],
+		managerSessionID, targetSessionID, targetCredentialID,
 	)
 	if _, err := store.SendConversationMessage(ctx, conversation.SendCommand{
 		SpaceID: removedSpaceID, MemberUserID: targetID, Text: "Retained private fixture",
@@ -103,11 +104,11 @@ func TestRemovedMemberCredentialsRetainUserButLoseExactSpaceHTTPAccess(t *testin
 
 	bearer := *carry.Client()
 	bearer.Jar = nil
-	assertCurrentUserSpacesWithBearer(t, &bearer, carry.URL, targetToken.Secret, targetID, []string{retainedSpaceID})
-	assertHTTPStatus(t, &bearer, http.MethodGet, carry.URL+"/v1/spaces/"+removedSpaceID+"/works", targetToken.Secret, nil, http.StatusForbidden)
-	assertHTTPStatus(t, &bearer, http.MethodGet, carry.URL+"/v1/spaces/"+removedSpaceID+"/conversation/messages", targetToken.Secret, nil, http.StatusForbidden)
+	assertCurrentUserSpacesWithBearer(t, &bearer, carry.URL, targetCredential, targetID, []string{retainedSpaceID})
+	assertHTTPStatus(t, &bearer, http.MethodGet, carry.URL+"/v1/spaces/"+removedSpaceID+"/works", targetCredential, nil, http.StatusForbidden)
+	assertHTTPStatus(t, &bearer, http.MethodGet, carry.URL+"/v1/spaces/"+removedSpaceID+"/conversation/messages", targetCredential, nil, http.StatusForbidden)
 	machineBody := bytes.NewBufferString(`{"space_id":"` + removedSpaceID + `","machine_id":"` + uuid.NewString() + `"}`)
-	assertHTTPStatus(t, &bearer, http.MethodPost, carry.URL+"/v1/machines/revoke", targetToken.Secret, machineBody, http.StatusForbidden)
+	assertHTTPStatus(t, &bearer, http.MethodPost, carry.URL+"/v1/machines/revoke", targetCredential, machineBody, http.StatusForbidden)
 }
 
 func seedMemberRemovalHTTPFixture(
@@ -115,7 +116,7 @@ func seedMemberRemovalHTTPFixture(
 	ctx context.Context,
 	pool *pgxpool.Pool,
 	managerID, targetID, removedSpaceID, retainedSpaceID, managerSessionID, targetSessionID string,
-	tokenHash []byte,
+	credentialID string,
 ) {
 	t.Helper()
 	tx, err := pool.Begin(ctx)
@@ -131,7 +132,16 @@ func seedMemberRemovalHTTPFixture(
 		{`insert into spaces (space_id, name) values ($1, 'Removed Space'), ($2, 'Retained Space')`, []any{removedSpaceID, retainedSpaceID}},
 		{`insert into space_memberships (space_id, user_id, can_manage_members, can_enroll_machines) values ($1, $2, true, true), ($1, $3, true, true), ($4, $3, false, false)`, []any{removedSpaceID, managerID, targetID, retainedSpaceID}},
 		{`insert into browser_sessions (session_id, user_id, identity_proof_method, expires_at) values ($1, $2, 'email', transaction_timestamp() + interval '30 days'), ($3, $4, 'email', transaction_timestamp() + interval '30 days')`, []any{managerSessionID, managerID, targetSessionID, targetID}},
-		{`insert into user_tokens (token_id, user_id, token_hash, expires_at) values ($1, $2, $3, transaction_timestamp() + interval '30 days')`, []any{uuid.NewString(), targetID, tokenHash}},
+		{`insert into cli_login_requests (
+			request_id, begin_idempotency_key, begin_request_digest, user_code_digest, code_generation, source_digest, label,
+			created_at, expires_at, approved_at, approved_by_user_id, approved_space_id,
+			approval_idempotency_key, approval_request_digest, prepared_credential_id
+		) values ($1, $2, decode(repeat('00', 32), 'hex'), decode(repeat('01', 32), 'hex'), 0, decode(repeat('02', 32), 'hex'),
+			'former member CLI', transaction_timestamp(), transaction_timestamp() + interval '15 minutes', transaction_timestamp(),
+			$3, $4, 'fixture-approval', decode(repeat('03', 32), 'hex'), $5)`, []any{uuid.NewString(), "fixture-cli-" + credentialID, targetID, retainedSpaceID, credentialID}},
+		{`insert into cli_credentials (credential_id, login_request_id, user_id, label)
+			select $1, request_id, $2, 'former member CLI' from cli_login_requests where prepared_credential_id = $1`, []any{credentialID, targetID}},
+		{`update cli_login_requests set resulting_credential_id = $1, redeemed_at = transaction_timestamp(), replay_until = transaction_timestamp() + interval '5 minutes' where prepared_credential_id = $1`, []any{credentialID}},
 	}
 	for _, statement := range statements {
 		if _, err := tx.Exec(ctx, statement.sql, statement.args...); err != nil {

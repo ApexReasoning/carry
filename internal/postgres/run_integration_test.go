@@ -21,7 +21,7 @@ import (
 
 type runFixture struct {
 	store     *Store
-	bootstrap BootstrapResult
+	bootstrap testMember
 	work      work.Work
 	machineID string
 }
@@ -30,8 +30,8 @@ func newRunFixture(t *testing.T, ctx context.Context) runFixture {
 	t.Helper()
 	pool := openMigratedTestPool(t, ctx)
 	store := NewStore(pool)
-	bootstrap, err := bootstrapForTest(ctx, store, BootstrapCommand{
-		DisplayName: "Run Owner", SpaceName: "Coordination Space", TokenExpiresAt: time.Now().Add(time.Hour),
+	bootstrap, err := createMemberForTest(ctx, store, testMemberCommand{
+		DisplayName: "Run Owner", SpaceName: "Coordination Space",
 	})
 	if err != nil {
 		t.Fatalf("bootstrap Run fixture: %v", err)

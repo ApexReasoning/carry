@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"slices"
 	"strings"
 )
 
@@ -35,7 +36,7 @@ func (source RequestSource) Resolve(request *http.Request) (string, error) {
 	}
 	var forwarded []netip.Addr
 	for _, value := range forwardedValues {
-		for _, part := range strings.Split(value, ",") {
+		for part := range strings.SplitSeq(value, ",") {
 			address, err := netip.ParseAddr(strings.TrimSpace(part))
 			if err != nil {
 				return "", errInvalidRequestSource
@@ -46,9 +47,9 @@ func (source RequestSource) Resolve(request *http.Request) (string, error) {
 	if len(forwarded) == 0 {
 		return "", errInvalidRequestSource
 	}
-	for index := len(forwarded) - 1; index >= 0; index-- {
-		if !source.isTrustedProxy(forwarded[index]) {
-			return forwarded[index].String(), nil
+	for _, address := range slices.Backward(forwarded) {
+		if !source.isTrustedProxy(address) {
+			return address.String(), nil
 		}
 	}
 	return forwarded[0].String(), nil

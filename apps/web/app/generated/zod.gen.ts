@@ -6,6 +6,48 @@ export const zApiError = z.object({
   error: z.string(),
 });
 
+export const zBegunCliLogin = z.object({
+  request_id: z.uuid(),
+  user_code: z.string(),
+  poll_secret: z.string(),
+  verification_path: z.literal("/cli-login"),
+  expires_at: z.iso.datetime({ offset: true }),
+  interval_seconds: z.int().gte(5).lte(30),
+});
+
+export const zRedeemedCliCredential = z.object({
+  credential_id: z.uuid(),
+  credential: z.string(),
+  user_id: z.uuid(),
+  space_id: z.uuid(),
+  label: z.string(),
+  expires_at: z.iso.datetime({ offset: true }),
+});
+
+export const zCliLoginPreview = z.object({
+  request_id: z.uuid(),
+  user_code: z.string(),
+  label: z.string(),
+  server: z.url(),
+  proposed_replacement_credential_id: z.uuid().optional(),
+  approved_space_id: z.uuid().optional(),
+  created_at: z.iso.datetime({ offset: true }),
+  expires_at: z.iso.datetime({ offset: true }),
+  approved: z.boolean(),
+  denied: z.boolean(),
+  cancelled: z.boolean(),
+  redeemed: z.boolean(),
+});
+
+export const zCliCredential = z.object({
+  credential_id: z.uuid(),
+  label: z.string(),
+  approved_space_id: z.uuid(),
+  approved_space_name: z.string(),
+  created_at: z.iso.datetime({ offset: true }),
+  expires_at: z.iso.datetime({ offset: true }),
+});
+
 export const zEmailChallenge = z.object({
   challenge_id: z.uuid(),
   expires_at: z.iso.datetime({ offset: true }),
@@ -156,6 +198,8 @@ export const zReviewId = z.uuid();
 
 export const zIdempotencyKey = z.string().min(1).max(255);
 
+export const zCliPollProof = z.string().min(1).max(255);
+
 export const zBeforeConversationMessage = z.uuid();
 
 export const zAfterConversationMessage = z.uuid();
@@ -165,6 +209,111 @@ export const zBeforeWork = z.uuid();
 export const zBeforeWorkMessage = z.uuid();
 
 export const zNeedsYou = z.boolean().default(false);
+
+export const zBeginCliLoginBody = z.object({
+  request_id: z.uuid(),
+  label: z.string().min(1).max(128),
+  proposed_replacement_credential_id: z.uuid().optional(),
+});
+
+export const zBeginCliLoginHeaders = z.object({
+  "Idempotency-Key": z.string().min(1).max(255),
+});
+
+/**
+ * Short-lived Browser approval ceremony created or exactly replayed
+ */
+export const zBeginCliLoginResponse = zBegunCliLogin;
+
+export const zPollCliLoginHeaders = z.object({
+  "X-Carry-CLI-Poll": z.string().min(1).max(255),
+});
+
+export const zPollCliLoginResponse = z.union([
+  zRedeemedCliCredential,
+  z.unknown(),
+]);
+
+export const zCancelCliLoginHeaders = z.object({
+  "X-Carry-CLI-Poll": z.string().min(1).max(255),
+});
+
+/**
+ * Pending or approved-unredeemed request cancelled
+ */
+export const zCancelCliLoginResponse = z.void();
+
+export const zLookupCliLoginBody = z.object({
+  user_code: z
+    .string()
+    .regex(
+      /^[BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{3}-[BCDFGHJKLMNPQRSTVWXZ]{3}$/,
+    ),
+});
+
+/**
+ * Exact Browser-reviewable CLI login request
+ */
+export const zLookupCliLoginResponse = zCliLoginPreview;
+
+export const zApproveCliLoginBody = z.object({
+  request_id: z.uuid(),
+  user_code: z.string(),
+  space_id: z.uuid(),
+  replacement_credential_id: z.uuid().optional(),
+});
+
+export const zApproveCliLoginHeaders = z.object({
+  "Idempotency-Key": z.string().min(1).max(255),
+});
+
+/**
+ * Browser approval recorded without exposing a CLI credential
+ */
+export const zApproveCliLoginResponse = z.void();
+
+export const zDenyCliLoginBody = z.object({
+  request_id: z.uuid(),
+  user_code: z.string(),
+});
+
+export const zDenyCliLoginHeaders = z.object({
+  "Idempotency-Key": z.string().min(1).max(255),
+});
+
+/**
+ * CLI login explicitly denied
+ */
+export const zDenyCliLoginResponse = z.void();
+
+/**
+ * Active CLI credentials for the current User
+ */
+export const zListCliCredentialsResponse = z.object({
+  credentials: z.array(zCliCredential),
+});
+
+export const zRevokeCliCredentialHeaders = z.object({
+  "Idempotency-Key": z.string().min(1).max(255),
+});
+
+export const zRevokeCliCredentialPath = z.object({
+  credentialID: z.uuid(),
+});
+
+/**
+ * Exact CLI credential revoked
+ */
+export const zRevokeCliCredentialResponse = z.void();
+
+export const zRevokeCurrentCliCredentialHeaders = z.object({
+  "Idempotency-Key": z.string().min(1).max(255),
+});
+
+/**
+ * Current CLI credential revoked or exactly replayed
+ */
+export const zRevokeCurrentCliCredentialResponse = z.void();
 
 export const zRequestEmailCodeBody = z.object({
   challenge_id: z.uuid(),

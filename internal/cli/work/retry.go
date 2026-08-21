@@ -30,8 +30,7 @@ func newRetryCommand(configDirectory string, output io.Writer) *cobra.Command {
 			}
 			mutationErr := client.RetryWork(command.Context(), selectedSpaceID, workID, idempotencyKey)
 			if mutationErr != nil {
-				var unknown *userapi.OutcomeUnknownError
-				if !errors.As(mutationErr, &unknown) {
+				if _, ok := errors.AsType[*userapi.OutcomeUnknownError](mutationErr); !ok {
 					return mutationErr
 				}
 			}

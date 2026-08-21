@@ -49,17 +49,16 @@ func TestMemberTalksPrivatelyAndDelegatesSharedWork(t *testing.T) {
 
 	pkiDirectory := filepath.Join(temporary, "pki")
 	run(t, root, nil, carryServer, "pki", "init", "--dir", pkiDirectory, "--hosts", "localhost,127.0.0.1")
-	bootstrapOutput := bootstrapCarry(t, root, carryServer, databaseURL)
+	testMemberOutput := prepareTestMember(t, databaseURL)
 	resetProductJourneyFacts(t, databaseURL)
-	var bootstrap struct {
-		UserID    string `json:"user_id"`
-		SpaceID   string `json:"space_id"`
-		UserToken string `json:"user_token"`
+	var member struct {
+		UserID  string `json:"user_id"`
+		SpaceID string `json:"space_id"`
 	}
-	if err := json.Unmarshal([]byte(bootstrapOutput), &bootstrap); err != nil {
-		t.Fatalf("decode bootstrap: %v", err)
+	if err := json.Unmarshal([]byte(testMemberOutput), &member); err != nil {
+		t.Fatalf("decode member: %v", err)
 	}
-	attachTestEmailIdentity(t, databaseURL, bootstrap.UserID, "conversation@example.com")
+	attachTestEmailIdentity(t, databaseURL, member.UserID, "conversation@example.com")
 
 	serverAddress := freeAddress(t)
 	stopServer, serverLog, emailCaptureFile := startServer(t, root, carryServer, serverAddress, databaseURL, pkiDirectory)
@@ -69,13 +68,10 @@ func TestMemberTalksPrivatelyAndDelegatesSharedWork(t *testing.T) {
 
 	configDirectory := filepath.Join(temporary, "config")
 	clientEnvironment := []string{"CARRY_CONFIG_DIR=" + configDirectory}
-	run(t, root, clientEnvironment, carry, "login",
-		"--server", serverURL,
-		"--ca-cert", filepath.Join(pkiDirectory, "ca.pem"),
-		"--token", bootstrap.UserToken,
-	)
+	loginCarryCLI(t, root, carry, databaseURL, serverURL, filepath.Join(pkiDirectory, "ca.pem"),
+		configDirectory, member.UserID, member.SpaceID, "private-conversation-cli")
 	run(t, root, clientEnvironment, carry, "host", "enroll",
-		"--space", bootstrap.SpaceID, "--name", "private-conversation-host",
+		"--space", member.SpaceID, "--name", "private-conversation-host",
 	)
 
 	hostCtx, cancelHost := context.WithCancel(t.Context())
@@ -127,7 +123,7 @@ func TestMemberTalksPrivatelyAndDelegatesSharedWork(t *testing.T) {
 		t.Fatalf("open private Conversation evidence database: %v", err)
 	}
 	defer pool.Close()
-	assertPrivateConversationEvidence(t, pool, bootstrap.SpaceID, bootstrap.UserID)
+	assertPrivateConversationEvidence(t, pool, member.SpaceID, member.UserID)
 }
 
 func waitForHostStart(t *testing.T, hostLog *lockedBuffer) {

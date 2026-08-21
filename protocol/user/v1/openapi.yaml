@@ -5,9 +5,251 @@ info:
 servers:
   - url: /
 security:
-  - memberToken: []
+  - memberCliCredential: []
   - browserSession: []
 paths:
+  /v1/cli-logins:
+    post:
+      operationId: beginCliLogin
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [request_id, label]
+              properties:
+                request_id:
+                  type: string
+                  format: uuid
+                label:
+                  type: string
+                  minLength: 1
+                  maxLength: 128
+                proposed_replacement_credential_id:
+                  type: string
+                  format: uuid
+      responses:
+        "201":
+          description: >-
+            Short-lived Browser approval ceremony created or exactly replayed
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BegunCliLogin"
+        "400":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "429":
+          $ref: "#/components/responses/Error"
+  /v1/cli-logins/poll:
+    post:
+      operationId: pollCliLogin
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/CliPollProof"
+      responses:
+        "200":
+          description: >-
+            The one final CLI credential, including exact committed replay
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RedeemedCliCredential"
+        "202":
+          description: Awaiting explicit Browser decision
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "410":
+          $ref: "#/components/responses/Error"
+        "429":
+          $ref: "#/components/responses/Error"
+  /v1/cli-logins/cancel:
+    post:
+      operationId: cancelCliLogin
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/CliPollProof"
+      responses:
+        "204":
+          description: Pending or approved-unredeemed request cancelled
+        "401":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "410":
+          $ref: "#/components/responses/Error"
+  /v1/cli-logins/lookup:
+    post:
+      operationId: lookupCliLogin
+      security:
+        - browserSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [user_code]
+              properties:
+                user_code:
+                  type: string
+                  pattern: >-
+                    ^[BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{3}-[BCDFGHJKLMNPQRSTVWXZ]{3}$
+      responses:
+        "200":
+          description: Exact Browser-reviewable CLI login request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CliLoginPreview"
+        "404":
+          $ref: "#/components/responses/Error"
+        "429":
+          $ref: "#/components/responses/Error"
+  /v1/cli-logins/approve:
+    post:
+      operationId: approveCliLogin
+      security:
+        - browserSession: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [request_id, user_code, space_id]
+              properties:
+                request_id:
+                  type: string
+                  format: uuid
+                user_code:
+                  type: string
+                space_id:
+                  type: string
+                  format: uuid
+                replacement_credential_id:
+                  type: string
+                  format: uuid
+      responses:
+        "204":
+          description: >-
+            Browser approval recorded without exposing a CLI credential
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "410":
+          $ref: "#/components/responses/Error"
+  /v1/cli-logins/deny:
+    post:
+      operationId: denyCliLogin
+      security:
+        - browserSession: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [request_id, user_code]
+              properties:
+                request_id:
+                  type: string
+                  format: uuid
+                user_code:
+                  type: string
+      responses:
+        "204":
+          description: CLI login explicitly denied
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+  /v1/identity/cli-credentials:
+    get:
+      operationId: listCliCredentials
+      security:
+        - browserSession: []
+      responses:
+        "200":
+          description: Active CLI credentials for the current User
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [credentials]
+                properties:
+                  credentials:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/CliCredential"
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/identity/cli-credentials/{credentialID}/revoke:
+    parameters:
+      - name: credentialID
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      operationId: revokeCliCredential
+      security:
+        - browserSession: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "204":
+          description: Exact CLI credential revoked
+        "401":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+  /v1/cli-credentials/current/revoke:
+    post:
+      operationId: revokeCurrentCliCredential
+      security:
+        - memberCliCredential: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "204":
+          description: Current CLI credential revoked or exactly replayed
+        "401":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
   /v1/auth/email/challenges:
     post:
       operationId: requestEmailCode
@@ -1131,9 +1373,12 @@ components:
         type: string
         const: no-store
   securitySchemes:
-    memberToken:
+    memberCliCredential:
       type: http
       scheme: bearer
+      description: >-
+        A Browser-approved carry_cli_ User credential; never a Machine
+        certificate or Browser Session
     browserSession:
       type: apiKey
       in: cookie
@@ -1199,6 +1444,14 @@ components:
         type: string
         minLength: 1
         maxLength: 255
+    CliPollProof:
+      name: X-Carry-CLI-Poll
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 255
     BeforeConversationMessage:
       name: before
       in: query
@@ -1252,6 +1505,133 @@ components:
       properties:
         error:
           type: string
+    BegunCliLogin:
+      type: object
+      additionalProperties: false
+      required:
+        - request_id
+        - user_code
+        - poll_secret
+        - verification_path
+        - expires_at
+        - interval_seconds
+      properties:
+        request_id:
+          type: string
+          format: uuid
+        user_code:
+          type: string
+        poll_secret:
+          type: string
+        verification_path:
+          type: string
+          const: /cli-login
+        expires_at:
+          type: string
+          format: date-time
+        interval_seconds:
+          type: integer
+          minimum: 5
+          maximum: 30
+    RedeemedCliCredential:
+      type: object
+      additionalProperties: false
+      required:
+        - credential_id
+        - credential
+        - user_id
+        - space_id
+        - label
+        - expires_at
+      properties:
+        credential_id:
+          type: string
+          format: uuid
+        credential:
+          type: string
+        user_id:
+          type: string
+          format: uuid
+        space_id:
+          type: string
+          format: uuid
+        label:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+    CliLoginPreview:
+      type: object
+      additionalProperties: false
+      required:
+        - request_id
+        - user_code
+        - label
+        - server
+        - created_at
+        - expires_at
+        - approved
+        - denied
+        - cancelled
+        - redeemed
+      properties:
+        request_id:
+          type: string
+          format: uuid
+        user_code:
+          type: string
+        label:
+          type: string
+        server:
+          type: string
+          format: uri
+        proposed_replacement_credential_id:
+          type: string
+          format: uuid
+        approved_space_id:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        approved:
+          type: boolean
+        denied:
+          type: boolean
+        cancelled:
+          type: boolean
+        redeemed:
+          type: boolean
+    CliCredential:
+      type: object
+      additionalProperties: false
+      required:
+        - credential_id
+        - label
+        - approved_space_id
+        - approved_space_name
+        - created_at
+        - expires_at
+      properties:
+        credential_id:
+          type: string
+          format: uuid
+        label:
+          type: string
+        approved_space_id:
+          type: string
+          format: uuid
+        approved_space_name:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
     EmailChallenge:
       type: object
       additionalProperties: false

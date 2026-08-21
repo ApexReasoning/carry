@@ -8,7 +8,6 @@ import (
 	"errors"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/ApexReasoning/carry/internal/identity"
 	"github.com/ApexReasoning/carry/internal/space"
@@ -19,7 +18,7 @@ func TestSpaceInvitationAuthorityReplayProjectionAndSubmission(t *testing.T) {
 	ctx := context.Background()
 	pool := openMigratedTestPool(t, ctx)
 	store := NewStore(pool)
-	manager := bootstrapInvitationManager(t, ctx, store)
+	manager := invitationManagerFixture(t, ctx, store)
 	submitter := &acceptedInvitationSubmitter{}
 	invitations := newTestInvitations(t, store, submitter)
 
@@ -106,7 +105,7 @@ func TestSpaceInvitationReplayEligibilityAndExactSpaceAuthority(t *testing.T) {
 	ctx := context.Background()
 	pool := openMigratedTestPool(t, ctx)
 	store := NewStore(pool)
-	manager := bootstrapInvitationManager(t, ctx, store)
+	manager := invitationManagerFixture(t, ctx, store)
 	submitter := &acceptedInvitationSubmitter{}
 	invitations := newTestInvitations(t, store, submitter)
 	request := space.IssueInvitationRequest{SpaceID: manager.SpaceID, ActorUserID: manager.UserID, RecipientEmail: "eligibility@example.com", IdempotencyKey: "eligibility"}
@@ -202,7 +201,7 @@ func TestSpaceInvitationRecordsObservedOutcomeAfterCallerCancellation(t *testing
 	ctx, cancel := context.WithCancel(context.Background())
 	pool := openMigratedTestPool(t, context.Background())
 	store := NewStore(pool)
-	manager := bootstrapInvitationManager(t, context.Background(), store)
+	manager := invitationManagerFixture(t, context.Background(), store)
 	submitter := &acceptedInvitationSubmitter{cancel: cancel}
 	invitations := newTestInvitations(t, store, submitter)
 	request := space.IssueInvitationRequest{SpaceID: manager.SpaceID, ActorUserID: manager.UserID, RecipientEmail: "cancelled@example.com", IdempotencyKey: "cancelled"}
@@ -220,7 +219,7 @@ func TestSpaceInvitationSubmissionCommitResponseLossRecoversWithoutAnotherSend(t
 	ctx := context.Background()
 	pool := openMigratedTestPool(t, ctx)
 	store := NewStore(pool)
-	manager := bootstrapInvitationManager(t, ctx, store)
+	manager := invitationManagerFixture(t, ctx, store)
 	lossStore := &invitationRecordResponseLossStore{Store: store}
 	submitter := &acceptedInvitationSubmitter{}
 	invitations := newTestInvitations(t, lossStore, submitter)
@@ -244,7 +243,7 @@ func TestSpaceInvitationRequiresExactRecentEmailProofAndReplaysAcceptance(t *tes
 	ctx := context.Background()
 	pool := openMigratedTestPool(t, ctx)
 	store := NewStore(pool)
-	manager := bootstrapInvitationManager(t, ctx, store)
+	manager := invitationManagerFixture(t, ctx, store)
 	invitations := newTestInvitations(t, store, &acceptedInvitationSubmitter{})
 	issued, err := invitations.Issue(ctx, space.IssueInvitationRequest{
 		SpaceID: manager.SpaceID, ActorUserID: manager.UserID, RecipientEmail: "invitee@example.com",
@@ -342,7 +341,7 @@ func TestSpaceInvitationAlreadyMemberUnchangedAndDatabaseTimeExpiry(t *testing.T
 	ctx := context.Background()
 	pool := openMigratedTestPool(t, ctx)
 	store := NewStore(pool)
-	manager := bootstrapInvitationManager(t, ctx, store)
+	manager := invitationManagerFixture(t, ctx, store)
 	invitations := newTestInvitations(t, store, &acceptedInvitationSubmitter{})
 	issued, err := invitations.Issue(ctx, space.IssueInvitationRequest{
 		SpaceID: manager.SpaceID, ActorUserID: manager.UserID, RecipientEmail: "race-member@example.com",
@@ -395,7 +394,7 @@ func TestInvitationResendCooldownReplayAndRevoke(t *testing.T) {
 	ctx := context.Background()
 	pool := openMigratedTestPool(t, ctx)
 	store := NewStore(pool)
-	manager := bootstrapInvitationManager(t, ctx, store)
+	manager := invitationManagerFixture(t, ctx, store)
 	submitter := &acceptedInvitationSubmitter{}
 	invitations := newTestInvitations(t, store, submitter)
 	issued, err := invitations.Issue(ctx, space.IssueInvitationRequest{
@@ -450,7 +449,7 @@ func TestConcurrentInvitationAcceptsHaveOneWinner(t *testing.T) {
 	ctx := context.Background()
 	pool := openMigratedTestPool(t, ctx)
 	store := NewStore(pool)
-	manager := bootstrapInvitationManager(t, ctx, store)
+	manager := invitationManagerFixture(t, ctx, store)
 	invitations := newTestInvitations(t, store, &acceptedInvitationSubmitter{})
 	issued, err := invitations.Issue(ctx, space.IssueInvitationRequest{SpaceID: manager.SpaceID, ActorUserID: manager.UserID, RecipientEmail: "two-accepts@example.com", IdempotencyKey: "issue-two-accepts"})
 	if err != nil {
@@ -496,7 +495,7 @@ func TestConcurrentInvitationAcceptAndRevokeHaveOneTerminalWinner(t *testing.T) 
 	ctx := context.Background()
 	pool := openMigratedTestPool(t, ctx)
 	store := NewStore(pool)
-	manager := bootstrapInvitationManager(t, ctx, store)
+	manager := invitationManagerFixture(t, ctx, store)
 	invitations := newTestInvitations(t, store, &acceptedInvitationSubmitter{})
 	issued, err := invitations.Issue(ctx, space.IssueInvitationRequest{
 		SpaceID: manager.SpaceID, ActorUserID: manager.UserID, RecipientEmail: "concurrent@example.com", IdempotencyKey: "issue-concurrent",
@@ -533,10 +532,10 @@ func TestConcurrentInvitationAcceptAndRevokeHaveOneTerminalWinner(t *testing.T) 
 	}
 }
 
-func bootstrapInvitationManager(t *testing.T, ctx context.Context, store *Store) BootstrapResult {
+func invitationManagerFixture(t *testing.T, ctx context.Context, store *Store) testMember {
 	t.Helper()
-	result, err := bootstrapForTest(ctx, store, BootstrapCommand{
-		DisplayName: "Invitation Manager", SpaceName: "Invitation Space", TokenExpiresAt: time.Now().Add(time.Hour),
+	result, err := createMemberForTest(ctx, store, testMemberCommand{
+		DisplayName: "Invitation Manager", SpaceName: "Invitation Space",
 	})
 	if err != nil {
 		t.Fatalf("bootstrap invitation manager: %v", err)

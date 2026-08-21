@@ -24,6 +24,55 @@ type CarryUser struct {
 	CreatedAt   pgtype.Timestamptz
 }
 
+type CliCredential struct {
+	CredentialID             string
+	LoginRequestID           string
+	UserID                   string
+	Label                    string
+	CreatedAt                pgtype.Timestamptz
+	ExpiresAt                pgtype.Timestamptz
+	RevokedAt                pgtype.Timestamptz
+	RevokedByUserID          pgtype.UUID
+	RevocationIdempotencyKey *string
+	RevocationRequestDigest  []byte
+}
+
+type CliLoginLookupFailure struct {
+	FailureID        string
+	BrowserSessionID string
+	SourceDigest     []byte
+	CreatedAt        pgtype.Timestamptz
+}
+
+type CliLoginRequest struct {
+	RequestID                       string
+	BeginIdempotencyKey             string
+	BeginRequestDigest              []byte
+	UserCodeDigest                  []byte
+	CodeGeneration                  int16
+	SourceDigest                    []byte
+	Label                           string
+	ProposedReplacementCredentialID pgtype.UUID
+	CreatedAt                       pgtype.Timestamptz
+	ExpiresAt                       pgtype.Timestamptz
+	LastPolledAt                    pgtype.Timestamptz
+	PollIntervalSeconds             int16
+	ApprovedAt                      pgtype.Timestamptz
+	ApprovedByUserID                pgtype.UUID
+	ApprovedSpaceID                 pgtype.UUID
+	ApprovalIdempotencyKey          *string
+	ApprovalRequestDigest           []byte
+	PreparedCredentialID            pgtype.UUID
+	DeniedAt                        pgtype.Timestamptz
+	DeniedByUserID                  pgtype.UUID
+	DenialIdempotencyKey            *string
+	DenialRequestDigest             []byte
+	CancelledAt                     pgtype.Timestamptz
+	ResultingCredentialID           pgtype.UUID
+	RedeemedAt                      pgtype.Timestamptz
+	ReplayUntil                     pgtype.Timestamptz
+}
+
 type Conversation struct {
 	ConversationID string
 	SpaceID        string
@@ -231,15 +280,6 @@ type SpaceMembership struct {
 	RemovalSuccessorUserID pgtype.UUID
 	RemovalIdempotencyKey  *string
 	RemovalRequestDigest   []byte
-}
-
-type UserToken struct {
-	TokenID   string
-	UserID    string
-	TokenHash []byte
-	CreatedAt pgtype.Timestamptz
-	ExpiresAt pgtype.Timestamptz
-	RevokedAt pgtype.Timestamptz
 }
 
 type Work struct {

@@ -30,14 +30,14 @@ func TestMemberEnrollsAndRevokesIndependentMachine(t *testing.T) {
 
 	pkiDirectory := filepath.Join(temporary, "pki")
 	run(t, root, nil, carryServer, "pki", "init", "--dir", pkiDirectory, "--hosts", "localhost,127.0.0.1")
-	bootstrapOutput := bootstrapCarry(t, root, carryServer, databaseURL)
+	testMemberOutput := prepareTestMember(t, databaseURL)
 	resetProductJourneyFacts(t, databaseURL)
-	var bootstrap struct {
-		SpaceID   string `json:"space_id"`
-		UserToken string `json:"user_token"`
+	var member struct {
+		UserID  string `json:"user_id"`
+		SpaceID string `json:"space_id"`
 	}
-	if err := json.Unmarshal([]byte(bootstrapOutput), &bootstrap); err != nil {
-		t.Fatalf("decode bootstrap: %v", err)
+	if err := json.Unmarshal([]byte(testMemberOutput), &member); err != nil {
+		t.Fatalf("decode member: %v", err)
 	}
 
 	address := freeAddress(t)
@@ -48,12 +48,9 @@ func TestMemberEnrollsAndRevokesIndependentMachine(t *testing.T) {
 	waitForServer(t, serverURL, filepath.Join(pkiDirectory, "ca.pem"), serverLog)
 	configDirectory := filepath.Join(temporary, "config")
 	clientEnvironment := []string{"CARRY_CONFIG_DIR=" + configDirectory}
-	run(t, root, clientEnvironment, carry, "login",
-		"--server", serverURL,
-		"--ca-cert", filepath.Join(pkiDirectory, "ca.pem"),
-		"--token", bootstrap.UserToken,
-	)
-	memberInfo, err := os.Stat(filepath.Join(configDirectory, "member.json"))
+	loginCarryCLI(t, root, carry, databaseURL, serverURL, filepath.Join(pkiDirectory, "ca.pem"),
+		configDirectory, member.UserID, member.SpaceID, "machine-enrollment-cli")
+	memberInfo, err := os.Stat(filepath.Join(configDirectory, "cli.json"))
 	if err != nil {
 		t.Fatalf("stat member credential: %v", err)
 	}
@@ -61,7 +58,7 @@ func TestMemberEnrollsAndRevokesIndependentMachine(t *testing.T) {
 		t.Fatalf("member credential mode = %o, want 600", got)
 	}
 	enrollOutput := run(t, root, clientEnvironment, carry, "host", "enroll",
-		"--space", bootstrap.SpaceID, "--name", "machine-enrollment-host")
+		"--space", member.SpaceID, "--name", "machine-enrollment-host")
 	if !strings.Contains(enrollOutput, "Enrolled Machine") {
 		t.Fatalf("enrollment output = %q", enrollOutput)
 	}
@@ -93,13 +90,13 @@ func TestMemberEnrollsAndRevokesIndependentMachine(t *testing.T) {
 	writeFakePi(t, filepath.Join(binDirectory, "pi"))
 	hostEnvironment := append(clientEnvironment, "PATH="+binDirectory)
 
-	memberPath := filepath.Join(configDirectory, "member.json")
+	memberPath := filepath.Join(configDirectory, "cli.json")
 	memberCredential, err := os.ReadFile(memberPath)
 	if err != nil {
-		t.Fatalf("read member credential: %v", err)
+		t.Fatalf("read CLI credential: %v", err)
 	}
 	if err := os.Remove(memberPath); err != nil {
-		t.Fatalf("remove member credential: %v", err)
+		t.Fatalf("remove CLI credential: %v", err)
 	}
 	started := runHostUntilStarted(t, root, carry, hostEnvironment)
 	if !strings.Contains(started, machineCredential.MachineID) || !strings.Contains(started, "with Pi") {
@@ -115,7 +112,7 @@ func TestMemberEnrollsAndRevokesIndependentMachine(t *testing.T) {
 	}
 
 	if err := os.WriteFile(memberPath, memberCredential, 0o600); err != nil {
-		t.Fatalf("restore member credential: %v", err)
+		t.Fatalf("restore CLI credential: %v", err)
 	}
 	revokeOutput := run(t, root, clientEnvironment, carry, "host", "revoke")
 	if !strings.Contains(revokeOutput, "removed its local credential") {
@@ -129,7 +126,7 @@ func TestMemberEnrollsAndRevokesIndependentMachine(t *testing.T) {
 		t.Fatalf("restore confirmed-revoked Machine credential: %v", err)
 	}
 	if err := os.Remove(memberPath); err != nil {
-		t.Fatalf("remove member credential before cleanup retry: %v", err)
+		t.Fatalf("remove CLI credential before cleanup retry: %v", err)
 	}
 	cleanupOutput := run(t, root, clientEnvironment, carry, "host", "revoke")
 	if !strings.Contains(cleanupOutput, "removed its local credential") {
@@ -139,7 +136,7 @@ func TestMemberEnrollsAndRevokesIndependentMachine(t *testing.T) {
 		t.Fatalf("confirmed-revoked Machine credential remains after cleanup retry: %v", err)
 	}
 	if err := os.WriteFile(memberPath, memberCredential, 0o600); err != nil {
-		t.Fatalf("restore member credential after cleanup retry: %v", err)
+		t.Fatalf("restore CLI credential after cleanup retry: %v", err)
 	}
 
 	staleConfigDirectory := filepath.Join(temporary, "stale-revoked-config")
@@ -158,7 +155,7 @@ func TestMemberEnrollsAndRevokesIndependentMachine(t *testing.T) {
 	}
 
 	reenrollOutput := run(t, root, clientEnvironment, carry, "host", "enroll",
-		"--space", bootstrap.SpaceID, "--name", "replacement-enrollment-host")
+		"--space", member.SpaceID, "--name", "replacement-enrollment-host")
 	if !strings.Contains(reenrollOutput, "Enrolled Machine") {
 		t.Fatalf("re-enrollment output = %q", reenrollOutput)
 	}

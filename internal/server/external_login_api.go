@@ -33,6 +33,10 @@ func ParseExternalOrigin(value string) (ExternalOrigin, error) {
 	return ExternalOrigin{value: value, host: parsed.Host}, nil
 }
 
+func (origin ExternalOrigin) String() string {
+	return origin.value
+}
+
 func (origin ExternalOrigin) CallbackURL(provider identity.ExternalLoginProvider) string {
 	return origin.value + "/v1/auth/" + provider.String() + "/callback"
 }

@@ -94,7 +94,7 @@ PostgreSQL 拥有事务、唯一 winner、lease、fence、幂等和恢复裁决�
 
 | Owner | 持久事实 | 当前消费者 |
 | --- | --- | --- |
-| Identity | User、邮箱/Google/GitHub proof、短期 proof 事务、显式登录方式变更、User token、Browser Session | User API、Web、CLI |
+| Identity | User、邮箱/Google/GitHub proof、短期 proof 事务、显式登录方式变更、Browser Session、Browser-approved CLI credential | User API、Web、CLI |
 | Space | Membership、准确邮箱邀请、邀请 submission outcome、Machine enrollment 权限 | User API、Host enrollment |
 | Work | 目标、负责人、消息、当前理解、阶段结果检查与接受事实 | 成员、执行路径 |
 | Conversation | 成员与 Carry 的私人消息、reply claim、private-side Work consequence | 准确成员、受限 Machine claim |
@@ -137,7 +137,9 @@ Email challenge 以相同 closed purpose 固定目标：reauthenticate 不接收
 
 新 User 在创建首个 Space 前允许没有 display name 和 Membership。`/v1/me` 的 User 与当前 Memberships 是 Web routing 的唯一事实；不增加 profile-completed、onboarding-state 或 default-Space。
 
-现有 User token 与 operator bootstrap 只为已发布 CLI 的过渡消费者保留到 Node 11。Browser 不再接受 token exchange；User token 和 Browser Session 都不能作为 Machine credential。
+成员 CLI login 是 Identity-owned 的短期 Browser approval ceremony，不是 OAuth server、Device、Installation 或通用 Approval owner。十五分钟 request 只保存 code verifier、poll cadence、Browser decision、所选默认 Space context 与 single-redeem consequence；人类 code、poll/cancel secret 和最终 credential 使用不同 MAC domain。固定 `/cli-login` 不把 code 或 secret 放入 URL，批准同事务重读 exact Browser Session、User、Space 与 active Membership。PostgreSQL database time 裁决 admission、lookup abuse budget、五秒起始且最多三十秒的 poll cadence、approve/deny/cancel/expiry 顺序、single redeem、replacement 与 response-loss replay。
+
+最终 `carry_cli_` credential 由 credential identity、configured canonical HTTPS origin 与 Identity root 派生，数据库只保存 identity、User、九十天 expiry、revocation 和准确 replay fact。批准 Space 只作为 origin request 与本地 `cli.json` 的默认 context；credential 不缓存 Membership、role 或 execution authority。所有 User Space 请求继续重读 current Membership。Browser Settings 与 current-credential revoke 都只撤销一个准确 credential；已撤销或过期 credential 不能由 poll replay resurrect。现有 Machine enrollment/revocation 的 User side 在 Node 11 继续接受该 CLI credential，但 approval 本身不签发 Machine certificate。Machine mTLS 与 Browser Session 都不能替代 CLI credential。旧 User token、operator bootstrap、token paste、`user_tokens` 与 `member.json` 已删除且不迁移。
 
 ### 5.2 Space invitation 与 Membership admission
 
@@ -368,6 +370,7 @@ User API 只表达成员旅程：
 - 从 same-origin POST 开始 Google/GitHub login，并在固定 callback 消费 provider proof 以建立同一种 Browser Session；
 - 以 Browser Session 读取固定登录方式标签、重新确认已有方式、显式关联新方式并幂等移除仍可安全移除的方式；
 - 撤销当前 Browser Session；
+- 建立、Browser lookup/approve/deny、poll/cancel 一个准确 CLI login，并以 Browser 或 current CLI credential 撤销准确 `carry_cli_` credential；
 - 读取当前 User 与 Spaces；
 - authenticated User 显式创建首个 Space；
 - 分页读取并幂等追加当前成员在一个 Space 中的私人 Conversation；
@@ -442,7 +445,9 @@ spaces
 space_memberships
 space_invitations
 space_invitation_submissions
-user_tokens
+cli_login_requests
+cli_login_lookup_failures
+cli_credentials
 browser_sessions
 machines
 conversations
