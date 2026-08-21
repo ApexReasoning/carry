@@ -7,7 +7,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// NewCommand constructs the Host subtree with separate member and Machine paths.
+// NewCommand constructs the Browser connection and Machine-only Host paths.
 func NewCommand(
 	configDirectory string,
 	output io.Writer,
@@ -16,16 +16,16 @@ func NewCommand(
 ) *cobra.Command {
 	command := &cobra.Command{
 		Use:   "host",
-		Short: "Enroll and run this Machine as a Carry Host",
+		Short: "Connect and run this Machine as a Carry Host",
 		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
 			return command.Help()
 		},
 	}
 	command.AddCommand(
-		newEnrollCommand(configDirectory, output),
+		newConnectCommand(configDirectory, output),
 		newStartCommand(configDirectory, output, piExecutor, codexExecutor),
-		newRevokeCommand(configDirectory, output),
+		newDisconnectCommand(configDirectory, output),
 	)
 	return command
 }

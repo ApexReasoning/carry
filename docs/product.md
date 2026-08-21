@@ -131,7 +131,7 @@ provider login 成功后的无 Membership User 继续现有显式创建首个 Sp
 
 成员 CLI 不接受可粘贴 token、邮箱验证码、provider token 或 Browser Session。成员对一个显式 HTTPS Carry server 运行 `carry login`，终端显示准确 server、有限的 CLI label、十五分钟有效的人类 code 与固定 `/cli-login` 页面；已登录 Browser 重复显示相同 code 和 server，成员选择一个当前 Space 后明确批准或拒绝。所选 Space 只是本地默认 context，不成为 credential scope，也不创建或扩大 Membership。
 
-人类 code、仅供 CLI poll/cancel 的 secret 与最终 `carry_cli_` credential 是三个不同 audience。首次有效 poll 才原子建立一个九十天有效的 User CLI credential；response loss 的有界准确重放只恢复同一个仍有效 secret，不建立第二个 credential。credential 只识别准确 User 与 server，每个 Work 或既有 Machine enrollment/revocation 请求仍由当前 Membership 裁决。Browser Settings 可以查看并撤销自己的 active CLI access；`carry logout` 先确认服务端撤销，再删除 private `cli.json`。丢失、过期或撤销后只能重新批准，不能恢复旧 secret。旧 member bearer、operator bootstrap 与 `member.json` 不再是产品入口或兼容路径。
+人类 code、仅供 CLI poll/cancel 的 secret 与最终 `carry_cli_` credential 是三个不同 audience。首次有效 poll 才原子建立一个九十天有效的 User CLI credential；response loss 的有界准确重放只恢复同一个仍有效 secret，不建立第二个 credential。credential 只识别准确 User 与 server，每个 User Space 或 Work 请求仍由当前 Membership 裁决；它不参与 Machine connection、approval 或 revocation。Browser Settings 可以查看并撤销自己的 active CLI access；`carry logout` 先确认服务端撤销，再删除 private `cli.json`。丢失、过期或撤销后只能重新批准，不能恢复旧 secret。旧 member bearer、operator bootstrap 与 `member.json` 不再是产品入口或兼容路径。
 
 ## Space
 
@@ -150,6 +150,12 @@ Space 不是文件夹。它决定哪些人和能力可以共同参与一份责�
 移除只终止该 Space 的当前 Membership authority。原 Browser/CLI credential 仍可识别 User 及其其他 Space，Space Machine 仍是独立 principal；后续对已移除 Space 的请求全部由当前 Membership fail closed。真实作者、共享 Work、私人 Conversation 与已经签发的固定期限 invitation 都不被改写或删除；其他成员不会因此获得私人 Conversation，当前 manager 仍可单独撤销 pending invitation。
 
 Space-enrolled Machine 是该 Space 的受信 Carry 执行基础设施，不是普通成员。它可以在准确、短期且可撤销的执行 authority 下处理完成当前责任所必需的 Space 内容，包括成员提交给 Carry 的有界私人 Conversation 上下文；enrollment 不授予通用内容浏览能力，也不能让 Machine 把私人内容写入共享 Work、日志或 provider Session。
+
+成员运行 `carry host connect --server <准确 HTTPS origin>` 后，终端显示 Machine display name、完整 `SHA256:` public-key fingerprint、十位 code 与固定 `/machine-connect` 页面。已登录 Browser 必须重新显示并让成员核对同一 origin、name、fingerprint 与 code，且只允许选择自己当前有 enrollment 权限的准确 Space；批准前不存在 durable Machine。code、poll/cancel secret、Browser/CLI credential 与最终 Machine certificate 是不同 audience，Machine private key 始终留在本地。
+
+Web 的 Machines inventory 只表达 Carry 服务端 authority：display name、Space、Active/Revoked 与 enrollment/revocation actor/time；完整 fingerprint 只在 connection approval 与准确 remote-revoke confirmation 中显示。Active 不表示在线，产品不展示 heartbeat、last seen、Runtime、provider、version、OS、IP 或 capacity。Remote revoke 只终止未来 Carry server authority，不能证明远端进程停止、文件删除或复制数据擦除。
+
+`carry host disconnect` 只有在 Machine mTLS self-revoke 得到明确确认后才删除本地 credential；服务不可达或结果 Unknown 时保留它以便准确重试。`--local-only` 是显式逃生口，只删除本地材料并明确远端可能仍为 Active。清理后重新连接总是 fresh key、request、Machine identity 与 certificate，不复活旧 identity。
 
 成员身份、浏览器会话、外部身份和执行机器身份必须分开。通过 Slack 或 Lark 验证的外部用户，不会因此自动成为 Space 成员。
 

@@ -55,11 +55,8 @@ func TestOwnerReviewsResultProducedThroughNativeExecution(t *testing.T) {
 	clientEnvironment := []string{"CARRY_CONFIG_DIR=" + configDirectory}
 	loginCarryCLI(t, root, carry, databaseURL, serverURL, filepath.Join(pkiDirectory, "ca.pem"),
 		configDirectory, member.UserID, member.SpaceID, "native-execution-cli")
-	run(
-		t, root, clientEnvironment, carry, "host", "enroll",
-		"--space", member.SpaceID,
-		"--name", "native-execution-host",
-	)
+	connectCarryMachine(t, root, carry, databaseURL, serverURL, filepath.Join(pkiDirectory, "ca.pem"),
+		configDirectory, member.UserID, member.SpaceID, "native-execution-host")
 	createdOutput := run(
 		t,
 		root,

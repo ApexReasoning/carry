@@ -44,11 +44,10 @@ func newRunFixture(t *testing.T, ctx context.Context) runFixture {
 		t.Fatalf("create Run fixture Work: %v", err)
 	}
 	machineID := uuid.NewString()
-	_, err = store.EnrollMachine(ctx, machine.EnrollMachineCommand{
+	_, err = enrollMachineForTest(ctx, store, testMachineCommand{
 		MachineID: machineID, SpaceID: bootstrap.SpaceID, DisplayName: "Run Host",
 		PublicKeyDER: []byte("run-public-key"), CertificatePEM: []byte("run-certificate"),
 		CertificateSerial: uuid.NewString(), EnrolledByUserID: bootstrap.UserID,
-		IdempotencyKey: "enroll-run-host",
 	})
 	if err != nil {
 		t.Fatalf("enroll Run fixture Machine: %v", err)
@@ -532,11 +531,10 @@ func TestExpiredAttemptRecoversOnceAndRejectsOldAuthority(t *testing.T) {
 	}
 
 	recoveryMachineID := uuid.NewString()
-	if _, err := fixture.store.EnrollMachine(ctx, machine.EnrollMachineCommand{
+	if _, err := enrollMachineForTest(ctx, fixture.store, testMachineCommand{
 		MachineID: recoveryMachineID, SpaceID: fixture.bootstrap.SpaceID, DisplayName: "Replacement Run Host",
 		PublicKeyDER: []byte("replacement-public-key"), CertificatePEM: []byte("replacement-certificate"),
 		CertificateSerial: uuid.NewString(), EnrolledByUserID: fixture.bootstrap.UserID,
-		IdempotencyKey: "enroll-replacement-run-host",
 	}); err != nil {
 		t.Fatalf("enroll replacement Machine: %v", err)
 	}
@@ -690,7 +688,7 @@ func TestMachineRevocationRejectsClaimAndCommit(t *testing.T) {
 	t.Run("before claim", func(t *testing.T) {
 		ctx := context.Background()
 		fixture := newRunFixture(t, ctx)
-		if err := fixture.store.RevokeMachine(ctx, fixture.bootstrap.UserID, fixture.bootstrap.SpaceID, fixture.machineID); err != nil {
+		if err := revokeMachineForTest(ctx, fixture.store, fixture.machineID); err != nil {
 			t.Fatalf("revoke Machine: %v", err)
 		}
 		if _, err := fixture.store.ClaimRun(ctx, fixture.machineID); !errors.Is(err, machine.ErrMachineRevoked) {
@@ -705,8 +703,17 @@ func TestMachineRevocationRejectsClaimAndCommit(t *testing.T) {
 		if err != nil {
 			t.Fatalf("claim Run: %v", err)
 		}
-		if err := fixture.store.RevokeMachine(ctx, fixture.bootstrap.UserID, fixture.bootstrap.SpaceID, fixture.machineID); err != nil {
+		if err := revokeMachineForTest(ctx, fixture.store, fixture.machineID); err != nil {
 			t.Fatalf("revoke Machine: %v", err)
+		}
+		if _, err := fixture.store.RenewRunAttempt(ctx, fixture.machineID, claim.RunID, claim.AttemptID, claim.Fence); !errors.Is(err, run.ErrStaleAttempt) {
+			t.Fatalf("revoked renew error = %v", err)
+		}
+		if err := fixture.store.FinishUnresolvedAttempt(ctx, run.FinishCommand{
+			MachineID: fixture.machineID, RunID: claim.RunID, AttemptID: claim.AttemptID,
+			Fence: claim.Fence, Outcome: run.StateFailed,
+		}); !errors.Is(err, run.ErrStaleAttempt) {
+			t.Fatalf("revoked finish error = %v", err)
 		}
 		if err := fixture.store.CommitWorkUnderstanding(ctx, run.CommitCommand{
 			MachineID: fixture.machineID, RunID: claim.RunID, AttemptID: claim.AttemptID,

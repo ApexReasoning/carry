@@ -32,28 +32,6 @@ func (q *Queries) CountActiveSpaceAuthorities(ctx context.Context, spaceID strin
 	return i, err
 }
 
-const getMachineEnrollmentPermission = `-- name: GetMachineEnrollmentPermission :one
-SELECT can_enroll_machines
-FROM space_memberships
-WHERE
-    space_id = $1
-    AND user_id = $2
-    AND revoked_at IS NULL
-FOR SHARE
-`
-
-type GetMachineEnrollmentPermissionParams struct {
-	SpaceID string
-	UserID  string
-}
-
-func (q *Queries) GetMachineEnrollmentPermission(ctx context.Context, arg GetMachineEnrollmentPermissionParams) (bool, error) {
-	row := q.db.QueryRow(ctx, getMachineEnrollmentPermission, arg.SpaceID, arg.UserID)
-	var can_enroll_machines bool
-	err := row.Scan(&can_enroll_machines)
-	return can_enroll_machines, err
-}
-
 const listActiveSpaceMembers = `-- name: ListActiveSpaceMembers :many
 SELECT m.user_id, u.display_name, m.can_manage_members,
     m.can_enroll_machines, m.created_at AS joined_at,

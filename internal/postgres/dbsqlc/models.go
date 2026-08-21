@@ -191,9 +191,46 @@ type Machine struct {
 	CertificatePem           []byte
 	CertificateSerial        string
 	EnrolledByUserID         string
-	EnrollmentIdempotencyKey string
 	EnrolledAt               pgtype.Timestamptz
 	RevokedAt                pgtype.Timestamptz
+	RevocationActorKind      *string
+	RevokedByUserID          pgtype.UUID
+	RevocationIdempotencyKey *string
+	RevocationRequestDigest  []byte
+}
+
+type MachineConnectionLookupFailure struct {
+	FailureID        string
+	BrowserSessionID string
+	SourceDigest     []byte
+	CreatedAt        pgtype.Timestamptz
+}
+
+type MachineConnectionRequest struct {
+	RequestID              string
+	BeginIdempotencyKey    string
+	BeginRequestDigest     []byte
+	SourceDigest           []byte
+	UserCodeDigest         []byte
+	PollSecretDigest       []byte
+	DisplayName            string
+	PublicKeyDer           []byte
+	KeyProof               []byte
+	CreatedAt              pgtype.Timestamptz
+	ExpiresAt              pgtype.Timestamptz
+	LastPolledAt           pgtype.Timestamptz
+	PollIntervalSeconds    int16
+	Decision               *string
+	DecidedAt              pgtype.Timestamptz
+	DecidedByUserID        pgtype.UUID
+	DecidedSpaceID         pgtype.UUID
+	DecisionIdempotencyKey *string
+	DecisionRequestDigest  []byte
+	PreparedMachineID      pgtype.UUID
+	CancelledAt            pgtype.Timestamptz
+	ResultingMachineID     pgtype.UUID
+	RedeemedAt             pgtype.Timestamptz
+	ReplayUntil            pgtype.Timestamptz
 }
 
 type Run struct {

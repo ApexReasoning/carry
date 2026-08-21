@@ -151,6 +151,10 @@ func run(ctx context.Context, arguments []string, stdout io.Writer, stderr io.Wr
 	if err != nil {
 		return fmt.Errorf("configure Identity root: %w", err)
 	}
+	machineCredentials, err := machine.ParseConnectionRoot(parsed.identityRoot)
+	if err != nil {
+		return fmt.Errorf("configure Machine connection root: %w", err)
+	}
 	resendSubmitter, err := newResendCodeSender(parsed.resendAPIURL, parsed.resendAPIKey, parsed.emailFrom)
 	if err != nil {
 		return fmt.Errorf("configure Resend: %w", err)
@@ -214,10 +218,11 @@ func run(ctx context.Context, arguments []string, stdout io.Writer, stderr io.Wr
 	if err != nil {
 		return fmt.Errorf("compose Space invitations: %w", err)
 	}
-	machineEnrollment, err := machine.NewEnrollment(store, authority)
+	machineConnections, err := machine.NewConnections(store, machineCredentials, authority, parsed.externalOrigin.String())
 	if err != nil {
-		return fmt.Errorf("compose Machine enrollment: %w", err)
+		return fmt.Errorf("compose Machine connections: %w", err)
 	}
+	requestSources := carryserver.NewRequestSource(parsed.trustedProxyCIDRs)
 	userAuthentication, err := carryserver.NewUserAuthentication(store, store, credentials, parsed.externalOrigin)
 	if err != nil {
 		return fmt.Errorf("compose User authentication: %w", err)
@@ -230,7 +235,7 @@ func run(ctx context.Context, arguments []string, stdout io.Writer, stderr io.Wr
 		cliLogin,
 		credentials,
 		parsed.externalOrigin,
-		carryserver.NewRequestSource(parsed.trustedProxyCIDRs),
+		requestSources,
 		store,
 	)
 	if err != nil {
@@ -240,7 +245,7 @@ func run(ctx context.Context, arguments []string, stdout io.Writer, stderr io.Wr
 	if err != nil {
 		return fmt.Errorf("compose User Space routes: %w", err)
 	}
-	userMachineRoutes, err := carryserver.NewUserMachineRoutes(machineEnrollment, store)
+	userMachineRoutes, err := carryserver.NewUserMachineRoutes(machineConnections, credentials, parsed.externalOrigin, requestSources)
 	if err != nil {
 		return fmt.Errorf("compose User Machine routes: %w", err)
 	}
@@ -263,7 +268,7 @@ func run(ctx context.Context, arguments []string, stdout io.Writer, stderr io.Wr
 	if err != nil {
 		return fmt.Errorf("compose User routes: %w", err)
 	}
-	machineRoutes, err := carryserver.NewMachineRoutes(store, store)
+	machineRoutes, err := carryserver.NewMachineRoutes(store, store, machineConnections)
 	if err != nil {
 		return fmt.Errorf("compose Machine routes: %w", err)
 	}

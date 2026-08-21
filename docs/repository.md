@@ -163,7 +163,7 @@ internal/registry
 
 Web 使用自己的 Node 24、pnpm、TypeScript 和 React 工具链。`package.json`、`pnpm-lock.yaml` 和 Node 版本文件都留在 `apps/web/`，不在仓库根目录再维护一份 JavaScript workspace。
 
-Web 不复制 Go domain，也不把后端 package tree 映射成 feature tree。User API 的 OpenAPI source 位于 `protocol/user/v1/openapi.yaml`，覆盖 Web 与成员 CLI 已消费的成员行为，包括 Machine enrollment/revocation；Web 只在 `apps/web/app/generated/` 保存可重建的生成客户端和 Zod schema。成员 CLI 的 `internal/cli/userapi/` 是同一 User API 的 concrete transport，不得吸收 Machine mTLS。只有新的真实协议受众出现后才增加另一棵 version 目录，不预建 Host 或 Agent 协议。
+Web 不复制 Go domain，也不把后端 package tree 映射成 feature tree。User API 的 OpenAPI source 位于 `protocol/user/v1/openapi.yaml`，覆盖 Web 与成员 CLI 已消费的成员行为，包括 Machine connection approval、inventory 与 Browser revocation；Web 只在 `apps/web/app/generated/` 保存可重建的生成客户端和 Zod schema。成员 CLI 的 `internal/cli/userapi/` 是同一 User API 的 concrete transport，不得吸收 Machine mTLS。只有新的真实协议受众出现后才增加另一棵 version 目录，不预建 Host 或 Agent 协议。
 
 ### `e2e/`
 
@@ -418,7 +418,7 @@ make check-product
 
 - 成员建立 Browser Session；
 - 创建、读取并补充 Work；
-- Machine enrollment 后用独立 mTLS claim 并推进 Work；
+- Browser 核对准确 fingerprint 与 Space 后连接 Machine，再用独立 mTLS claim 并推进 Work；
 - Host 中断后新的 Attempt 安全继续，旧 Attempt 不能晚到提交；
 - 成员在 Web 私聊 Carry，普通问题只得到私人回复；
 - 清晰委托原子形成一份共享 Work，而私人原文和 source identity 不进入 Work；

@@ -238,6 +238,133 @@ func loginCarryCLI(t *testing.T, root, carry, databaseURL, serverURL, caCertific
 	return finishCarryCLILogin(t, pending)
 }
 
+type pendingMachineConnection struct {
+	command     *exec.Cmd
+	log         *lockedBuffer
+	code        string
+	fingerprint string
+	done        <-chan error
+}
+
+func startCarryMachineConnection(t *testing.T, root, carry, configDirectory, serverURL, caCertificatePath, name string) pendingMachineConnection {
+	t.Helper()
+	log := &lockedBuffer{}
+	command := exec.CommandContext(t.Context(), carry, "host", "connect", "--server", serverURL, "--ca-cert", caCertificatePath, "--name", name)
+	command.Dir = root
+	command.Env = append(os.Environ(), "CARRY_CONFIG_DIR="+configDirectory)
+	command.Stdout, command.Stderr = log, log
+	if err := command.Start(); err != nil {
+		t.Fatalf("start Machine connection: %v", err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- command.Wait() }()
+	codePattern := regexp.MustCompile(`Code: ([BCDFGHJKLMNPQRSTVWXZ-]+)`)
+	fingerprintPattern := regexp.MustCompile(`Public key: (SHA256:[A-Za-z0-9+/]+)`)
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		codeMatch := codePattern.FindStringSubmatch(log.String())
+		fingerprintMatch := fingerprintPattern.FindStringSubmatch(log.String())
+		if len(codeMatch) == 2 && len(fingerprintMatch) == 2 {
+			return pendingMachineConnection{
+				command: command, log: log, code: codeMatch[1], fingerprint: fingerprintMatch[1], done: done,
+			}
+		}
+		select {
+		case err := <-done:
+			t.Fatalf("carry host connect stopped before showing a code: %v\n%s", err, log.String())
+		default:
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("carry host connect did not show a code\n%s", log.String())
+	return pendingMachineConnection{}
+}
+
+func approveCarryMachineHTTP(t *testing.T, databaseURL, serverURL, caCertificatePath, userID, spaceID, code string) {
+	t.Helper()
+	sessionID := uuid.NewString()
+	pool, err := pgxpool.New(t.Context(), databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	if _, err := pool.Exec(t.Context(), `insert into browser_sessions (session_id, user_id, identity_proof_method, expires_at) values ($1, $2, 'email', transaction_timestamp() + interval '1 hour')`, sessionID, userID); err != nil {
+		t.Fatalf("create Machine approval Browser Session: %v", err)
+	}
+	caPEM, err := os.ReadFile(caCertificatePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, err := testHTTPClient(caPEM)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identityCredentials, _ := identity.NewCredentials(bytes.Repeat([]byte{3}, identity.IdentityRootBytes))
+	cookie, _ := identityCredentials.BrowserSessionCredential(sessionID)
+	post := func(path string, body any, key string, destination any) {
+		encoded, _ := json.Marshal(body)
+		request, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, serverURL+path, bytes.NewReader(encoded))
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Origin", serverURL)
+		if key != "" {
+			request.Header.Set("Idempotency-Key", key)
+		}
+		request.AddCookie(&http.Cookie{Name: "__Host-carry_session", Value: cookie})
+		response, err := client.Do(request)
+		if err != nil {
+			t.Fatalf("send Machine approval: %v", err)
+		}
+		defer response.Body.Close()
+		if response.StatusCode < 200 || response.StatusCode >= 300 {
+			failure, _ := io.ReadAll(response.Body)
+			t.Fatalf("Machine approval %s = %d: %s", path, response.StatusCode, failure)
+		}
+		if destination != nil {
+			if err := json.NewDecoder(response.Body).Decode(destination); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	var preview struct {
+		RequestID   string `json:"request_id"`
+		UserCode    string `json:"user_code"`
+		Fingerprint string `json:"fingerprint"`
+		DisplayName string `json:"display_name"`
+	}
+	post("/v1/machine-connections/lookup", map[string]string{"user_code": code}, "", &preview)
+	if preview.UserCode != code || !strings.HasPrefix(preview.Fingerprint, "SHA256:") || preview.DisplayName == "" {
+		t.Fatalf("Machine preview differs from terminal: %#v", preview)
+	}
+	post("/v1/machine-connections/"+preview.RequestID+"/approve", map[string]string{
+		"request_id": preview.RequestID, "user_code": code, "space_id": spaceID,
+	}, uuid.NewString(), nil)
+}
+
+func finishCarryMachineConnection(t *testing.T, pending pendingMachineConnection) string {
+	t.Helper()
+	select {
+	case err := <-pending.done:
+		if err != nil {
+			t.Fatalf("complete Machine connection: %v\n%s", err, pending.log.String())
+		}
+	case <-time.After(35 * time.Second):
+		_ = pending.command.Process.Kill()
+		t.Fatalf("Machine connection timed out\n%s", pending.log.String())
+	}
+	output := pending.log.String()
+	if !strings.Contains(output, " connected to Space ") {
+		t.Fatalf("Machine connection output = %q", output)
+	}
+	return output
+}
+
+func connectCarryMachine(t *testing.T, root, carry, databaseURL, serverURL, caCertificatePath, configDirectory, userID, spaceID, name string) string {
+	t.Helper()
+	pending := startCarryMachineConnection(t, root, carry, configDirectory, serverURL, caCertificatePath, name)
+	approveCarryMachineHTTP(t, databaseURL, serverURL, caCertificatePath, userID, spaceID, pending.code)
+	return finishCarryMachineConnection(t, pending)
+}
+
 func startServer(
 	t *testing.T,
 	root string,
@@ -438,6 +565,8 @@ func resetProductJourneyFacts(t *testing.T, databaseURL string) {
 	}
 	defer func() { _ = transaction.Rollback(t.Context()) }()
 	for _, table := range []string{
+		"machine_connection_lookup_failures",
+		"machine_connection_requests",
 		"cli_login_lookup_failures",
 		"email_login_attempts",
 		"email_login_challenges",

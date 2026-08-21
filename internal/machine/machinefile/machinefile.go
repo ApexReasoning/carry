@@ -1,46 +1,69 @@
 package machinefile
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/tls"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"io"
+	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
+	"time"
+
+	"github.com/ApexReasoning/carry/internal/machine"
+	"github.com/google/uuid"
 )
 
-var ErrAlreadyEnrolled = errors.New("this Machine is already enrolled")
+var (
+	ErrAlreadyEnrolled  = errors.New("this Machine is already connected")
+	ErrUnsafeCredential = errors.New("Machine credential file is not a private regular file")
+)
 
 const (
 	credentialFilename        = "machine.json"
 	revokedCredentialFilename = "machine-revoked.json"
+	pendingFilename           = "machine-connection.json"
+	maximumFileBytes          = 1 << 20
 )
 
 // Credential is the installed Machine identity. Its private key is generated
 // and consumed locally and must never be sent to carry-server.
 type Credential struct {
-	MachineID        string `json:"machine_id"`
-	SpaceID          string `json:"space_id"`
-	ServerURL        string `json:"server_url"`
-	CACertificatePEM string `json:"ca_certificate_pem"`
-	CertificatePEM   string `json:"certificate_pem"`
-	PrivateKeyPEM    string `json:"private_key_pem"`
+	MachineID                string `json:"machine_id"`
+	SpaceID                  string `json:"space_id"`
+	ServerURL                string `json:"server_url"`
+	CACertificatePEM         string `json:"ca_certificate_pem,omitempty"`
+	CertificatePEM           string `json:"certificate_pem"`
+	PrivateKeyPEM            string `json:"private_key_pem"`
+	DisconnectIdempotencyKey string `json:"disconnect_idempotency_key,omitempty"`
 }
 
-// PendingEnrollment is the durable input for an exact enrollment retry when
-// the server outcome is unknown.
-type PendingEnrollment struct {
-	ServerURL        string `json:"server_url"`
-	CACertificatePEM string `json:"ca_certificate_pem"`
-	EnrolledByUserID string `json:"enrolled_by_user_id"`
-	SpaceID          string `json:"space_id"`
-	DisplayName      string `json:"display_name"`
-	IdempotencyKey   string `json:"idempotency_key"`
-	PublicKeyDER     []byte `json:"public_key_der"`
-	PrivateKeyPEM    string `json:"private_key_pem"`
+// PendingConnection retains the exact key and separate ceremony audiences so
+// begin, poll, cancellation, and local installation can resume without minting
+// another Machine identity when a response is lost.
+type PendingConnection struct {
+	ServerURL        string    `json:"server_url"`
+	CACertificatePEM string    `json:"ca_certificate_pem,omitempty"`
+	RequestID        string    `json:"request_id"`
+	IdempotencyKey   string    `json:"idempotency_key"`
+	DisplayName      string    `json:"display_name"`
+	UserCode         string    `json:"user_code"`
+	PollSecret       string    `json:"poll_secret"`
+	PublicKeyDER     []byte    `json:"public_key_der"`
+	PrivateKeyPEM    string    `json:"private_key_pem"`
+	KeyProof         []byte    `json:"key_proof"`
+	Fingerprint      string    `json:"fingerprint"`
+	ExpiresAt        time.Time `json:"expires_at"`
+	IntervalSeconds  int       `json:"interval_seconds"`
 }
 
 // GenerateKey creates a new local Machine key and exports only its public half.
@@ -60,20 +83,58 @@ func GenerateKey() (publicKeyDER []byte, privateKeyPEM []byte, err error) {
 	return publicKeyDER, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: privateKeyDER}), nil
 }
 
+func NewPollSecret(requestID string) (string, error) {
+	if uuid.Validate(requestID) != nil {
+		return "", errors.New("Machine request identity is invalid")
+	}
+	secret := make([]byte, 32)
+	if _, err := rand.Read(secret); err != nil {
+		return "", fmt.Errorf("generate Machine poll secret: %w", err)
+	}
+	return "carry_machine_connect_" + requestID + "." + base64.RawURLEncoding.EncodeToString(secret), nil
+}
+
+func NewUserCode() (string, error) {
+	const alphabet = "BCDFGHJKLMNPQRSTVWXZ"
+	random := make([]byte, 10)
+	if _, err := rand.Read(random); err != nil {
+		return "", fmt.Errorf("generate Machine connection code: %w", err)
+	}
+	for index := range random {
+		random[index] = alphabet[int(random[index])%len(alphabet)]
+	}
+	return string(random[:4]) + "-" + string(random[4:7]) + "-" + string(random[7:]), nil
+}
+
+func SignConnectionProof(privateKeyPEM string, origin, requestID, displayName string, publicKeyDER []byte, code, pollSecret string) ([]byte, error) {
+	block, _ := pem.Decode([]byte(privateKeyPEM))
+	if block == nil {
+		return nil, errors.New("Machine private key is invalid")
+	}
+	parsed, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+	if err != nil {
+		return nil, errors.New("Machine private key is invalid")
+	}
+	privateKey, ok := parsed.(ed25519.PrivateKey)
+	if !ok {
+		return nil, errors.New("Machine private key is not Ed25519")
+	}
+	return ed25519.Sign(privateKey, machine.ConnectionKeyProofMessage(origin, requestID, displayName, publicKeyDER, code, pollSecret)), nil
+}
+
 // Save atomically publishes a mode-0600 Machine credential.
 func Save(directory string, credential Credential) error {
+	if err := validateCredential(credential); err != nil {
+		return err
+	}
 	return saveJSON(directory, credentialFilename, ".machine-*.json", "Machine credential", credential)
 }
 
-// Load reads the installed Machine credential.
 func Load(directory string) (Credential, error) {
-	return loadCredential(filepath.Join(directory, credentialFilename), "Machine credential")
+	return loadCredential(filepath.Join(directory, credentialFilename), directory, "Machine credential")
 }
 
-// LoadForRevocation resumes local cleanup after the server has confirmed
-// revocation. confirmed is true only when the active credential was already
-// durably retired by an earlier invocation.
-func LoadForRevocation(directory string) (credential Credential, confirmed bool, err error) {
+func LoadForDisconnection(directory string) (credential Credential, confirmed bool, err error) {
 	credential, err = Load(directory)
 	if err == nil {
 		return credential, false, nil
@@ -81,65 +142,69 @@ func LoadForRevocation(directory string) (credential Credential, confirmed bool,
 	if !errors.Is(err, os.ErrNotExist) {
 		return Credential{}, false, err
 	}
-	credential, err = loadCredential(
-		filepath.Join(directory, revokedCredentialFilename),
-		"revoked Machine credential",
-	)
+	credential, err = loadCredential(filepath.Join(directory, revokedCredentialFilename), directory, "revoked Machine credential")
 	if err != nil {
 		return Credential{}, false, err
 	}
 	return credential, true, nil
 }
 
-// MarkRevoked durably removes the credential from the active Host path while
-// retaining enough local state to retry cleanup after a crash.
 func MarkRevoked(directory string) error {
-	if err := os.Rename(
-		filepath.Join(directory, credentialFilename),
-		filepath.Join(directory, revokedCredentialFilename),
-	); err != nil {
+	if err := inspectPrivateDirectory(directory); err != nil {
+		return err
+	}
+	if err := os.Rename(filepath.Join(directory, credentialFilename), filepath.Join(directory, revokedCredentialFilename)); err != nil {
 		return fmt.Errorf("retire revoked Machine credential: %w", err)
 	}
 	return syncDirectory(directory)
 }
 
-// RemoveRevoked destroys a credential only after server revocation is known.
 func RemoveRevoked(directory string) error {
-	path := filepath.Join(directory, revokedCredentialFilename)
-	if err := os.Remove(path); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
-		}
-		return fmt.Errorf("remove revoked Machine credential: %w", err)
+	return removeFile(directory, revokedCredentialFilename, "revoked Machine credential")
+}
+
+func SavePending(directory string, pending PendingConnection) error {
+	if err := validatePending(pending); err != nil {
+		return err
 	}
-	return syncDirectory(directory)
+	return saveJSON(directory, pendingFilename, ".machine-connection-*.json", "pending Machine connection", pending)
 }
 
-// SavePending persists the private key and idempotency identity before the
-// request, so a lost enrollment response can be reconciled by an exact retry.
-func SavePending(directory string, pending PendingEnrollment) error {
-	return saveJSON(directory, "machine-enrollment.json", ".machine-enrollment-*.json", "pending Machine enrollment", pending)
-}
-
-func LoadPending(directory string) (PendingEnrollment, error) {
-	var pending PendingEnrollment
-	if err := loadJSON(filepath.Join(directory, "machine-enrollment.json"), "pending Machine enrollment", &pending); err != nil {
-		return PendingEnrollment{}, err
+func LoadPending(directory string) (PendingConnection, error) {
+	var pending PendingConnection
+	if err := loadJSON(filepath.Join(directory, pendingFilename), directory, "pending Machine connection", &pending); err != nil {
+		return PendingConnection{}, err
+	}
+	if err := validatePending(pending); err != nil {
+		return PendingConnection{}, err
 	}
 	return pending, nil
 }
 
 func RemovePending(directory string) error {
-	path := filepath.Join(directory, "machine-enrollment.json")
-	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("remove pending Machine enrollment: %w", err)
+	return removeFile(directory, pendingFilename, "pending Machine connection")
+}
+
+// RemoveLocalOnly erases local Machine material without changing or claiming
+// anything about the server-side Machine authority.
+func RemoveLocalOnly(directory string) error {
+	if err := inspectPrivateDirectory(directory); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	for _, filename := range []string{pendingFilename, credentialFilename, revokedCredentialFilename} {
+		if err := os.Remove(filepath.Join(directory, filename)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("remove local Machine material: %w", err)
+		}
 	}
 	return syncDirectory(directory)
 }
 
-func saveJSON(directory string, filename string, pattern string, description string, value any) error {
-	if err := os.MkdirAll(directory, 0o700); err != nil {
-		return fmt.Errorf("create %s directory: %w", description, err)
+func saveJSON(directory, filename, pattern, description string, value any) error {
+	if err := ensurePrivateDirectory(directory); err != nil {
+		return err
 	}
 	encoded, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {
@@ -172,23 +237,140 @@ func saveJSON(directory string, filename string, pattern string, description str
 	return syncDirectory(directory)
 }
 
-func loadCredential(path string, description string) (Credential, error) {
+func loadCredential(path, directory, description string) (Credential, error) {
 	var credential Credential
-	if err := loadJSON(path, description, &credential); err != nil {
+	if err := loadJSON(path, directory, description, &credential); err != nil {
+		return Credential{}, err
+	}
+	if err := validateCredential(credential); err != nil {
 		return Credential{}, err
 	}
 	return credential, nil
 }
 
-func loadJSON(path string, description string, destination any) error {
-	encoded, err := os.ReadFile(path)
-	if err != nil {
+func loadJSON(path, directory, description string, destination any) error {
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("read %s: %w", description, err)
 	}
-	if err := json.Unmarshal(encoded, destination); err != nil {
+	if err != nil {
+		return fmt.Errorf("inspect %s: %w", description, err)
+	}
+	if err := inspectPrivateDirectory(directory); err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() ||
+		(runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0) || info.Size() > maximumFileBytes {
+		return ErrUnsafeCredential
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("open %s: %w", description, err)
+	}
+	defer file.Close()
+	decoder := json.NewDecoder(io.LimitReader(file, maximumFileBytes+1))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(destination); err != nil {
 		return fmt.Errorf("decode %s: %w", description, err)
 	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return fmt.Errorf("decode %s: expected one JSON value", description)
+	}
 	return nil
+}
+
+func validateCredential(credential Credential) error {
+	if !validServerURL(credential.ServerURL) || uuid.Validate(credential.MachineID) != nil || uuid.Validate(credential.SpaceID) != nil ||
+		strings.TrimSpace(credential.CertificatePEM) == "" || strings.TrimSpace(credential.PrivateKeyPEM) == "" ||
+		(credential.DisconnectIdempotencyKey != "" && uuid.Validate(credential.DisconnectIdempotencyKey) != nil) {
+		return errors.New("Machine credential content is invalid")
+	}
+	pair, err := tls.X509KeyPair([]byte(credential.CertificatePEM), []byte(credential.PrivateKeyPEM))
+	if err != nil || pair.Leaf == nil {
+		return errors.New("Machine credential key and certificate are invalid")
+	}
+	machineID, err := machine.MachineIDFromCertificate(pair.Leaf)
+	if err != nil || machineID != credential.MachineID {
+		return errors.New("Machine credential certificate identity does not match")
+	}
+	if credential.CACertificatePEM != "" {
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM([]byte(credential.CACertificatePEM)) {
+			return errors.New("Machine CA certificate is invalid")
+		}
+	}
+	return nil
+}
+
+func validatePending(pending PendingConnection) error {
+	code, codeOK := machine.NormalizeConnectionCode(pending.UserCode)
+	requestID, secretOK := machine.ParseConnectionPollSecret(pending.PollSecret)
+	if !validServerURL(pending.ServerURL) || uuid.Validate(pending.RequestID) != nil || uuid.Validate(pending.IdempotencyKey) != nil ||
+		requestID != pending.RequestID || !secretOK || !codeOK || code != pending.UserCode ||
+		strings.TrimSpace(pending.DisplayName) == "" || len([]byte(pending.DisplayName)) > machine.DisplayNameMaximumBytes ||
+		len(pending.PublicKeyDER) == 0 || len(pending.KeyProof) != ed25519.SignatureSize ||
+		pending.Fingerprint != machine.PublicKeyFingerprint(pending.PublicKeyDER) || pending.ExpiresAt.IsZero() ||
+		pending.IntervalSeconds < int(machine.ConnectionInitialInterval/time.Second) || pending.IntervalSeconds > int(machine.ConnectionMaximumInterval/time.Second) {
+		return errors.New("pending Machine connection content is invalid")
+	}
+	publicKey, err := x509.ParsePKIXPublicKey(pending.PublicKeyDER)
+	if err != nil {
+		return errors.New("pending Machine public key is invalid")
+	}
+	key, ok := publicKey.(ed25519.PublicKey)
+	if !ok || !ed25519.Verify(key, machine.ConnectionKeyProofMessage(pending.ServerURL, pending.RequestID, pending.DisplayName, pending.PublicKeyDER, pending.UserCode, pending.PollSecret), pending.KeyProof) {
+		return errors.New("pending Machine key proof is invalid")
+	}
+	proof, err := SignConnectionProof(pending.PrivateKeyPEM, pending.ServerURL, pending.RequestID, pending.DisplayName, pending.PublicKeyDER, pending.UserCode, pending.PollSecret)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(proof, pending.KeyProof) {
+		return errors.New("pending Machine private key does not match its approved public key")
+	}
+	return nil
+}
+
+func validServerURL(value string) bool {
+	parsed, err := url.Parse(value)
+	return err == nil && parsed.Scheme == "https" && parsed.Host != "" && parsed.User == nil && parsed.Path == "" && parsed.RawQuery == "" && parsed.Fragment == ""
+}
+
+func ensurePrivateDirectory(directory string) error {
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		return fmt.Errorf("create Machine credential directory: %w", err)
+	}
+	info, err := os.Lstat(directory)
+	if err != nil {
+		return fmt.Errorf("inspect Machine credential directory: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return ErrUnsafeCredential
+	}
+	if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
+		if err := os.Chmod(directory, 0o700); err != nil {
+			return fmt.Errorf("protect Machine credential directory: %w", err)
+		}
+	}
+	return nil
+}
+
+func inspectPrivateDirectory(directory string) error {
+	info, err := os.Lstat(directory)
+	if err != nil {
+		return fmt.Errorf("inspect Machine credential directory: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() || (runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0) {
+		return ErrUnsafeCredential
+	}
+	return nil
+}
+
+func removeFile(directory, filename, description string) error {
+	if err := os.Remove(filepath.Join(directory, filename)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove %s: %w", description, err)
+	}
+	return syncDirectory(directory)
 }
 
 func syncDirectory(directory string) error {

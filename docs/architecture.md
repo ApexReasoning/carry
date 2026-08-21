@@ -95,7 +95,7 @@ PostgreSQL 拥有事务、唯一 winner、lease、fence、幂等和恢复裁决�
 | Owner | 持久事实 | 当前消费者 |
 | --- | --- | --- |
 | Identity | User、邮箱/Google/GitHub proof、短期 proof 事务、显式登录方式变更、Browser Session、Browser-approved CLI credential | User API、Web、CLI |
-| Space | Membership、准确邮箱邀请、邀请 submission outcome、Machine enrollment 权限 | User API、Host enrollment |
+| Space | Membership、准确邮箱邀请、邀请 submission outcome、Machine enrollment 权限 | User API、Browser Machine approval |
 | Work | 目标、负责人、消息、当前理解、阶段结果检查与接受事实 | 成员、执行路径 |
 | Conversation | 成员与 Carry 的私人消息、reply claim、private-side Work consequence | 准确成员、受限 Machine claim |
 | Machine | 独立执行身份、证书、撤销 | Host API |
@@ -139,7 +139,7 @@ Email challenge 以相同 closed purpose 固定目标：reauthenticate 不接收
 
 成员 CLI login 是 Identity-owned 的短期 Browser approval ceremony，不是 OAuth server、Device、Installation 或通用 Approval owner。十五分钟 request 只保存 code verifier、poll cadence、Browser decision、所选默认 Space context 与 single-redeem consequence；人类 code、poll/cancel secret 和最终 credential 使用不同 MAC domain。固定 `/cli-login` 不把 code 或 secret 放入 URL，批准同事务重读 exact Browser Session、User、Space 与 active Membership。PostgreSQL database time 裁决 admission、lookup abuse budget、五秒起始且最多三十秒的 poll cadence、approve/deny/cancel/expiry 顺序、single redeem、replacement 与 response-loss replay。
 
-最终 `carry_cli_` credential 由 credential identity、configured canonical HTTPS origin 与 Identity root 派生，数据库只保存 identity、User、九十天 expiry、revocation 和准确 replay fact。批准 Space 只作为 origin request 与本地 `cli.json` 的默认 context；credential 不缓存 Membership、role 或 execution authority。所有 User Space 请求继续重读 current Membership。Browser Settings 与 current-credential revoke 都只撤销一个准确 credential；已撤销或过期 credential 不能由 poll replay resurrect。现有 Machine enrollment/revocation 的 User side 在 Node 11 继续接受该 CLI credential，但 approval 本身不签发 Machine certificate。Machine mTLS 与 Browser Session 都不能替代 CLI credential。旧 User token、operator bootstrap、token paste、`user_tokens` 与 `member.json` 已删除且不迁移。
+最终 `carry_cli_` credential 由 credential identity、configured canonical HTTPS origin 与 Identity root 派生，数据库只保存 identity、User、九十天 expiry、revocation 和准确 replay fact。批准 Space 只作为 origin request 与本地 `cli.json` 的默认 context；credential 不缓存 Membership、role 或 execution authority。所有 User Space 请求继续重读 current Membership。Browser Settings 与 current-credential revoke 都只撤销一个准确 credential；已撤销或过期 credential 不能由 poll replay resurrect。CLI credential 不参与 Machine connection、approval 或 revocation；Machine mTLS 与 Browser Session 也不能替代 CLI credential。旧 User token、operator bootstrap、token paste、`user_tokens` 与 `member.json` 已删除且不迁移。
 
 ### 5.2 Space invitation 与 Membership admission
 
@@ -163,11 +163,15 @@ Removal 后 Browser Session 与过渡 CLI credential 仍只代表同一 User，M
 
 ### 5.4 Machine
 
-`carry host enroll` 由已登录成员发起。服务端在同一事务中验证 Membership 与 enrollment 权限，并签发独立 Machine certificate。
+`carry host connect` 在首次网络 I/O 前生成并私有持久化 fresh Ed25519 key、十位 human code、独立 high-entropy poll/cancel secret 与 exact request identity。公开 begin 只接受对 version、准确 HTTPS origin、request、display name、SPKI、code 与 poll secret 的 key proof；human code 不能 poll，poll secret 不能批准，Browser Session 和 CLI credential 都不进入 Machine credential audience。
 
-此后 `carry host start` 只使用 Machine mTLS。Machine 被撤销后不能 claim、renew、commit 或 finish。`carry host revoke` 只有在服务端明确确认撤销后，才把本地 credential 原子移出 active Host 路径并删除；响应丢失时保留 credential 供准确重试。已确认撤销后的本地 cleanup 可以在下一次 revoke/enroll 继续，新的 enrollment 不复用旧 Machine identity。
+已登录 Browser 通过固定 `/machine-connect` 重新核对准确 origin、display name 与完整 `SHA256:` SPKI fingerprint，并选择当前 `can_enroll_machines` Membership 对应的准确 Space。PostgreSQL 在 approval transaction 内重读 Browser Session、Membership 和 enrollment permission；Machine 只在 approval 后的首次有效 poll 中创建。数据库时间拥有十五分钟 ceremony、五秒起始/最多三十秒的 poll cadence、cancel/approve race、single winner 与十五分钟 byte-identical certificate replay。Machine private key 永不离开本地。
 
-Machine 只保存 durable identity、Space、显示名、证书 serial、enrollment 与 revocation。服务端不保存 Runtime report、binary path、版本、availability 或 Machine status projection。
+此后 `carry host start` 只使用 Machine mTLS。Machine 被撤销后不能 claim、renew、commit 或 finish。Web inventory 只显示 display name、Space、enrollment/revocation actor/time 与 authoritative Active/Revoked；完整 fingerprint 只在 connection approval 与准确 remote-revoke confirmation 中显示，Active 不表示 online。历史 Node 12 前 revoked row 的 actor 明确为 `Not recorded`，不能猜测回填。
+
+`carry host disconnect` 只用当前 Machine mTLS self-revoke。只有服务端明确确认后，客户端才通过 active credential → confirmed tombstone → deletion 完成 crash-safe cleanup；不可达或 outcome Unknown 时保留 credential 供同一 idempotency identity 准确重试。显式 `--local-only` 只删除本地材料并说明远端可能仍为 Active。Web remote revoke 只证明未来 Carry server authority 已撤销，不声称进程停止、文件删除或复制数据擦除。重新 connect 总是新 key、request、Machine ID 与 certificate，不链接、替换或复活旧 identity。
+
+Machine 只保存 durable identity、Space、显示名、public key、证书 serial、enrollment 与 revocation。服务端不保存 Runtime report、binary path、版本、heartbeat、availability、last-seen、capacity 或 Machine status projection。
 
 Space-enrolled Machine 是该 Space 的受信 Carry 执行基础设施。除了共享 Work，它可以在 exact Conversation reply claim、current fence 和 unexpired database-time lease 下读取生成一条私人回复所需的有界上下文。这个 authority 不提供通用 Conversation list/read，不跨 Space，不在成员 Membership 失效后继续，也不能把私人文本写入日志、Work 或 provider Session。要求连 Space 管理者控制的 Host 都无法读取私人内容，需要成员专属执行信任或端到端加密，是另一条尚未进入的旅程。
 
@@ -381,7 +385,7 @@ User API 只表达成员旅程：
 - 以 Browser Session 管理准确 Space 的成员邀请，查看当前 pending invitations，并显式 resend/revoke；
 - 按当前 User 的准确 Email method 查询邀请，在 recent Email proof 后显式 accept；
 - 分页查看 active Space members，并在需要时显式选择一个 active successor，把目标负责的全部 Open Work 与 Membership removal 原子提交；
-- enrollment/revocation Machine。
+- 建立、poll/cancel Machine connection，Browser lookup/approve/deny，并分页查看或 remote-revoke 当前 Space 的 Machine；Host self-revoke 仍只接受 Machine mTLS。
 
 所有 credential-bearing User API 与 Host API 响应统一 `Cache-Control: no-store`。Work list 使用 Work UUID 作为 exclusive cursor，每页最多 50 条 summary；Work detail 的消息页使用 Message UUID cursor，同时最多 50 条且消息文本合计最多 256 KiB。cursor 必须属于准确 Space/Work。User API 返回 Identity 当前 display name 作为读取时 projection，不把名字复制成 Work 持久事实。
 

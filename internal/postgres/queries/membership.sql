@@ -33,15 +33,6 @@ WHERE m.space_id = sqlc.arg(space_id)
 ORDER BY m.created_at, m.user_id
 LIMIT 51;
 
--- name: GetMachineEnrollmentPermission :one
-SELECT can_enroll_machines
-FROM space_memberships
-WHERE
-    space_id = sqlc.arg(space_id)
-    AND user_id = sqlc.arg(user_id)
-    AND revoked_at IS NULL
-FOR SHARE;
-
 -- name: LockSpaceForMemberRemoval :one
 SELECT space_id
 FROM spaces

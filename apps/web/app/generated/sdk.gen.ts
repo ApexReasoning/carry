@@ -21,12 +21,21 @@ import type {
   ApproveCliLoginData,
   ApproveCliLoginErrors,
   ApproveCliLoginResponses,
+  ApproveMachineConnectionData,
+  ApproveMachineConnectionErrors,
+  ApproveMachineConnectionResponses,
   BeginCliLoginData,
   BeginCliLoginErrors,
   BeginCliLoginResponses,
+  BeginMachineConnectionData,
+  BeginMachineConnectionErrors,
+  BeginMachineConnectionResponses,
   CancelCliLoginData,
   CancelCliLoginErrors,
   CancelCliLoginResponses,
+  CancelMachineConnectionData,
+  CancelMachineConnectionErrors,
+  CancelMachineConnectionResponses,
   CompleteGitHubLoginData,
   CompleteGitHubLoginErrors,
   CompleteGoogleLoginData,
@@ -40,9 +49,9 @@ import type {
   DenyCliLoginData,
   DenyCliLoginErrors,
   DenyCliLoginResponses,
-  EnrollMachineData,
-  EnrollMachineErrors,
-  EnrollMachineResponses,
+  DenyMachineConnectionData,
+  DenyMachineConnectionErrors,
+  DenyMachineConnectionResponses,
   IssueSpaceInvitationData,
   IssueSpaceInvitationErrors,
   IssueSpaceInvitationResponses,
@@ -55,6 +64,9 @@ import type {
   ListInvitationInboxData,
   ListInvitationInboxErrors,
   ListInvitationInboxResponses,
+  ListMachinesData,
+  ListMachinesErrors,
+  ListMachinesResponses,
   ListManagedInvitationsData,
   ListManagedInvitationsErrors,
   ListManagedInvitationsResponses,
@@ -76,9 +88,15 @@ import type {
   LookupCliLoginData,
   LookupCliLoginErrors,
   LookupCliLoginResponses,
+  LookupMachineConnectionData,
+  LookupMachineConnectionErrors,
+  LookupMachineConnectionResponses,
   PollCliLoginData,
   PollCliLoginErrors,
   PollCliLoginResponses,
+  PollMachineConnectionData,
+  PollMachineConnectionErrors,
+  PollMachineConnectionResponses,
   RemoveSpaceMemberData,
   RemoveSpaceMemberErrors,
   RemoveSpaceMemberResponses,
@@ -145,16 +163,20 @@ import {
   zAcceptWorkReviewResponse,
   zAppendWorkMessageResponse,
   zApproveCliLoginResponse,
+  zApproveMachineConnectionResponse,
   zBeginCliLoginResponse,
+  zBeginMachineConnectionResponse,
   zCancelCliLoginResponse,
+  zCancelMachineConnectionResponse,
   zCreateFirstSpaceResponse,
   zCreateWorkResponse,
   zDenyCliLoginResponse,
-  zEnrollMachineResponse,
+  zDenyMachineConnectionResponse,
   zIssueSpaceInvitationResponse,
   zListCliCredentialsResponse,
   zListConversationMessagesResponse,
   zListInvitationInboxResponse,
+  zListMachinesResponse,
   zListManagedInvitationsResponse,
   zListSpaceMembersResponse,
   zListWorksResponse,
@@ -162,7 +184,9 @@ import {
   zLoadIdentityMethodsResponse,
   zLoadWorkResponse,
   zLookupCliLoginResponse,
+  zLookupMachineConnectionResponse,
   zPollCliLoginResponse,
+  zPollMachineConnectionResponse,
   zRemoveSpaceMemberResponse,
   zRequestEmailCodeResponse,
   zRequestEmailLinkCodeResponse,
@@ -807,30 +831,170 @@ export const createFirstSpace = <ThrowOnError extends boolean = false>(
     },
   });
 
-export const enrollMachine = <ThrowOnError extends boolean = false>(
-  options: Options<EnrollMachineData, ThrowOnError>,
-): RequestResult<EnrollMachineResponses, EnrollMachineErrors, ThrowOnError> =>
+export const beginMachineConnection = <ThrowOnError extends boolean = false>(
+  options: Options<BeginMachineConnectionData, ThrowOnError>,
+): RequestResult<
+  BeginMachineConnectionResponses,
+  BeginMachineConnectionErrors,
+  ThrowOnError
+> =>
   (options.client ?? client).post<
-    EnrollMachineResponses,
-    EnrollMachineErrors,
+    BeginMachineConnectionResponses,
+    BeginMachineConnectionErrors,
     ThrowOnError
   >({
     responseValidator: async (data) =>
-      await zEnrollMachineResponse.parseAsync(data),
+      await zBeginMachineConnectionResponse.parseAsync(data),
+    url: "/v1/machine-connections",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+
+export const pollMachineConnection = <ThrowOnError extends boolean = false>(
+  options: Options<PollMachineConnectionData, ThrowOnError>,
+): RequestResult<
+  PollMachineConnectionResponses,
+  PollMachineConnectionErrors,
+  ThrowOnError
+> =>
+  (options.client ?? client).post<
+    PollMachineConnectionResponses,
+    PollMachineConnectionErrors,
+    ThrowOnError
+  >({
+    responseValidator: async (data) =>
+      await zPollMachineConnectionResponse.parseAsync(data),
+    url: "/v1/machine-connections/status",
+    ...options,
+  });
+
+export const cancelMachineConnection = <ThrowOnError extends boolean = false>(
+  options: Options<CancelMachineConnectionData, ThrowOnError>,
+): RequestResult<
+  CancelMachineConnectionResponses,
+  CancelMachineConnectionErrors,
+  ThrowOnError
+> =>
+  (options.client ?? client).post<
+    CancelMachineConnectionResponses,
+    CancelMachineConnectionErrors,
+    ThrowOnError
+  >({
+    responseValidator: async (data) =>
+      await zCancelMachineConnectionResponse.parseAsync(data),
+    url: "/v1/machine-connections/cancel",
+    ...options,
+  });
+
+export const lookupMachineConnection = <ThrowOnError extends boolean = false>(
+  options: Options<LookupMachineConnectionData, ThrowOnError>,
+): RequestResult<
+  LookupMachineConnectionResponses,
+  LookupMachineConnectionErrors,
+  ThrowOnError
+> =>
+  (options.client ?? client).post<
+    LookupMachineConnectionResponses,
+    LookupMachineConnectionErrors,
+    ThrowOnError
+  >({
+    responseValidator: async (data) =>
+      await zLookupMachineConnectionResponse.parseAsync(data),
     security: [
-      { scheme: "bearer", type: "http" },
       {
         in: "cookie",
         name: "__Host-carry_session",
         type: "apiKey",
       },
     ],
-    url: "/v1/machines/enroll",
+    url: "/v1/machine-connections/lookup",
     ...options,
     headers: {
       "Content-Type": "application/json",
       ...options.headers,
     },
+  });
+
+export const approveMachineConnection = <ThrowOnError extends boolean = false>(
+  options: Options<ApproveMachineConnectionData, ThrowOnError>,
+): RequestResult<
+  ApproveMachineConnectionResponses,
+  ApproveMachineConnectionErrors,
+  ThrowOnError
+> =>
+  (options.client ?? client).post<
+    ApproveMachineConnectionResponses,
+    ApproveMachineConnectionErrors,
+    ThrowOnError
+  >({
+    responseValidator: async (data) =>
+      await zApproveMachineConnectionResponse.parseAsync(data),
+    security: [
+      {
+        in: "cookie",
+        name: "__Host-carry_session",
+        type: "apiKey",
+      },
+    ],
+    url: "/v1/machine-connections/{requestID}/approve",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+
+export const denyMachineConnection = <ThrowOnError extends boolean = false>(
+  options: Options<DenyMachineConnectionData, ThrowOnError>,
+): RequestResult<
+  DenyMachineConnectionResponses,
+  DenyMachineConnectionErrors,
+  ThrowOnError
+> =>
+  (options.client ?? client).post<
+    DenyMachineConnectionResponses,
+    DenyMachineConnectionErrors,
+    ThrowOnError
+  >({
+    responseValidator: async (data) =>
+      await zDenyMachineConnectionResponse.parseAsync(data),
+    security: [
+      {
+        in: "cookie",
+        name: "__Host-carry_session",
+        type: "apiKey",
+      },
+    ],
+    url: "/v1/machine-connections/{requestID}/deny",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+
+export const listMachines = <ThrowOnError extends boolean = false>(
+  options: Options<ListMachinesData, ThrowOnError>,
+): RequestResult<ListMachinesResponses, ListMachinesErrors, ThrowOnError> =>
+  (options.client ?? client).get<
+    ListMachinesResponses,
+    ListMachinesErrors,
+    ThrowOnError
+  >({
+    responseValidator: async (data) =>
+      await zListMachinesResponse.parseAsync(data),
+    security: [
+      {
+        in: "cookie",
+        name: "__Host-carry_session",
+        type: "apiKey",
+      },
+    ],
+    url: "/v1/spaces/{spaceID}/machines",
+    ...options,
   });
 
 export const revokeMachine = <ThrowOnError extends boolean = false>(
@@ -844,19 +1008,14 @@ export const revokeMachine = <ThrowOnError extends boolean = false>(
     responseValidator: async (data) =>
       await zRevokeMachineResponse.parseAsync(data),
     security: [
-      { scheme: "bearer", type: "http" },
       {
         in: "cookie",
         name: "__Host-carry_session",
         type: "apiKey",
       },
     ],
-    url: "/v1/machines/revoke",
+    url: "/v1/spaces/{spaceID}/machines/{machineID}/revoke",
     ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...options.headers,
-    },
   });
 
 export const listConversationMessages = <ThrowOnError extends boolean = false>(

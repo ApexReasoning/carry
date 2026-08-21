@@ -7,6 +7,8 @@ import { FirstSpace } from "./features/user-session/first-space";
 import { IdentityMethodSettings } from "./features/user-session/identity-methods";
 import { InvitationInboxView } from "./features/user-session/invitation-inbox";
 import { MemberSettings } from "./features/user-session/member-settings";
+import { MachineConnectPage } from "./features/user-session/machine-connect";
+import { MachineSettings } from "./features/user-session/machine-settings";
 import { useUserSession } from "./features/user-session/use-user-session";
 import { UserEntry } from "./features/user-session/user-entry";
 import { CreateWorkForm } from "./features/works/create-work-form";
@@ -16,7 +18,7 @@ import { WorkList } from "./features/works/work-list";
 
 export function App() {
   const [settingsPanel, setSettingsPanel] = useState<
-    "identity" | "cli" | "members" | null
+    "identity" | "cli" | "machines" | "members" | null
   >(hasIdentityChangeStatus() ? "identity" : null);
   const session = useUserSession();
   const board = useWorkBoard(session.user);
@@ -119,6 +121,9 @@ export function App() {
   if (window.location.pathname === "/cli-login") {
     return <CliLoginPage user={session.user} />;
   }
+  if (window.location.pathname === "/machine-connect") {
+    return <MachineConnectPage user={session.user} />;
+  }
 
   const currentSpace = session.user.spaces.find(
     (space) => space.space_id === board.spaceID,
@@ -200,13 +205,22 @@ export function App() {
                 CLI access
               </button>
               {currentSpace ? (
-                <button
-                  className="ghost-button"
-                  type="button"
-                  onClick={() => setSettingsPanel("members")}
-                >
-                  Members
-                </button>
+                <>
+                  <button
+                    className="ghost-button"
+                    type="button"
+                    onClick={() => setSettingsPanel("machines")}
+                  >
+                    Machines
+                  </button>
+                  <button
+                    className="ghost-button"
+                    type="button"
+                    onClick={() => setSettingsPanel("members")}
+                  >
+                    Members
+                  </button>
+                </>
               ) : null}
             </nav>
             {settingsPanel === "identity" ? (
@@ -214,6 +228,15 @@ export function App() {
             ) : null}
             {settingsPanel === "cli" ? (
               <CliCredentialSettings onClose={() => setSettingsPanel(null)} />
+            ) : null}
+            {settingsPanel === "machines" && currentSpace ? (
+              <MachineSettings
+                key={currentSpace.space_id}
+                spaceID={currentSpace.space_id}
+                spaceName={currentSpace.name}
+                canEnroll={currentSpace.can_enroll_machines}
+                onClose={() => setSettingsPanel(null)}
+              />
             ) : null}
             {settingsPanel === "members" && currentSpace ? (
               <MemberSettings

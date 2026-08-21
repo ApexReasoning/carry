@@ -59,9 +59,8 @@ func TestInterruptedHostWorkContinuesWithNewAttempt(t *testing.T) {
 	clientEnvironment := []string{"CARRY_CONFIG_DIR=" + configDirectory}
 	loginCarryCLI(t, root, carry, databaseURL, serverURL, filepath.Join(pkiDirectory, "ca.pem"),
 		configDirectory, member.UserID, member.SpaceID, "recovery-cli")
-	run(t, root, clientEnvironment, carry, "host", "enroll",
-		"--space", member.SpaceID, "--name", "recovery-host",
-	)
+	connectCarryMachine(t, root, carry, databaseURL, serverURL, filepath.Join(pkiDirectory, "ca.pem"),
+		configDirectory, member.UserID, member.SpaceID, "recovery-host")
 	created := run(t, root, clientEnvironment, carry, "work", "create",
 		"--goal", "Recover this Work after its Host disappears",
 	)
@@ -139,9 +138,8 @@ func TestInterruptedHostWorkContinuesWithNewAttempt(t *testing.T) {
 	replacementClientEnvironment := []string{"CARRY_CONFIG_DIR=" + replacementConfigDirectory}
 	loginCarryCLI(t, root, carry, databaseURL, serverURL, filepath.Join(pkiDirectory, "ca.pem"),
 		replacementConfigDirectory, member.UserID, member.SpaceID, "replacement-recovery-cli")
-	run(t, root, replacementClientEnvironment, carry, "host", "enroll",
-		"--space", member.SpaceID, "--name", "replacement-recovery-host",
-	)
+	connectCarryMachine(t, root, carry, databaseURL, serverURL, filepath.Join(pkiDirectory, "ca.pem"),
+		replacementConfigDirectory, member.UserID, member.SpaceID, "replacement-recovery-host")
 	replacementHostEnvironment := append(append([]string{}, replacementClientEnvironment...), agentEnvironment...)
 	secondContext, cancelSecond := context.WithCancel(context.Background())
 	secondHost := exec.CommandContext(secondContext, carry, "host", "start")

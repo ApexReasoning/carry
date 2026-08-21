@@ -95,20 +95,6 @@ func TestWorkMutationReportsUnknownAfterResponsesRemainLost(t *testing.T) {
 	}
 }
 
-func TestMachineEnrollmentDoesNotHideResponseLoss(t *testing.T) {
-	t.Parallel()
-	attempts := 0
-	origin, _ := url.Parse("https://carry.example")
-	client := Client{origin: origin, credential: "member-secret", client: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
-		attempts++
-		return nil, errors.New("response lost")
-	})}}
-	_, err := client.EnrollMachine(context.Background(), "22222222-2222-4222-8222-222222222222", "Desk Host", "stable-enroll-key", []byte("public-key"))
-	if err == nil || attempts != 1 {
-		t.Fatalf("enrollment error = %v, attempts = %d", err, attempts)
-	}
-}
-
 func jsonResponse(request *http.Request, body string) *http.Response {
 	return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(bytes.NewBufferString(body)), Request: request}
 }

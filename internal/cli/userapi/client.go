@@ -6,7 +6,6 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -32,12 +31,6 @@ type Member struct {
 	UserID      string
 	DisplayName string
 	Spaces      []space.Membership
-}
-
-type MachineEnrollment struct {
-	MachineID      string `json:"machine_id"`
-	SpaceID        string `json:"space_id"`
-	CertificatePEM string `json:"certificate_pem"`
 }
 
 type Work struct {
@@ -171,29 +164,6 @@ func (client *Client) LoadMember(ctx context.Context) (Member, error) {
 		})
 	}
 	return member, nil
-}
-
-func (client *Client) EnrollMachine(
-	ctx context.Context,
-	spaceID string,
-	displayName string,
-	idempotencyKey string,
-	publicKeyDER []byte,
-) (MachineEnrollment, error) {
-	var enrollment MachineEnrollment
-	err := client.send(ctx, http.MethodPost, "/v1/machines/enroll", idempotencyKey, struct {
-		SpaceID     string `json:"space_id"`
-		DisplayName string `json:"display_name"`
-		PublicKey   string `json:"public_key"`
-	}{SpaceID: spaceID, DisplayName: displayName, PublicKey: base64.StdEncoding.EncodeToString(publicKeyDER)}, &enrollment, false)
-	return enrollment, err
-}
-
-func (client *Client) RevokeMachine(ctx context.Context, spaceID string, machineID string) error {
-	return client.send(ctx, http.MethodPost, "/v1/machines/revoke", "", struct {
-		SpaceID   string `json:"space_id"`
-		MachineID string `json:"machine_id"`
-	}{SpaceID: spaceID, MachineID: machineID}, nil, false)
 }
 
 func (client *Client) CreateWork(ctx context.Context, spaceID string, goal string, idempotencyKey string) (Work, error) {

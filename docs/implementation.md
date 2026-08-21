@@ -289,7 +289,7 @@ member removal、permission editing、Role、bulk/domain invite、bearer invitat
 - final credential 绑定准确 User/configured canonical server、九十天 database-time expiry 且没有 refresh/自动续期；Space context 可检查并保存为本地默认，但不成为 scope，也不因 CLI login 自动扩大 Membership；
 - `carry work create/list/show/message` 通过 Browser-approved credential 完成真实 journey，所有 Space/Work authority 仍由服务端当前 Membership 裁决；
 - Browser revoke、准确 replacement 与 `carry logout` confirmed self-revoke 后旧 CLI credential 立即失败；响应丢失时保留 private `cli.json` 供准确重试，unsafe/symlink/permissive file fail closed；
-- CLI credential 与 Machine certificate 永不混用，旧 member bearer、`member.json`、operator bootstrap、`user_tokens` 与 `--token` 路径被删除；既有 `carry host enroll/revoke` 只继续消费新的 User credential，Browser approval 本身不 enroll Machine。
+- CLI credential 与 Machine certificate 永不混用，旧 member bearer、`member.json`、operator bootstrap、`user_tokens` 与 `--token` 路径被删除；Node 11 不把 Browser-approved User CLI ceremony 当作 Machine authority。
 
 ### 明确不做
 
@@ -305,12 +305,14 @@ Node 进入时优先重新走查 Multica 当前 Add a computer、browser sign-in
 
 ### 关闭证据
 
-- Browser approval 准确绑定 public key、Space、display name 与 approving member；
-- approval secret、member/CLI credential 与 durable Machine certificate 分离；
-- list 只展示 display name、Space、enrollment/revocation actor/time 与 authoritative Active/Revoked；
-- remote revoke 只承诺服务端 certificate authority 已撤销，不声称远端进程停止或文件删除；
-- confirmed revoke 后 cleanup 可恢复；service unreachable 时 local-only erase 明确不声称 remote revoke；
-- response loss、stale credential rejection 和 fresh re-enrollment 有直接证据，新连接不复活旧 Machine identity。
+- `carry host connect` 在首次网络 I/O 前私有持久化 fresh Ed25519 key、request identity、十位 unambiguous code 与独立 poll/cancel secret；key proof versioned 绑定准确 origin、request、display name、SPKI、code 与 poll proof；
+- 固定 `/machine-connect` 不携带 code；Browser approval 完整显示准确 origin、display name、`SHA256:` fingerprint 与 code，只列出当前可 enrollment 的准确 Space，并在 transaction 内重读 Browser Session、Membership 与 `can_enroll_machines`；
+- approval 前不创建 Machine；PostgreSQL database time 拥有十五分钟 expiry、首次五秒 poll、`slow_down` 至三十秒、cancel/decision race、single certificate winner 与十五分钟 byte-identical retrieval replay；
+- human code、poll/cancel secret、Browser Session、User CLI credential 与 durable Machine certificate 的 audience 分离，private key 不离开本地；旧 `/v1/machines/enroll|revoke` 与 `carry host enroll|revoke` 被删除；
+- Web inventory 只展示 display name、Space、enrollment/revocation actor/time 与 authoritative Active/Revoked；完整 fingerprint 只在 connection approval 与准确 remote-revoke confirmation 中显示，历史 revoked actor 显示 `Not recorded`，不引入 heartbeat、online/offline、last-seen、Runtime/provider/version、IP/OS 或 capacity；
+- Browser remote revoke 与 Machine mTLS self-revoke 都由 PostgreSQL 单 winner 裁决；revoked Machine 后续 authority fail closed，但产品只承诺服务端 authority 撤销，不声称进程停止、文件删除或复制数据擦除；
+- `carry host disconnect` 通过 active credential → confirmed tombstone → deletion crash-safe cleanup；service unreachable 或 outcome Unknown 保留 credential 和同一 idempotency identity，显式 `--local-only` 只删本地材料并承认远端可能仍为 Active；
+- pending begin/redeem response loss 可用 exact local proof 恢复；cleanup 后 fresh connect 生成新 key、request、Machine ID 与 certificate，不链接、替换或复活旧 identity；pre-Node12 Machine row 与现有 `machine.json` mTLS identity 继续有效直至权威 revoke/certificate validity 否定。
 
 ## 15. Node 13：Private reply failure
 

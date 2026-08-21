@@ -51,7 +51,7 @@ func healthTestAPI(t *testing.T, readiness Readiness) http.Handler {
 	authority := testAuthority(t)
 	member := testUserRoutes(t, authority)
 	runStore := &recordingMachineRuns{}
-	machine, err := NewMachineRoutes(runStore, unavailableMachineConversations{})
+	machine, err := NewMachineRoutes(runStore, unavailableMachineConversations{}, unavailableMachineConnections{})
 	if err != nil {
 		t.Fatalf("compose Machine routes: %v", err)
 	}

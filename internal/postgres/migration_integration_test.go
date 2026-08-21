@@ -3,10 +3,14 @@
 package postgres
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/ApexReasoning/carry/internal/conversation"
+	"github.com/ApexReasoning/carry/internal/machine"
 	"github.com/ApexReasoning/carry/internal/work"
 	"github.com/google/uuid"
 )
@@ -158,6 +162,131 @@ func TestConversationReplySchemaRejectsInvalidSourceAndReplyShapes(t *testing.T)
 		values ($1, $2)
 	`, carryMessageID, conversationID); err == nil {
 		t.Fatal("private reply claim accepted a Carry message as its source")
+	}
+}
+
+func TestMigratePreservesPreNode12MachinesAndMarksHistoricalRevokerUnknown(t *testing.T) {
+	ctx := context.Background()
+	pool := openMigratedTestPool(t, ctx)
+	if _, err := pool.Exec(ctx, `drop schema public cascade; create schema public`); err != nil {
+		t.Fatalf("reset schema for Machine upgrade: %v", err)
+	}
+	connection, err := pool.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := connection.Exec(ctx, `
+		create table carry_schema_migrations (
+			version text primary key,
+			applied_at timestamptz not null default transaction_timestamp()
+		)
+	`); err != nil {
+		connection.Release()
+		t.Fatal(err)
+	}
+	for _, filename := range []string{
+		"0001_node0_foundation.sql", "0002_first_durable_work.sql", "0003_work_open_lifecycle_only.sql",
+		"0004_native_execution_authority.sql", "0005_simplify_execution.sql", "0006_explicit_run_retry.sql",
+		"0007_private_conversation.sql", "0008_work_result_check.sql", "0009_email_identity_first_space.sql",
+		"0010_external_identity_login.sql", "0011_identity_method_management.sql", "0012_member_admission.sql",
+		"0013_member_removal.sql", "0014_browser_approved_cli.sql",
+	} {
+		migration, readErr := migrationFiles.ReadFile("migrations/" + filename)
+		if readErr != nil {
+			connection.Release()
+			t.Fatalf("read migration %s: %v", filename, readErr)
+		}
+		if applyErr := applyMigration(ctx, connection, filename, string(migration)); applyErr != nil {
+			connection.Release()
+			t.Fatalf("apply migration %s: %v", filename, applyErr)
+		}
+	}
+	connection.Release()
+
+	store := NewStore(pool)
+	member, err := createMemberForTest(ctx, store, testMemberCommand{DisplayName: "Upgrade Owner", SpaceName: "Upgrade Space"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	activeID, revokedID := uuid.NewString(), uuid.NewString()
+	enrolledAt := time.Date(2026, time.August, 1, 2, 3, 4, 0, time.UTC)
+	revokedAt := enrolledAt.Add(48 * time.Hour)
+	activeKey, revokedKey := []byte("pre-node12-active-spki"), []byte("pre-node12-revoked-spki")
+	if _, err := pool.Exec(ctx, `
+		insert into machines (
+			machine_id, space_id, display_name, public_key_der, certificate_pem,
+			certificate_serial, enrolled_by_user_id, enrollment_idempotency_key, enrolled_at, revoked_at
+		) values
+			($1,$2,'Old Active',$3,'old-active-certificate','1001',$4,'old-active-enrollment',$5,null),
+			($6,$2,'Old Revoked',$7,'old-revoked-certificate','1002',$4,'old-revoked-enrollment',$5,$8)
+	`, activeID, member.SpaceID, activeKey, member.UserID, enrolledAt, revokedID, revokedKey, revokedAt); err != nil {
+		t.Fatal(err)
+	}
+	if err := Migrate(ctx, pool); err != nil {
+		t.Fatalf("apply Node 12 Machine migration: %v", err)
+	}
+
+	var gotActiveKey, gotRevokedKey, activeCertificate, revokedCertificate []byte
+	var activeSpace, activeName, activeSerial, activeEnroller string
+	var revokedSpace, revokedName, revokedSerial, revokedEnroller string
+	var activeEnrolledAt, revokedEnrolledAt, gotRevokedAt time.Time
+	var activeRevokedAt *time.Time
+	var historicalActor *string
+	if err := pool.QueryRow(ctx, `
+		select space_id, display_name, public_key_der, certificate_pem, certificate_serial,
+			enrolled_by_user_id, enrolled_at, revoked_at
+		from machines where machine_id=$1
+	`, activeID).Scan(&activeSpace, &activeName, &gotActiveKey, &activeCertificate, &activeSerial, &activeEnroller, &activeEnrolledAt, &activeRevokedAt); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `
+		select space_id, display_name, public_key_der, certificate_pem, certificate_serial,
+			enrolled_by_user_id, enrolled_at, revoked_at, revocation_actor_kind
+		from machines where machine_id=$1
+	`, revokedID).Scan(&revokedSpace, &revokedName, &gotRevokedKey, &revokedCertificate, &revokedSerial, &revokedEnroller, &revokedEnrolledAt, &gotRevokedAt, &historicalActor); err != nil {
+		t.Fatal(err)
+	}
+	if activeSpace != member.SpaceID || activeName != "Old Active" || activeSerial != "1001" || activeEnroller != member.UserID ||
+		revokedSpace != member.SpaceID || revokedName != "Old Revoked" || revokedSerial != "1002" || revokedEnroller != member.UserID ||
+		!bytes.Equal(gotActiveKey, activeKey) || !bytes.Equal(gotRevokedKey, revokedKey) ||
+		string(activeCertificate) != "old-active-certificate" || string(revokedCertificate) != "old-revoked-certificate" ||
+		!activeEnrolledAt.Equal(enrolledAt) || !revokedEnrolledAt.Equal(enrolledAt) || activeRevokedAt != nil ||
+		!gotRevokedAt.Equal(revokedAt) || historicalActor == nil || *historicalActor != "not_recorded" {
+		t.Fatalf("upgraded Machine facts changed: active=%s/%s/%q/%q/%s/%s/%s/%v revoked=%s/%s/%q/%q/%s/%s/%s/%s/%v",
+			activeID, activeSpace, gotActiveKey, activeCertificate, activeSerial, activeEnroller, activeEnrolledAt, activeRevokedAt,
+			revokedID, revokedSpace, gotRevokedKey, revokedCertificate, revokedSerial, revokedEnroller, revokedEnrolledAt, gotRevokedAt, historicalActor)
+	}
+	var oldColumnExists bool
+	if err := pool.QueryRow(ctx, `select exists(select 1 from information_schema.columns where table_schema='public' and table_name='machines' and column_name='enrollment_idempotency_key')`).Scan(&oldColumnExists); err != nil {
+		t.Fatal(err)
+	}
+	if oldColumnExists {
+		t.Fatal("obsolete enrollment idempotency column survived Node 12 migration")
+	}
+
+	sessionID := uuid.NewString()
+	if _, err := pool.Exec(ctx, `insert into browser_sessions (session_id,user_id,identity_proof_method,expires_at) values ($1,$2,'email',transaction_timestamp()+interval '1 hour')`, sessionID, member.UserID); err != nil {
+		t.Fatal(err)
+	}
+	connections := testMachineConnections(t, store)
+	page, err := connections.List(ctx, sessionID, member.SpaceID, "")
+	if err != nil || len(page.Machines) != 2 {
+		t.Fatalf("upgraded Machine inventory = %#v, %v", page, err)
+	}
+	var historicalFound bool
+	for _, record := range page.Machines {
+		if record.MachineID == revokedID {
+			historicalFound = record.State == "Revoked" && record.RevocationActor == "not_recorded"
+		}
+	}
+	if !historicalFound {
+		t.Fatalf("historical revoked Machine was not projected as Not recorded: %#v", page.Machines)
+	}
+	if _, err := connections.RevokeFromHost(ctx, activeID, "1001", uuid.NewString()); err != nil {
+		t.Fatalf("preserved active Machine could not use exact certificate identity: %v", err)
+	}
+	if _, err := connections.Poll(ctx, "not-a-poll-secret"); !errors.Is(err, machine.ErrMachineUnavailable) {
+		t.Fatalf("invalid poll error = %v", err)
 	}
 }
 

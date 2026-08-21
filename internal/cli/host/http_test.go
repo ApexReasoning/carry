@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"syscall"
 	"testing"
@@ -18,6 +19,91 @@ import (
 	hostdomain "github.com/ApexReasoning/carry/internal/host"
 	"github.com/ApexReasoning/carry/internal/run"
 )
+
+func TestMachineConnectionResponsesUseExactSnakeCaseWire(t *testing.T) {
+	t.Parallel()
+	beginResponse := &http.Response{
+		StatusCode: http.StatusCreated,
+		Body: io.NopCloser(strings.NewReader(`{
+			"request_id":"11111111-1111-4111-8111-111111111111",
+			"display_name":"Desk Mac","user_code":"BCDF-GHJ-KLM","poll_secret":"poll",
+			"fingerprint":"SHA256:exact","verification_path":"/machine-connect",
+			"expires_at":"2026-08-21T00:15:00Z","interval_seconds":5
+		}`)),
+	}
+	var begun begunConnection
+	if err := decodeConnectionResponse(beginResponse, &begun); err != nil || begun.RequestID == "" || begun.VerificationPath != "/machine-connect" {
+		t.Fatalf("decode begin = %#v, %v", begun, err)
+	}
+	pollResponse := &http.Response{
+		StatusCode: http.StatusOK,
+		Body: io.NopCloser(strings.NewReader(`{
+			"machine_id":"22222222-2222-4222-8222-222222222222",
+			"space_id":"33333333-3333-4333-8333-333333333333","display_name":"Desk Mac",
+			"certificate_pem":"certificate","redeemed_at":"2026-08-21T00:05:00Z",
+			"replay_until":"2026-08-21T00:20:00Z"
+		}`)),
+	}
+	var connected connectedMachine
+	if err := decodeConnectionResponse(pollResponse, &connected); err != nil || connected.MachineID == "" || connected.CertificatePEM != "certificate" {
+		t.Fatalf("decode poll = %#v, %v", connected, err)
+	}
+}
+
+func TestMachineConnectionPollRetriesOnlyTransientTransportFailures(t *testing.T) {
+	t.Parallel()
+	origin, err := url.Parse("https://carry.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name          string
+		transport     http.RoundTripper
+		wantTransient bool
+	}{
+		{
+			name: "connection reset",
+			transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+				return nil, &net.OpError{Op: "read", Net: "tcp", Err: syscall.ECONNRESET}
+			}),
+			wantTransient: true,
+		},
+		{
+			name: "expired TLS certificate",
+			transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+				return nil, &tls.CertificateVerificationError{Err: x509.CertificateInvalidError{Reason: x509.Expired}}
+			}),
+		},
+		{
+			name: "fatal TLS alert",
+			transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+				return nil, tls.AlertError(42)
+			}),
+		},
+		{
+			name: "unknown protocol failure",
+			transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+				return nil, errors.New("unclassified transport protocol failure")
+			}),
+		},
+		{
+			name: "malformed successful JSON",
+			transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+				return jsonResponse(http.StatusOK, `{not-json`), nil
+			}),
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			client := connectionClient{origin: origin, client: &http.Client{Transport: testCase.transport}}
+			_, pollErr := client.poll(context.Background(), "carry_machine_connect_11111111-1111-4111-8111-111111111111.secret")
+			var transient *transientConnectionError
+			if got := errors.As(pollErr, &transient); got != testCase.wantTransient {
+				t.Fatalf("poll error = %v, transient = %t", pollErr, got)
+			}
+		})
+	}
+}
 
 func TestParseServerURLRequiresHTTPSRoot(t *testing.T) {
 	t.Parallel()

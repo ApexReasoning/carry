@@ -70,9 +70,8 @@ func TestMemberTalksPrivatelyAndDelegatesSharedWork(t *testing.T) {
 	clientEnvironment := []string{"CARRY_CONFIG_DIR=" + configDirectory}
 	loginCarryCLI(t, root, carry, databaseURL, serverURL, filepath.Join(pkiDirectory, "ca.pem"),
 		configDirectory, member.UserID, member.SpaceID, "private-conversation-cli")
-	run(t, root, clientEnvironment, carry, "host", "enroll",
-		"--space", member.SpaceID, "--name", "private-conversation-host",
-	)
+	connectCarryMachine(t, root, carry, databaseURL, serverURL, filepath.Join(pkiDirectory, "ca.pem"),
+		configDirectory, member.UserID, member.SpaceID, "private-conversation-host")
 
 	hostCtx, cancelHost := context.WithCancel(t.Context())
 	hostLog := &lockedBuffer{}

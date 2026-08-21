@@ -25,6 +25,11 @@ type machineAPI struct {
 
 type machineContextKey struct{}
 
+type machinePrincipal struct {
+	machineID         string
+	certificateSerial string
+}
+
 type renewRunAttemptRequest struct {
 	Fence int64 `json:"fence"`
 }
@@ -80,18 +85,28 @@ func requireMachine(next http.Handler) http.Handler {
 			writeAPIError(response, http.StatusUnauthorized, "Machine certificate is invalid")
 			return
 		}
-		ctx := context.WithValue(request.Context(), machineContextKey{}, machineID)
+		ctx := context.WithValue(request.Context(), machineContextKey{}, machinePrincipal{
+			machineID: machineID, certificateSerial: request.TLS.PeerCertificates[0].SerialNumber.String(),
+		})
 		next.ServeHTTP(response, request.WithContext(ctx))
 	})
 }
 
-func currentMachine(response http.ResponseWriter, request *http.Request) (string, bool) {
-	machineID, ok := request.Context().Value(machineContextKey{}).(string)
-	if !ok || machineID == "" {
+func currentMachinePrincipal(response http.ResponseWriter, request *http.Request) (machinePrincipal, bool) {
+	principal, ok := request.Context().Value(machineContextKey{}).(machinePrincipal)
+	if !ok || principal.machineID == "" || principal.certificateSerial == "" {
 		writeAPIError(response, http.StatusInternalServerError, "Machine authentication context is missing")
+		return machinePrincipal{}, false
+	}
+	return principal, true
+}
+
+func currentMachine(response http.ResponseWriter, request *http.Request) (string, bool) {
+	principal, ok := currentMachinePrincipal(response, request)
+	if !ok {
 		return "", false
 	}
-	return machineID, true
+	return principal.machineID, true
 }
 
 func (api machineAPI) claimRun(response http.ResponseWriter, request *http.Request) {

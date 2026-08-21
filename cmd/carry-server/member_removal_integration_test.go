@@ -71,6 +71,13 @@ func TestRemovedMemberCredentialsRetainUserButLoseExactSpaceHTTPAccess(t *testin
 		t, ctx, pool, managerID, targetID, removedSpaceID, retainedSpaceID,
 		managerSessionID, targetSessionID, targetCredentialID,
 	)
+	machineID := uuid.NewString()
+	if _, err := pool.Exec(ctx, `
+		insert into machines (machine_id, space_id, display_name, public_key_der, certificate_pem, certificate_serial, enrolled_by_user_id)
+		values ($1,$2,'Removal Machine',decode('01','hex'),decode('02','hex'),$3,$4)
+	`, machineID, removedSpaceID, uuid.NewString(), managerID); err != nil {
+		t.Fatalf("seed Removal Machine: %v", err)
+	}
 	if _, err := store.SendConversationMessage(ctx, conversation.SendCommand{
 		SpaceID: removedSpaceID, MemberUserID: targetID, Text: "Retained private fixture",
 		IdempotencyKey: "retained-private-http",
@@ -107,8 +114,20 @@ func TestRemovedMemberCredentialsRetainUserButLoseExactSpaceHTTPAccess(t *testin
 	assertCurrentUserSpacesWithBearer(t, &bearer, carry.URL, targetCredential, targetID, []string{retainedSpaceID})
 	assertHTTPStatus(t, &bearer, http.MethodGet, carry.URL+"/v1/spaces/"+removedSpaceID+"/works", targetCredential, nil, http.StatusForbidden)
 	assertHTTPStatus(t, &bearer, http.MethodGet, carry.URL+"/v1/spaces/"+removedSpaceID+"/conversation/messages", targetCredential, nil, http.StatusForbidden)
-	machineBody := bytes.NewBufferString(`{"space_id":"` + removedSpaceID + `","machine_id":"` + uuid.NewString() + `"}`)
-	assertHTTPStatus(t, &bearer, http.MethodPost, carry.URL+"/v1/machines/revoke", targetCredential, machineBody, http.StatusForbidden)
+	revokeRequest, err := http.NewRequest(http.MethodPost, carry.URL+"/v1/spaces/"+removedSpaceID+"/machines/"+machineID+"/revoke", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	revokeRequest.Header.Set("Origin", carry.URL)
+	revokeRequest.Header.Set("Idempotency-Key", "removed-machine-operation")
+	revokeResponse, err := targetBrowser.Do(revokeRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer revokeResponse.Body.Close()
+	if revokeResponse.StatusCode != http.StatusForbidden {
+		t.Fatalf("former member Machine revoke status = %d, body = %s", revokeResponse.StatusCode, readBody(revokeResponse))
+	}
 }
 
 func seedMemberRemovalHTTPFixture(

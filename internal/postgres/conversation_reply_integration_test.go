@@ -240,6 +240,19 @@ func TestConversationReplyRenewAndFirstCommitRejectLostAuthority(t *testing.T) {
 	}
 }
 
+func TestRevokedMachineCannotClaimPrivateConversationReply(t *testing.T) {
+	ctx := context.Background()
+	pool := openMigratedTestPool(t, ctx)
+	store := NewStore(pool)
+	_, machineID, _ := replyFixture(t, ctx, pool, store, "revoked-claim")
+	if err := revokeMachineForTest(ctx, store, machineID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.ClaimConversationReply(ctx, machineID); !errors.Is(err, machine.ErrMachineRevoked) {
+		t.Fatalf("revoked private reply claim error = %v", err)
+	}
+}
+
 func TestConversationReplyConcurrentCommitAndCompletedReplayAreReplyOnce(t *testing.T) {
 	ctx := context.Background()
 	pool := openMigratedTestPool(t, ctx)
@@ -448,9 +461,9 @@ func insertReplyMachine(t *testing.T, ctx context.Context, pool *pgxpool.Pool, s
 	if _, err := pool.Exec(ctx, `
 		insert into machines (
 			machine_id, space_id, display_name, public_key_der, certificate_pem,
-			certificate_serial, enrolled_by_user_id, enrollment_idempotency_key
-		) values ($1, $2, 'private-reply-host', decode('01', 'hex'), decode('02', 'hex'), $3, $4, $5)
-	`, machineID, spaceID, uuid.NewString(), userID, uuid.NewString()); err != nil {
+			certificate_serial, enrolled_by_user_id
+		) values ($1, $2, 'private-reply-host', decode('01', 'hex'), decode('02', 'hex'), $3, $4)
+	`, machineID, spaceID, uuid.NewString(), userID); err != nil {
 		t.Fatalf("insert reply Machine: %v", err)
 	}
 	return machineID

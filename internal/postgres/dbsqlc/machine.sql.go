@@ -7,42 +7,128 @@ package dbsqlc
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const createMachine = `-- name: CreateMachine :one
+const cancelMachineConnection = `-- name: CancelMachineConnection :one
+UPDATE machine_connection_requests
+SET cancelled_at = transaction_timestamp()
+WHERE request_id = $1
+  AND decision IS NULL AND cancelled_at IS NULL
+  AND expires_at > transaction_timestamp()
+RETURNING request_id, begin_idempotency_key, begin_request_digest, source_digest, user_code_digest, poll_secret_digest, display_name, public_key_der, key_proof, created_at, expires_at, last_polled_at, poll_interval_seconds, decision, decided_at, decided_by_user_id, decided_space_id, decision_idempotency_key, decision_request_digest, prepared_machine_id, cancelled_at, resulting_machine_id, redeemed_at, replay_until
+`
+
+func (q *Queries) CancelMachineConnection(ctx context.Context, requestID string) (MachineConnectionRequest, error) {
+	row := q.db.QueryRow(ctx, cancelMachineConnection, requestID)
+	var i MachineConnectionRequest
+	err := row.Scan(
+		&i.RequestID,
+		&i.BeginIdempotencyKey,
+		&i.BeginRequestDigest,
+		&i.SourceDigest,
+		&i.UserCodeDigest,
+		&i.PollSecretDigest,
+		&i.DisplayName,
+		&i.PublicKeyDer,
+		&i.KeyProof,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+		&i.LastPolledAt,
+		&i.PollIntervalSeconds,
+		&i.Decision,
+		&i.DecidedAt,
+		&i.DecidedByUserID,
+		&i.DecidedSpaceID,
+		&i.DecisionIdempotencyKey,
+		&i.DecisionRequestDigest,
+		&i.PreparedMachineID,
+		&i.CancelledAt,
+		&i.ResultingMachineID,
+		&i.RedeemedAt,
+		&i.ReplayUntil,
+	)
+	return i, err
+}
+
+const countLiveMachineConnections = `-- name: CountLiveMachineConnections :one
+SELECT count(*) FROM machine_connection_requests
+WHERE expires_at > transaction_timestamp()
+  AND decision IS NULL AND cancelled_at IS NULL
+`
+
+func (q *Queries) CountLiveMachineConnections(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, countLiveMachineConnections)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countLiveMachineConnectionsForSource = `-- name: CountLiveMachineConnectionsForSource :one
+SELECT count(*) FROM machine_connection_requests
+WHERE source_digest = $1
+  AND expires_at > transaction_timestamp()
+  AND decision IS NULL AND cancelled_at IS NULL
+`
+
+func (q *Queries) CountLiveMachineConnectionsForSource(ctx context.Context, sourceDigest []byte) (int64, error) {
+	row := q.db.QueryRow(ctx, countLiveMachineConnectionsForSource, sourceDigest)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countRecentMachineConnectionLookupFailuresForSession = `-- name: CountRecentMachineConnectionLookupFailuresForSession :one
+SELECT count(*) FROM machine_connection_lookup_failures
+WHERE browser_session_id = $1
+  AND created_at > transaction_timestamp() - interval '10 minutes'
+`
+
+func (q *Queries) CountRecentMachineConnectionLookupFailuresForSession(ctx context.Context, browserSessionID string) (int64, error) {
+	row := q.db.QueryRow(ctx, countRecentMachineConnectionLookupFailuresForSession, browserSessionID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countRecentMachineConnectionLookupFailuresForSource = `-- name: CountRecentMachineConnectionLookupFailuresForSource :one
+SELECT count(*) FROM machine_connection_lookup_failures
+WHERE source_digest = $1
+  AND created_at > transaction_timestamp() - interval '10 minutes'
+`
+
+func (q *Queries) CountRecentMachineConnectionLookupFailuresForSource(ctx context.Context, sourceDigest []byte) (int64, error) {
+	row := q.db.QueryRow(ctx, countRecentMachineConnectionLookupFailuresForSource, sourceDigest)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const createConnectedMachine = `-- name: CreateConnectedMachine :one
 INSERT INTO machines (
     machine_id, space_id, display_name, public_key_der, certificate_pem,
-    certificate_serial, enrolled_by_user_id, enrollment_idempotency_key
+    certificate_serial, enrolled_by_user_id
 ) VALUES (
     $1, $2, $3,
     $4, $5, $6,
-    $7, $8
+    $7
 )
-ON CONFLICT (space_id, enrolled_by_user_id, enrollment_idempotency_key) DO NOTHING
-RETURNING machine_id, space_id, display_name, certificate_pem, public_key_der
+RETURNING machine_id, space_id, display_name, public_key_der, certificate_pem, certificate_serial, enrolled_by_user_id, enrolled_at, revoked_at, revocation_actor_kind, revoked_by_user_id, revocation_idempotency_key, revocation_request_digest
 `
 
-type CreateMachineParams struct {
-	MachineID                string
-	SpaceID                  string
-	DisplayName              string
-	PublicKeyDer             []byte
-	CertificatePem           []byte
-	CertificateSerial        string
-	EnrolledByUserID         string
-	EnrollmentIdempotencyKey string
+type CreateConnectedMachineParams struct {
+	MachineID         string
+	SpaceID           string
+	DisplayName       string
+	PublicKeyDer      []byte
+	CertificatePem    []byte
+	CertificateSerial string
+	EnrolledByUserID  string
 }
 
-type CreateMachineRow struct {
-	MachineID      string
-	SpaceID        string
-	DisplayName    string
-	CertificatePem []byte
-	PublicKeyDer   []byte
-}
-
-func (q *Queries) CreateMachine(ctx context.Context, arg CreateMachineParams) (CreateMachineRow, error) {
-	row := q.db.QueryRow(ctx, createMachine,
+func (q *Queries) CreateConnectedMachine(ctx context.Context, arg CreateConnectedMachineParams) (Machine, error) {
+	row := q.db.QueryRow(ctx, createConnectedMachine,
 		arg.MachineID,
 		arg.SpaceID,
 		arg.DisplayName,
@@ -50,70 +136,754 @@ func (q *Queries) CreateMachine(ctx context.Context, arg CreateMachineParams) (C
 		arg.CertificatePem,
 		arg.CertificateSerial,
 		arg.EnrolledByUserID,
-		arg.EnrollmentIdempotencyKey,
 	)
-	var i CreateMachineRow
+	var i Machine
 	err := row.Scan(
 		&i.MachineID,
 		&i.SpaceID,
 		&i.DisplayName,
-		&i.CertificatePem,
 		&i.PublicKeyDer,
+		&i.CertificatePem,
+		&i.CertificateSerial,
+		&i.EnrolledByUserID,
+		&i.EnrolledAt,
+		&i.RevokedAt,
+		&i.RevocationActorKind,
+		&i.RevokedByUserID,
+		&i.RevocationIdempotencyKey,
+		&i.RevocationRequestDigest,
 	)
 	return i, err
 }
 
-const findEnrollmentByIdempotency = `-- name: FindEnrollmentByIdempotency :one
-SELECT machine_id, space_id, display_name, certificate_pem, public_key_der
-FROM machines
-WHERE space_id = $1
-  AND enrolled_by_user_id = $2
-  AND enrollment_idempotency_key = $3
+const createMachineConnection = `-- name: CreateMachineConnection :one
+INSERT INTO machine_connection_requests (
+    request_id, begin_idempotency_key, begin_request_digest, source_digest,
+    user_code_digest, poll_secret_digest, display_name, public_key_der, key_proof
+) VALUES (
+    $1, $2, $3,
+    $4, $5, $6,
+    $7, $8, $9
+)
+RETURNING request_id, begin_idempotency_key, begin_request_digest, source_digest, user_code_digest, poll_secret_digest, display_name, public_key_der, key_proof, created_at, expires_at, last_polled_at, poll_interval_seconds, decision, decided_at, decided_by_user_id, decided_space_id, decision_idempotency_key, decision_request_digest, prepared_machine_id, cancelled_at, resulting_machine_id, redeemed_at, replay_until
 `
 
-type FindEnrollmentByIdempotencyParams struct {
-	SpaceID                  string
-	EnrolledByUserID         string
-	EnrollmentIdempotencyKey string
+type CreateMachineConnectionParams struct {
+	RequestID           string
+	BeginIdempotencyKey string
+	BeginRequestDigest  []byte
+	SourceDigest        []byte
+	UserCodeDigest      []byte
+	PollSecretDigest    []byte
+	DisplayName         string
+	PublicKeyDer        []byte
+	KeyProof            []byte
 }
 
-type FindEnrollmentByIdempotencyRow struct {
-	MachineID      string
+func (q *Queries) CreateMachineConnection(ctx context.Context, arg CreateMachineConnectionParams) (MachineConnectionRequest, error) {
+	row := q.db.QueryRow(ctx, createMachineConnection,
+		arg.RequestID,
+		arg.BeginIdempotencyKey,
+		arg.BeginRequestDigest,
+		arg.SourceDigest,
+		arg.UserCodeDigest,
+		arg.PollSecretDigest,
+		arg.DisplayName,
+		arg.PublicKeyDer,
+		arg.KeyProof,
+	)
+	var i MachineConnectionRequest
+	err := row.Scan(
+		&i.RequestID,
+		&i.BeginIdempotencyKey,
+		&i.BeginRequestDigest,
+		&i.SourceDigest,
+		&i.UserCodeDigest,
+		&i.PollSecretDigest,
+		&i.DisplayName,
+		&i.PublicKeyDer,
+		&i.KeyProof,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+		&i.LastPolledAt,
+		&i.PollIntervalSeconds,
+		&i.Decision,
+		&i.DecidedAt,
+		&i.DecidedByUserID,
+		&i.DecidedSpaceID,
+		&i.DecisionIdempotencyKey,
+		&i.DecisionRequestDigest,
+		&i.PreparedMachineID,
+		&i.CancelledAt,
+		&i.ResultingMachineID,
+		&i.RedeemedAt,
+		&i.ReplayUntil,
+	)
+	return i, err
+}
+
+const decideMachineConnection = `-- name: DecideMachineConnection :one
+UPDATE machine_connection_requests
+SET decision = $1,
+    decided_at = transaction_timestamp(),
+    decided_by_user_id = $2,
+    decided_space_id = $3,
+    decision_idempotency_key = $4,
+    decision_request_digest = $5,
+    prepared_machine_id = $6
+WHERE request_id = $7
+  AND decision IS NULL AND cancelled_at IS NULL
+  AND expires_at > transaction_timestamp()
+RETURNING request_id, begin_idempotency_key, begin_request_digest, source_digest, user_code_digest, poll_secret_digest, display_name, public_key_der, key_proof, created_at, expires_at, last_polled_at, poll_interval_seconds, decision, decided_at, decided_by_user_id, decided_space_id, decision_idempotency_key, decision_request_digest, prepared_machine_id, cancelled_at, resulting_machine_id, redeemed_at, replay_until
+`
+
+type DecideMachineConnectionParams struct {
+	Decision          *string
+	UserID            pgtype.UUID
+	SpaceID           pgtype.UUID
+	IdempotencyKey    *string
+	RequestDigest     []byte
+	PreparedMachineID pgtype.UUID
+	RequestID         string
+}
+
+func (q *Queries) DecideMachineConnection(ctx context.Context, arg DecideMachineConnectionParams) (MachineConnectionRequest, error) {
+	row := q.db.QueryRow(ctx, decideMachineConnection,
+		arg.Decision,
+		arg.UserID,
+		arg.SpaceID,
+		arg.IdempotencyKey,
+		arg.RequestDigest,
+		arg.PreparedMachineID,
+		arg.RequestID,
+	)
+	var i MachineConnectionRequest
+	err := row.Scan(
+		&i.RequestID,
+		&i.BeginIdempotencyKey,
+		&i.BeginRequestDigest,
+		&i.SourceDigest,
+		&i.UserCodeDigest,
+		&i.PollSecretDigest,
+		&i.DisplayName,
+		&i.PublicKeyDer,
+		&i.KeyProof,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+		&i.LastPolledAt,
+		&i.PollIntervalSeconds,
+		&i.Decision,
+		&i.DecidedAt,
+		&i.DecidedByUserID,
+		&i.DecidedSpaceID,
+		&i.DecisionIdempotencyKey,
+		&i.DecisionRequestDigest,
+		&i.PreparedMachineID,
+		&i.CancelledAt,
+		&i.ResultingMachineID,
+		&i.RedeemedAt,
+		&i.ReplayUntil,
+	)
+	return i, err
+}
+
+const findLiveMachineConnectionByCode = `-- name: FindLiveMachineConnectionByCode :one
+SELECT request_id, begin_idempotency_key, begin_request_digest, source_digest, user_code_digest, poll_secret_digest, display_name, public_key_der, key_proof, created_at, expires_at, last_polled_at, poll_interval_seconds, decision, decided_at, decided_by_user_id, decided_space_id, decision_idempotency_key, decision_request_digest, prepared_machine_id, cancelled_at, resulting_machine_id, redeemed_at, replay_until FROM machine_connection_requests
+WHERE user_code_digest = $1
+  AND expires_at > transaction_timestamp()
+  AND cancelled_at IS NULL
+`
+
+func (q *Queries) FindLiveMachineConnectionByCode(ctx context.Context, userCodeDigest []byte) (MachineConnectionRequest, error) {
+	row := q.db.QueryRow(ctx, findLiveMachineConnectionByCode, userCodeDigest)
+	var i MachineConnectionRequest
+	err := row.Scan(
+		&i.RequestID,
+		&i.BeginIdempotencyKey,
+		&i.BeginRequestDigest,
+		&i.SourceDigest,
+		&i.UserCodeDigest,
+		&i.PollSecretDigest,
+		&i.DisplayName,
+		&i.PublicKeyDer,
+		&i.KeyProof,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+		&i.LastPolledAt,
+		&i.PollIntervalSeconds,
+		&i.Decision,
+		&i.DecidedAt,
+		&i.DecidedByUserID,
+		&i.DecidedSpaceID,
+		&i.DecisionIdempotencyKey,
+		&i.DecisionRequestDigest,
+		&i.PreparedMachineID,
+		&i.CancelledAt,
+		&i.ResultingMachineID,
+		&i.RedeemedAt,
+		&i.ReplayUntil,
+	)
+	return i, err
+}
+
+const listSpaceMachines = `-- name: ListSpaceMachines :many
+SELECT machine.machine_id, machine.space_id, space.name AS space_name,
+    machine.display_name, machine.public_key_der, machine.enrolled_by_user_id,
+    coalesce(enroller.display_name, '') AS enrolled_by_name, machine.enrolled_at,
+    machine.revoked_at, coalesce(machine.revocation_actor_kind, '') AS revocation_actor_kind,
+    machine.revoked_by_user_id, coalesce(revoker.display_name, '') AS revoked_by_name
+FROM machines AS machine
+INNER JOIN spaces AS space ON space.space_id = machine.space_id
+INNER JOIN carry_users AS enroller ON enroller.user_id = machine.enrolled_by_user_id
+LEFT JOIN carry_users AS revoker ON revoker.user_id = machine.revoked_by_user_id
+WHERE machine.space_id = $1
+  AND ($2::uuid IS NULL OR machine.machine_id > $2::uuid)
+ORDER BY machine.machine_id
+LIMIT 51
+`
+
+type ListSpaceMachinesParams struct {
 	SpaceID        string
-	DisplayName    string
-	CertificatePem []byte
-	PublicKeyDer   []byte
+	AfterMachineID pgtype.UUID
 }
 
-func (q *Queries) FindEnrollmentByIdempotency(ctx context.Context, arg FindEnrollmentByIdempotencyParams) (FindEnrollmentByIdempotencyRow, error) {
-	row := q.db.QueryRow(ctx, findEnrollmentByIdempotency, arg.SpaceID, arg.EnrolledByUserID, arg.EnrollmentIdempotencyKey)
-	var i FindEnrollmentByIdempotencyRow
+type ListSpaceMachinesRow struct {
+	MachineID           string
+	SpaceID             string
+	SpaceName           string
+	DisplayName         string
+	PublicKeyDer        []byte
+	EnrolledByUserID    string
+	EnrolledByName      string
+	EnrolledAt          pgtype.Timestamptz
+	RevokedAt           pgtype.Timestamptz
+	RevocationActorKind string
+	RevokedByUserID     pgtype.UUID
+	RevokedByName       string
+}
+
+func (q *Queries) ListSpaceMachines(ctx context.Context, arg ListSpaceMachinesParams) ([]ListSpaceMachinesRow, error) {
+	rows, err := q.db.Query(ctx, listSpaceMachines, arg.SpaceID, arg.AfterMachineID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSpaceMachinesRow
+	for rows.Next() {
+		var i ListSpaceMachinesRow
+		if err := rows.Scan(
+			&i.MachineID,
+			&i.SpaceID,
+			&i.SpaceName,
+			&i.DisplayName,
+			&i.PublicKeyDer,
+			&i.EnrolledByUserID,
+			&i.EnrolledByName,
+			&i.EnrolledAt,
+			&i.RevokedAt,
+			&i.RevocationActorKind,
+			&i.RevokedByUserID,
+			&i.RevokedByName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const loadMachine = `-- name: LoadMachine :one
+SELECT machine_id, space_id, display_name, public_key_der, certificate_pem, certificate_serial, enrolled_by_user_id, enrolled_at, revoked_at, revocation_actor_kind, revoked_by_user_id, revocation_idempotency_key, revocation_request_digest FROM machines WHERE machine_id = $1
+`
+
+func (q *Queries) LoadMachine(ctx context.Context, machineID string) (Machine, error) {
+	row := q.db.QueryRow(ctx, loadMachine, machineID)
+	var i Machine
 	err := row.Scan(
 		&i.MachineID,
 		&i.SpaceID,
 		&i.DisplayName,
-		&i.CertificatePem,
 		&i.PublicKeyDer,
+		&i.CertificatePem,
+		&i.CertificateSerial,
+		&i.EnrolledByUserID,
+		&i.EnrolledAt,
+		&i.RevokedAt,
+		&i.RevocationActorKind,
+		&i.RevokedByUserID,
+		&i.RevocationIdempotencyKey,
+		&i.RevocationRequestDigest,
 	)
 	return i, err
 }
 
-const revokeMachine = `-- name: RevokeMachine :execrows
-UPDATE machines
-SET revoked_at = coalesce(revoked_at, transaction_timestamp())
-WHERE machine_id = $1
-  AND space_id = $2
+const loadMachineConnectionForBegin = `-- name: LoadMachineConnectionForBegin :one
+SELECT request_id, begin_idempotency_key, begin_request_digest, source_digest, user_code_digest, poll_secret_digest, display_name, public_key_der, key_proof, created_at, expires_at, last_polled_at, poll_interval_seconds, decision, decided_at, decided_by_user_id, decided_space_id, decision_idempotency_key, decision_request_digest, prepared_machine_id, cancelled_at, resulting_machine_id, redeemed_at, replay_until FROM machine_connection_requests WHERE request_id = $1
 `
 
-type RevokeMachineParams struct {
+func (q *Queries) LoadMachineConnectionForBegin(ctx context.Context, requestID string) (MachineConnectionRequest, error) {
+	row := q.db.QueryRow(ctx, loadMachineConnectionForBegin, requestID)
+	var i MachineConnectionRequest
+	err := row.Scan(
+		&i.RequestID,
+		&i.BeginIdempotencyKey,
+		&i.BeginRequestDigest,
+		&i.SourceDigest,
+		&i.UserCodeDigest,
+		&i.PollSecretDigest,
+		&i.DisplayName,
+		&i.PublicKeyDer,
+		&i.KeyProof,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+		&i.LastPolledAt,
+		&i.PollIntervalSeconds,
+		&i.Decision,
+		&i.DecidedAt,
+		&i.DecidedByUserID,
+		&i.DecidedSpaceID,
+		&i.DecisionIdempotencyKey,
+		&i.DecisionRequestDigest,
+		&i.PreparedMachineID,
+		&i.CancelledAt,
+		&i.ResultingMachineID,
+		&i.RedeemedAt,
+		&i.ReplayUntil,
+	)
+	return i, err
+}
+
+const loadMachineListMembership = `-- name: LoadMachineListMembership :one
+SELECT session.user_id, membership.can_enroll_machines
+FROM browser_sessions AS session
+INNER JOIN space_memberships AS membership
+    ON membership.user_id = session.user_id
+WHERE session.session_id = $1
+  AND session.revoked_at IS NULL AND session.expires_at > transaction_timestamp()
+  AND membership.space_id = $2 AND membership.revoked_at IS NULL
+`
+
+type LoadMachineListMembershipParams struct {
+	SessionID string
+	SpaceID   string
+}
+
+type LoadMachineListMembershipRow struct {
+	UserID            string
+	CanEnrollMachines bool
+}
+
+func (q *Queries) LoadMachineListMembership(ctx context.Context, arg LoadMachineListMembershipParams) (LoadMachineListMembershipRow, error) {
+	row := q.db.QueryRow(ctx, loadMachineListMembership, arg.SessionID, arg.SpaceID)
+	var i LoadMachineListMembershipRow
+	err := row.Scan(&i.UserID, &i.CanEnrollMachines)
+	return i, err
+}
+
+const lockBrowserSessionForMachineConnection = `-- name: LockBrowserSessionForMachineConnection :one
+SELECT session.user_id, coalesce(carry_user.display_name, '') AS display_name
+FROM browser_sessions AS session
+INNER JOIN carry_users AS carry_user ON carry_user.user_id = session.user_id
+WHERE session.session_id = $1
+  AND session.revoked_at IS NULL
+  AND session.expires_at > transaction_timestamp()
+FOR UPDATE OF session
+`
+
+type LockBrowserSessionForMachineConnectionRow struct {
+	UserID      string
+	DisplayName string
+}
+
+func (q *Queries) LockBrowserSessionForMachineConnection(ctx context.Context, sessionID string) (LockBrowserSessionForMachineConnectionRow, error) {
+	row := q.db.QueryRow(ctx, lockBrowserSessionForMachineConnection, sessionID)
+	var i LockBrowserSessionForMachineConnectionRow
+	err := row.Scan(&i.UserID, &i.DisplayName)
+	return i, err
+}
+
+const lockMachineByIDForSelfRevocation = `-- name: LockMachineByIDForSelfRevocation :one
+SELECT machine_id, space_id, display_name, public_key_der, certificate_pem, certificate_serial, enrolled_by_user_id, enrolled_at, revoked_at, revocation_actor_kind, revoked_by_user_id, revocation_idempotency_key, revocation_request_digest FROM machines WHERE machine_id = $1 FOR UPDATE
+`
+
+func (q *Queries) LockMachineByIDForSelfRevocation(ctx context.Context, machineID string) (Machine, error) {
+	row := q.db.QueryRow(ctx, lockMachineByIDForSelfRevocation, machineID)
+	var i Machine
+	err := row.Scan(
+		&i.MachineID,
+		&i.SpaceID,
+		&i.DisplayName,
+		&i.PublicKeyDer,
+		&i.CertificatePem,
+		&i.CertificateSerial,
+		&i.EnrolledByUserID,
+		&i.EnrolledAt,
+		&i.RevokedAt,
+		&i.RevocationActorKind,
+		&i.RevokedByUserID,
+		&i.RevocationIdempotencyKey,
+		&i.RevocationRequestDigest,
+	)
+	return i, err
+}
+
+const lockMachineConnectionAdmission = `-- name: LockMachineConnectionAdmission :exec
+SELECT pg_advisory_xact_lock(612440219::bigint)
+`
+
+func (q *Queries) LockMachineConnectionAdmission(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, lockMachineConnectionAdmission)
+	return err
+}
+
+const lockMachineConnectionLookupBudget = `-- name: LockMachineConnectionLookupBudget :exec
+SELECT pg_advisory_xact_lock(hashtextextended($1::text, 19237))
+`
+
+func (q *Queries) LockMachineConnectionLookupBudget(ctx context.Context, lockKey string) error {
+	_, err := q.db.Exec(ctx, lockMachineConnectionLookupBudget, lockKey)
+	return err
+}
+
+const lockMachineConnectionRequest = `-- name: LockMachineConnectionRequest :one
+SELECT request_id, begin_idempotency_key, begin_request_digest, source_digest, user_code_digest, poll_secret_digest, display_name, public_key_der, key_proof, created_at, expires_at, last_polled_at, poll_interval_seconds, decision, decided_at, decided_by_user_id, decided_space_id, decision_idempotency_key, decision_request_digest, prepared_machine_id, cancelled_at, resulting_machine_id, redeemed_at, replay_until FROM machine_connection_requests
+WHERE request_id = $1
+FOR UPDATE
+`
+
+func (q *Queries) LockMachineConnectionRequest(ctx context.Context, requestID string) (MachineConnectionRequest, error) {
+	row := q.db.QueryRow(ctx, lockMachineConnectionRequest, requestID)
+	var i MachineConnectionRequest
+	err := row.Scan(
+		&i.RequestID,
+		&i.BeginIdempotencyKey,
+		&i.BeginRequestDigest,
+		&i.SourceDigest,
+		&i.UserCodeDigest,
+		&i.PollSecretDigest,
+		&i.DisplayName,
+		&i.PublicKeyDer,
+		&i.KeyProof,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+		&i.LastPolledAt,
+		&i.PollIntervalSeconds,
+		&i.Decision,
+		&i.DecidedAt,
+		&i.DecidedByUserID,
+		&i.DecidedSpaceID,
+		&i.DecisionIdempotencyKey,
+		&i.DecisionRequestDigest,
+		&i.PreparedMachineID,
+		&i.CancelledAt,
+		&i.ResultingMachineID,
+		&i.RedeemedAt,
+		&i.ReplayUntil,
+	)
+	return i, err
+}
+
+const lockMachineEnrollmentMembership = `-- name: LockMachineEnrollmentMembership :one
+SELECT user_id, can_enroll_machines
+FROM space_memberships
+WHERE space_id = $1 AND user_id = $2 AND revoked_at IS NULL
+FOR UPDATE
+`
+
+type LockMachineEnrollmentMembershipParams struct {
+	SpaceID string
+	UserID  string
+}
+
+type LockMachineEnrollmentMembershipRow struct {
+	UserID            string
+	CanEnrollMachines bool
+}
+
+func (q *Queries) LockMachineEnrollmentMembership(ctx context.Context, arg LockMachineEnrollmentMembershipParams) (LockMachineEnrollmentMembershipRow, error) {
+	row := q.db.QueryRow(ctx, lockMachineEnrollmentMembership, arg.SpaceID, arg.UserID)
+	var i LockMachineEnrollmentMembershipRow
+	err := row.Scan(&i.UserID, &i.CanEnrollMachines)
+	return i, err
+}
+
+const lockMachineForRevocation = `-- name: LockMachineForRevocation :one
+SELECT machine_id, space_id, display_name, public_key_der, certificate_pem, certificate_serial, enrolled_by_user_id, enrolled_at, revoked_at, revocation_actor_kind, revoked_by_user_id, revocation_idempotency_key, revocation_request_digest FROM machines
+WHERE machine_id = $1 AND space_id = $2
+FOR UPDATE
+`
+
+type LockMachineForRevocationParams struct {
 	MachineID string
 	SpaceID   string
 }
 
-func (q *Queries) RevokeMachine(ctx context.Context, arg RevokeMachineParams) (int64, error) {
-	result, err := q.db.Exec(ctx, revokeMachine, arg.MachineID, arg.SpaceID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
+func (q *Queries) LockMachineForRevocation(ctx context.Context, arg LockMachineForRevocationParams) (Machine, error) {
+	row := q.db.QueryRow(ctx, lockMachineForRevocation, arg.MachineID, arg.SpaceID)
+	var i Machine
+	err := row.Scan(
+		&i.MachineID,
+		&i.SpaceID,
+		&i.DisplayName,
+		&i.PublicKeyDer,
+		&i.CertificatePem,
+		&i.CertificateSerial,
+		&i.EnrolledByUserID,
+		&i.EnrolledAt,
+		&i.RevokedAt,
+		&i.RevocationActorKind,
+		&i.RevokedByUserID,
+		&i.RevocationIdempotencyKey,
+		&i.RevocationRequestDigest,
+	)
+	return i, err
+}
+
+const lockSpaceForMachineConnection = `-- name: LockSpaceForMachineConnection :one
+SELECT space_id FROM spaces WHERE space_id = $1 FOR NO KEY UPDATE
+`
+
+func (q *Queries) LockSpaceForMachineConnection(ctx context.Context, spaceID string) (string, error) {
+	row := q.db.QueryRow(ctx, lockSpaceForMachineConnection, spaceID)
+	var space_id string
+	err := row.Scan(&space_id)
+	return space_id, err
+}
+
+const machineDatabaseTime = `-- name: MachineDatabaseTime :one
+SELECT transaction_timestamp()::timestamptz
+`
+
+func (q *Queries) MachineDatabaseTime(ctx context.Context) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, machineDatabaseTime)
+	var column_1 pgtype.Timestamptz
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const recordMachineConnectionLookupFailure = `-- name: RecordMachineConnectionLookupFailure :exec
+INSERT INTO machine_connection_lookup_failures (failure_id, browser_session_id, source_digest)
+VALUES ($1, $2, $3)
+`
+
+type RecordMachineConnectionLookupFailureParams struct {
+	FailureID        string
+	BrowserSessionID string
+	SourceDigest     []byte
+}
+
+func (q *Queries) RecordMachineConnectionLookupFailure(ctx context.Context, arg RecordMachineConnectionLookupFailureParams) error {
+	_, err := q.db.Exec(ctx, recordMachineConnectionLookupFailure, arg.FailureID, arg.BrowserSessionID, arg.SourceDigest)
+	return err
+}
+
+const recordMachineConnectionPoll = `-- name: RecordMachineConnectionPoll :one
+UPDATE machine_connection_requests
+SET last_polled_at = transaction_timestamp()
+WHERE request_id = $1
+RETURNING request_id, begin_idempotency_key, begin_request_digest, source_digest, user_code_digest, poll_secret_digest, display_name, public_key_der, key_proof, created_at, expires_at, last_polled_at, poll_interval_seconds, decision, decided_at, decided_by_user_id, decided_space_id, decision_idempotency_key, decision_request_digest, prepared_machine_id, cancelled_at, resulting_machine_id, redeemed_at, replay_until
+`
+
+func (q *Queries) RecordMachineConnectionPoll(ctx context.Context, requestID string) (MachineConnectionRequest, error) {
+	row := q.db.QueryRow(ctx, recordMachineConnectionPoll, requestID)
+	var i MachineConnectionRequest
+	err := row.Scan(
+		&i.RequestID,
+		&i.BeginIdempotencyKey,
+		&i.BeginRequestDigest,
+		&i.SourceDigest,
+		&i.UserCodeDigest,
+		&i.PollSecretDigest,
+		&i.DisplayName,
+		&i.PublicKeyDer,
+		&i.KeyProof,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+		&i.LastPolledAt,
+		&i.PollIntervalSeconds,
+		&i.Decision,
+		&i.DecidedAt,
+		&i.DecidedByUserID,
+		&i.DecidedSpaceID,
+		&i.DecisionIdempotencyKey,
+		&i.DecisionRequestDigest,
+		&i.PreparedMachineID,
+		&i.CancelledAt,
+		&i.ResultingMachineID,
+		&i.RedeemedAt,
+		&i.ReplayUntil,
+	)
+	return i, err
+}
+
+const redeemMachineConnection = `-- name: RedeemMachineConnection :one
+UPDATE machine_connection_requests
+SET resulting_machine_id = $1,
+    redeemed_at = transaction_timestamp(),
+    replay_until = transaction_timestamp() + interval '15 minutes'
+WHERE request_id = $2
+  AND decision = 'approved' AND cancelled_at IS NULL AND redeemed_at IS NULL
+RETURNING request_id, begin_idempotency_key, begin_request_digest, source_digest, user_code_digest, poll_secret_digest, display_name, public_key_der, key_proof, created_at, expires_at, last_polled_at, poll_interval_seconds, decision, decided_at, decided_by_user_id, decided_space_id, decision_idempotency_key, decision_request_digest, prepared_machine_id, cancelled_at, resulting_machine_id, redeemed_at, replay_until
+`
+
+type RedeemMachineConnectionParams struct {
+	MachineID pgtype.UUID
+	RequestID string
+}
+
+func (q *Queries) RedeemMachineConnection(ctx context.Context, arg RedeemMachineConnectionParams) (MachineConnectionRequest, error) {
+	row := q.db.QueryRow(ctx, redeemMachineConnection, arg.MachineID, arg.RequestID)
+	var i MachineConnectionRequest
+	err := row.Scan(
+		&i.RequestID,
+		&i.BeginIdempotencyKey,
+		&i.BeginRequestDigest,
+		&i.SourceDigest,
+		&i.UserCodeDigest,
+		&i.PollSecretDigest,
+		&i.DisplayName,
+		&i.PublicKeyDer,
+		&i.KeyProof,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+		&i.LastPolledAt,
+		&i.PollIntervalSeconds,
+		&i.Decision,
+		&i.DecidedAt,
+		&i.DecidedByUserID,
+		&i.DecidedSpaceID,
+		&i.DecisionIdempotencyKey,
+		&i.DecisionRequestDigest,
+		&i.PreparedMachineID,
+		&i.CancelledAt,
+		&i.ResultingMachineID,
+		&i.RedeemedAt,
+		&i.ReplayUntil,
+	)
+	return i, err
+}
+
+const revokeMachineBySelf = `-- name: RevokeMachineBySelf :one
+UPDATE machines
+SET revoked_at = transaction_timestamp(),
+    revocation_actor_kind = 'machine',
+    revoked_by_user_id = NULL,
+    revocation_idempotency_key = $1,
+    revocation_request_digest = $2
+WHERE machine_id = $3 AND revoked_at IS NULL
+RETURNING machine_id, space_id, display_name, public_key_der, certificate_pem, certificate_serial, enrolled_by_user_id, enrolled_at, revoked_at, revocation_actor_kind, revoked_by_user_id, revocation_idempotency_key, revocation_request_digest
+`
+
+type RevokeMachineBySelfParams struct {
+	IdempotencyKey *string
+	RequestDigest  []byte
+	MachineID      string
+}
+
+func (q *Queries) RevokeMachineBySelf(ctx context.Context, arg RevokeMachineBySelfParams) (Machine, error) {
+	row := q.db.QueryRow(ctx, revokeMachineBySelf, arg.IdempotencyKey, arg.RequestDigest, arg.MachineID)
+	var i Machine
+	err := row.Scan(
+		&i.MachineID,
+		&i.SpaceID,
+		&i.DisplayName,
+		&i.PublicKeyDer,
+		&i.CertificatePem,
+		&i.CertificateSerial,
+		&i.EnrolledByUserID,
+		&i.EnrolledAt,
+		&i.RevokedAt,
+		&i.RevocationActorKind,
+		&i.RevokedByUserID,
+		&i.RevocationIdempotencyKey,
+		&i.RevocationRequestDigest,
+	)
+	return i, err
+}
+
+const revokeMachineByUser = `-- name: RevokeMachineByUser :one
+UPDATE machines
+SET revoked_at = transaction_timestamp(),
+    revocation_actor_kind = 'user',
+    revoked_by_user_id = $1,
+    revocation_idempotency_key = $2,
+    revocation_request_digest = $3
+WHERE machine_id = $4 AND revoked_at IS NULL
+RETURNING machine_id, space_id, display_name, public_key_der, certificate_pem, certificate_serial, enrolled_by_user_id, enrolled_at, revoked_at, revocation_actor_kind, revoked_by_user_id, revocation_idempotency_key, revocation_request_digest
+`
+
+type RevokeMachineByUserParams struct {
+	UserID         pgtype.UUID
+	IdempotencyKey *string
+	RequestDigest  []byte
+	MachineID      string
+}
+
+func (q *Queries) RevokeMachineByUser(ctx context.Context, arg RevokeMachineByUserParams) (Machine, error) {
+	row := q.db.QueryRow(ctx, revokeMachineByUser,
+		arg.UserID,
+		arg.IdempotencyKey,
+		arg.RequestDigest,
+		arg.MachineID,
+	)
+	var i Machine
+	err := row.Scan(
+		&i.MachineID,
+		&i.SpaceID,
+		&i.DisplayName,
+		&i.PublicKeyDer,
+		&i.CertificatePem,
+		&i.CertificateSerial,
+		&i.EnrolledByUserID,
+		&i.EnrolledAt,
+		&i.RevokedAt,
+		&i.RevocationActorKind,
+		&i.RevokedByUserID,
+		&i.RevocationIdempotencyKey,
+		&i.RevocationRequestDigest,
+	)
+	return i, err
+}
+
+const slowDownMachineConnectionPoll = `-- name: SlowDownMachineConnectionPoll :one
+UPDATE machine_connection_requests
+SET last_polled_at = transaction_timestamp(),
+    poll_interval_seconds = least(30, poll_interval_seconds + 5)
+WHERE request_id = $1
+RETURNING request_id, begin_idempotency_key, begin_request_digest, source_digest, user_code_digest, poll_secret_digest, display_name, public_key_der, key_proof, created_at, expires_at, last_polled_at, poll_interval_seconds, decision, decided_at, decided_by_user_id, decided_space_id, decision_idempotency_key, decision_request_digest, prepared_machine_id, cancelled_at, resulting_machine_id, redeemed_at, replay_until
+`
+
+func (q *Queries) SlowDownMachineConnectionPoll(ctx context.Context, requestID string) (MachineConnectionRequest, error) {
+	row := q.db.QueryRow(ctx, slowDownMachineConnectionPoll, requestID)
+	var i MachineConnectionRequest
+	err := row.Scan(
+		&i.RequestID,
+		&i.BeginIdempotencyKey,
+		&i.BeginRequestDigest,
+		&i.SourceDigest,
+		&i.UserCodeDigest,
+		&i.PollSecretDigest,
+		&i.DisplayName,
+		&i.PublicKeyDer,
+		&i.KeyProof,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+		&i.LastPolledAt,
+		&i.PollIntervalSeconds,
+		&i.Decision,
+		&i.DecidedAt,
+		&i.DecidedByUserID,
+		&i.DecidedSpaceID,
+		&i.DecisionIdempotencyKey,
+		&i.DecisionRequestDigest,
+		&i.PreparedMachineID,
+		&i.CancelledAt,
+		&i.ResultingMachineID,
+		&i.RedeemedAt,
+		&i.ReplayUntil,
+	)
+	return i, err
 }

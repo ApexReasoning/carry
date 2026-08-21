@@ -125,10 +125,58 @@ export const zAcceptedInvitation = z.object({
   already_member: z.boolean(),
 });
 
-export const zMachineEnrollment = z.object({
+export const zBegunMachineConnection = z.object({
+  request_id: z.uuid(),
+  display_name: z.string(),
+  user_code: z.string(),
+  poll_secret: z.string(),
+  fingerprint: z.string(),
+  verification_path: z.literal("/machine-connect"),
+  expires_at: z.iso.datetime({ offset: true }),
+  interval_seconds: z.int().gte(5).lte(30),
+});
+
+export const zMachineConnectionPreview = z.object({
+  request_id: z.uuid(),
+  user_code: z.string(),
+  display_name: z.string(),
+  fingerprint: z.string(),
+  server: z.url(),
+  decision: z.enum(["approved", "denied"]).optional(),
+  approved_space_id: z.uuid().optional(),
+  created_at: z.iso.datetime({ offset: true }),
+  expires_at: z.iso.datetime({ offset: true }),
+});
+
+export const zConnectedMachine = z.object({
   machine_id: z.uuid(),
   space_id: z.uuid(),
+  display_name: z.string(),
   certificate_pem: z.string(),
+  redeemed_at: z.iso.datetime({ offset: true }),
+  replay_until: z.iso.datetime({ offset: true }),
+});
+
+export const zMachineRecord = z.object({
+  machine_id: z.uuid(),
+  space_id: z.uuid(),
+  space_name: z.string(),
+  display_name: z.string(),
+  fingerprint: z.string(),
+  state: z.enum(["Active", "Revoked"]),
+  enrolled_by_user_id: z.uuid(),
+  enrolled_by_name: z.string(),
+  enrolled_at: z.iso.datetime({ offset: true }),
+  revocation_actor: z.string().optional(),
+  revoked_by_user_id: z.uuid().optional(),
+  revoked_by_name: z.string().optional(),
+  revoked_at: z.iso.datetime({ offset: true }).optional(),
+  can_revoke: z.boolean(),
+});
+
+export const zMachinePage = z.object({
+  machines: z.array(zMachineRecord).max(50),
+  next_cursor: z.uuid().optional(),
 });
 
 export const zConversationMessage = z.object({
@@ -187,6 +235,10 @@ export const zOAuthState = z.string().min(1).max(255);
 export const zOAuthCode = z.string().min(1).max(4096);
 
 export const zOAuthError = z.string().min(1).max(255);
+
+export const zMachineConnectionRequestId = z.uuid();
+
+export const zMachineId = z.uuid();
 
 export const zSpaceId = z.uuid();
 
@@ -461,32 +513,114 @@ export const zCreateFirstSpaceHeaders = z.object({
  */
 export const zCreateFirstSpaceResponse = zMembership;
 
-export const zEnrollMachineBody = z.object({
-  space_id: z.uuid(),
-  display_name: z.string().min(1),
+export const zBeginMachineConnectionBody = z.object({
+  request_id: z.uuid(),
+  display_name: z.string().min(1).max(128),
+  user_code: z.string(),
+  poll_secret: z.string(),
   public_key: z.string(),
+  key_proof: z.string(),
 });
 
-export const zEnrollMachineHeaders = z.object({
+export const zBeginMachineConnectionHeaders = z.object({
   "Idempotency-Key": z.string().min(1).max(255),
 });
 
 /**
- * Machine enrolled or idempotently replayed
+ * Short-lived Machine connection ceremony created or exactly replayed
  */
-export const zEnrollMachineResponse = zMachineEnrollment;
+export const zBeginMachineConnectionResponse = zBegunMachineConnection;
 
-export const zRevokeMachineBody = z.object({
-  space_id: z.uuid(),
-  machine_id: z.uuid(),
+export const zPollMachineConnectionHeaders = z.object({
+  "X-Carry-Machine-Connection": z.string(),
+});
+
+export const zPollMachineConnectionResponse = z.union([
+  zConnectedMachine,
+  z.unknown(),
+]);
+
+export const zCancelMachineConnectionHeaders = z.object({
+  "X-Carry-Machine-Connection": z.string(),
 });
 
 /**
- * Machine revoked
+ * Connection request cancelled or exactly replayed
  */
-export const zRevokeMachineResponse = z.object({
-  status: z.literal("revoked"),
+export const zCancelMachineConnectionResponse = z.void();
+
+export const zLookupMachineConnectionBody = z.object({
+  user_code: z.string(),
 });
+
+/**
+ * Exact pending Machine facts for Browser review
+ */
+export const zLookupMachineConnectionResponse = zMachineConnectionPreview;
+
+export const zApproveMachineConnectionBody = z.object({
+  request_id: z.uuid(),
+  user_code: z.string(),
+  space_id: z.uuid(),
+});
+
+export const zApproveMachineConnectionHeaders = z.object({
+  "Idempotency-Key": z.string().min(1).max(255),
+});
+
+export const zApproveMachineConnectionPath = z.object({
+  requestID: z.uuid(),
+});
+
+/**
+ * Machine connection approved or exactly replayed
+ */
+export const zApproveMachineConnectionResponse = z.void();
+
+export const zDenyMachineConnectionBody = z.object({
+  request_id: z.uuid(),
+  user_code: z.string(),
+});
+
+export const zDenyMachineConnectionHeaders = z.object({
+  "Idempotency-Key": z.string().min(1).max(255),
+});
+
+export const zDenyMachineConnectionPath = z.object({
+  requestID: z.uuid(),
+});
+
+/**
+ * Machine connection denied or exactly replayed
+ */
+export const zDenyMachineConnectionResponse = z.void();
+
+export const zListMachinesPath = z.object({
+  spaceID: z.uuid(),
+});
+
+export const zListMachinesQuery = z.object({
+  after: z.uuid().optional(),
+});
+
+/**
+ * Persistent authoritative Space Machine inventory
+ */
+export const zListMachinesResponse = zMachinePage;
+
+export const zRevokeMachineHeaders = z.object({
+  "Idempotency-Key": z.string().min(1).max(255),
+});
+
+export const zRevokeMachinePath = z.object({
+  spaceID: z.uuid(),
+  machineID: z.uuid(),
+});
+
+/**
+ * Server-side Machine authority revoked or authoritative winner replayed
+ */
+export const zRevokeMachineResponse = zMachineRecord;
 
 export const zListConversationMessagesPath = z.object({
   spaceID: z.uuid(),

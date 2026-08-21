@@ -122,10 +122,58 @@ export type AcceptedInvitation = {
   already_member: boolean;
 };
 
-export type MachineEnrollment = {
+export type BegunMachineConnection = {
+  request_id: string;
+  display_name: string;
+  user_code: string;
+  poll_secret: string;
+  fingerprint: string;
+  verification_path: "/machine-connect";
+  expires_at: string;
+  interval_seconds: number;
+};
+
+export type MachineConnectionPreview = {
+  request_id: string;
+  user_code: string;
+  display_name: string;
+  fingerprint: string;
+  server: string;
+  decision?: "approved" | "denied";
+  approved_space_id?: string;
+  created_at: string;
+  expires_at: string;
+};
+
+export type ConnectedMachine = {
   machine_id: string;
   space_id: string;
+  display_name: string;
   certificate_pem: string;
+  redeemed_at: string;
+  replay_until: string;
+};
+
+export type MachineRecord = {
+  machine_id: string;
+  space_id: string;
+  space_name: string;
+  display_name: string;
+  fingerprint: string;
+  state: "Active" | "Revoked";
+  enrolled_by_user_id: string;
+  enrolled_by_name: string;
+  enrolled_at: string;
+  revocation_actor?: string;
+  revoked_by_user_id?: string;
+  revoked_by_name?: string;
+  revoked_at?: string;
+  can_revoke: boolean;
+};
+
+export type MachinePage = {
+  machines: Array<MachineRecord>;
+  next_cursor?: string;
 };
 
 export type ConversationMessage = {
@@ -205,6 +253,10 @@ export type OAuthState = string;
 export type OAuthCode = string;
 
 export type OAuthError = string;
+
+export type MachineConnectionRequestId = string;
+
+export type MachineId = string;
 
 export type SpaceId = string;
 
@@ -1229,21 +1281,193 @@ export type CreateFirstSpaceResponses = {
 export type CreateFirstSpaceResponse =
   CreateFirstSpaceResponses[keyof CreateFirstSpaceResponses];
 
-export type EnrollMachineData = {
+export type BeginMachineConnectionData = {
   body: {
-    space_id: string;
+    request_id: string;
     display_name: string;
+    user_code: string;
+    poll_secret: string;
     public_key: string;
+    key_proof: string;
   };
   headers: {
     "Idempotency-Key": string;
   };
   path?: never;
   query?: never;
-  url: "/v1/machines/enroll";
+  url: "/v1/machine-connections";
 };
 
-export type EnrollMachineErrors = {
+export type BeginMachineConnectionErrors = {
+  /**
+   * Request rejected
+   */
+  400: ApiError;
+  /**
+   * Request rejected
+   */
+  409: ApiError;
+  /**
+   * Request rejected
+   */
+  429: ApiError;
+};
+
+export type BeginMachineConnectionError =
+  BeginMachineConnectionErrors[keyof BeginMachineConnectionErrors];
+
+export type BeginMachineConnectionResponses = {
+  /**
+   * Short-lived Machine connection ceremony created or exactly replayed
+   */
+  201: BegunMachineConnection;
+};
+
+export type BeginMachineConnectionResponse =
+  BeginMachineConnectionResponses[keyof BeginMachineConnectionResponses];
+
+export type PollMachineConnectionData = {
+  body?: never;
+  headers: {
+    "X-Carry-Machine-Connection": string;
+  };
+  path?: never;
+  query?: never;
+  url: "/v1/machine-connections/status";
+};
+
+export type PollMachineConnectionErrors = {
+  /**
+   * Request rejected
+   */
+  401: ApiError;
+  /**
+   * Request rejected
+   */
+  403: ApiError;
+  /**
+   * Request rejected
+   */
+  409: ApiError;
+  /**
+   * Request rejected
+   */
+  410: ApiError;
+  /**
+   * Request rejected
+   */
+  429: ApiError;
+};
+
+export type PollMachineConnectionError =
+  PollMachineConnectionErrors[keyof PollMachineConnectionErrors];
+
+export type PollMachineConnectionResponses = {
+  /**
+   * Exact approved Machine certificate
+   */
+  200: ConnectedMachine;
+  /**
+   * Awaiting Browser decision
+   */
+  202: unknown;
+};
+
+export type PollMachineConnectionResponse =
+  PollMachineConnectionResponses[keyof PollMachineConnectionResponses];
+
+export type CancelMachineConnectionData = {
+  body?: never;
+  headers: {
+    "X-Carry-Machine-Connection": string;
+  };
+  path?: never;
+  query?: never;
+  url: "/v1/machine-connections/cancel";
+};
+
+export type CancelMachineConnectionErrors = {
+  /**
+   * Request rejected
+   */
+  401: ApiError;
+  /**
+   * Request rejected
+   */
+  409: ApiError;
+  /**
+   * Request rejected
+   */
+  410: ApiError;
+};
+
+export type CancelMachineConnectionError =
+  CancelMachineConnectionErrors[keyof CancelMachineConnectionErrors];
+
+export type CancelMachineConnectionResponses = {
+  /**
+   * Connection request cancelled or exactly replayed
+   */
+  204: void;
+};
+
+export type CancelMachineConnectionResponse =
+  CancelMachineConnectionResponses[keyof CancelMachineConnectionResponses];
+
+export type LookupMachineConnectionData = {
+  body: {
+    user_code: string;
+  };
+  path?: never;
+  query?: never;
+  url: "/v1/machine-connections/lookup";
+};
+
+export type LookupMachineConnectionErrors = {
+  /**
+   * Request rejected
+   */
+  401: ApiError;
+  /**
+   * Request rejected
+   */
+  404: ApiError;
+  /**
+   * Request rejected
+   */
+  429: ApiError;
+};
+
+export type LookupMachineConnectionError =
+  LookupMachineConnectionErrors[keyof LookupMachineConnectionErrors];
+
+export type LookupMachineConnectionResponses = {
+  /**
+   * Exact pending Machine facts for Browser review
+   */
+  200: MachineConnectionPreview;
+};
+
+export type LookupMachineConnectionResponse =
+  LookupMachineConnectionResponses[keyof LookupMachineConnectionResponses];
+
+export type ApproveMachineConnectionData = {
+  body: {
+    request_id: string;
+    user_code: string;
+    space_id: string;
+  };
+  headers: {
+    "Idempotency-Key": string;
+  };
+  path: {
+    requestID: string;
+  };
+  query?: never;
+  url: "/v1/machine-connections/{requestID}/approve";
+};
+
+export type ApproveMachineConnectionErrors = {
   /**
    * Request rejected
    */
@@ -1260,35 +1484,120 @@ export type EnrollMachineErrors = {
    * Request rejected
    */
   409: ApiError;
-};
-
-export type EnrollMachineError = EnrollMachineErrors[keyof EnrollMachineErrors];
-
-export type EnrollMachineResponses = {
   /**
-   * Machine enrolled or idempotently replayed
+   * Request rejected
    */
-  201: MachineEnrollment;
+  410: ApiError;
 };
 
-export type EnrollMachineResponse =
-  EnrollMachineResponses[keyof EnrollMachineResponses];
+export type ApproveMachineConnectionError =
+  ApproveMachineConnectionErrors[keyof ApproveMachineConnectionErrors];
 
-export type RevokeMachineData = {
+export type ApproveMachineConnectionResponses = {
+  /**
+   * Machine connection approved or exactly replayed
+   */
+  204: void;
+};
+
+export type ApproveMachineConnectionResponse =
+  ApproveMachineConnectionResponses[keyof ApproveMachineConnectionResponses];
+
+export type DenyMachineConnectionData = {
   body: {
-    space_id: string;
-    machine_id: string;
+    request_id: string;
+    user_code: string;
   };
-  path?: never;
+  headers: {
+    "Idempotency-Key": string;
+  };
+  path: {
+    requestID: string;
+  };
   query?: never;
-  url: "/v1/machines/revoke";
+  url: "/v1/machine-connections/{requestID}/deny";
 };
 
-export type RevokeMachineErrors = {
+export type DenyMachineConnectionErrors = {
   /**
    * Request rejected
    */
   400: ApiError;
+  /**
+   * Request rejected
+   */
+  401: ApiError;
+  /**
+   * Request rejected
+   */
+  409: ApiError;
+  /**
+   * Request rejected
+   */
+  410: ApiError;
+};
+
+export type DenyMachineConnectionError =
+  DenyMachineConnectionErrors[keyof DenyMachineConnectionErrors];
+
+export type DenyMachineConnectionResponses = {
+  /**
+   * Machine connection denied or exactly replayed
+   */
+  204: void;
+};
+
+export type DenyMachineConnectionResponse =
+  DenyMachineConnectionResponses[keyof DenyMachineConnectionResponses];
+
+export type ListMachinesData = {
+  body?: never;
+  path: {
+    spaceID: string;
+  };
+  query?: {
+    after?: string;
+  };
+  url: "/v1/spaces/{spaceID}/machines";
+};
+
+export type ListMachinesErrors = {
+  /**
+   * Request rejected
+   */
+  401: ApiError;
+  /**
+   * Request rejected
+   */
+  404: ApiError;
+};
+
+export type ListMachinesError = ListMachinesErrors[keyof ListMachinesErrors];
+
+export type ListMachinesResponses = {
+  /**
+   * Persistent authoritative Space Machine inventory
+   */
+  200: MachinePage;
+};
+
+export type ListMachinesResponse =
+  ListMachinesResponses[keyof ListMachinesResponses];
+
+export type RevokeMachineData = {
+  body?: never;
+  headers: {
+    "Idempotency-Key": string;
+  };
+  path: {
+    spaceID: string;
+    machineID: string;
+  };
+  query?: never;
+  url: "/v1/spaces/{spaceID}/machines/{machineID}/revoke";
+};
+
+export type RevokeMachineErrors = {
   /**
    * Request rejected
    */
@@ -1301,17 +1610,19 @@ export type RevokeMachineErrors = {
    * Request rejected
    */
   404: ApiError;
+  /**
+   * Request rejected
+   */
+  409: ApiError;
 };
 
 export type RevokeMachineError = RevokeMachineErrors[keyof RevokeMachineErrors];
 
 export type RevokeMachineResponses = {
   /**
-   * Machine revoked
+   * Server-side Machine authority revoked or authoritative winner replayed
    */
-  200: {
-    status: "revoked";
-  };
+  200: MachineRecord;
 };
 
 export type RevokeMachineResponse =

@@ -92,10 +92,10 @@ func TestRemoveSpaceMemberWorklessTransferReplayAndRetention(t *testing.T) {
 		t.Fatalf("seed retained Membership: %v", err)
 	}
 
-	enrolledMachine, err := store.EnrollMachine(ctx, machine.EnrollMachineCommand{
+	enrolledMachine, err := enrollMachineForTest(ctx, store, testMachineCommand{
 		MachineID: uuid.NewString(), SpaceID: manager.SpaceID, DisplayName: "Independent Machine",
 		PublicKeyDER: []byte{1}, CertificatePEM: []byte("certificate"), CertificateSerial: uuid.NewString(),
-		EnrolledByUserID: target, IdempotencyKey: "machine-before-removal",
+		EnrolledByUserID: target,
 	})
 	if err != nil {
 		t.Fatalf("seed independent Machine: %v", err)
@@ -135,12 +135,24 @@ func TestRemoveSpaceMemberWorklessTransferReplayAndRetention(t *testing.T) {
 	if page, err := store.ListSpaceMembers(ctx, space.ListMembersCommand{SpaceID: otherSpace, ActorUserID: target}); err != nil || len(page.Members) != 1 {
 		t.Fatalf("retained other-Space access = %#v, %v", page, err)
 	}
-	if _, err := store.EnrollMachine(ctx, machine.EnrollMachineCommand{
-		MachineID: uuid.NewString(), SpaceID: manager.SpaceID, DisplayName: "Former Machine",
-		PublicKeyDER: []byte{1}, CertificatePEM: []byte("certificate"), CertificateSerial: uuid.NewString(),
-		EnrolledByUserID: target, IdempotencyKey: "former-machine",
-	}); !errors.Is(err, space.ErrForbidden) {
-		t.Fatalf("former member Machine enrollment = %v", err)
+	formerSessionID := uuid.NewString()
+	if _, err := pool.Exec(ctx, `insert into browser_sessions (session_id, user_id, identity_proof_method, expires_at) values ($1,$2,'email',transaction_timestamp()+interval '1 hour')`, formerSessionID, target); err != nil {
+		t.Fatalf("seed former member Browser Session: %v", err)
+	}
+	requestID := uuid.NewString()
+	codeDigest, pollDigest, sourceDigest, requestDigest := [32]byte{1}, [32]byte{2}, [32]byte{3}, [32]byte{4}
+	if _, err := store.BeginMachineConnection(ctx, machine.BeginConnectionCommand{
+		RequestID: requestID, IdempotencyKey: uuid.NewString(), DisplayName: "Former Machine",
+		PublicKeyDER: []byte{1}, KeyProof: make([]byte, 64), CodeDigest: codeDigest, PollDigest: pollDigest,
+		SourceDigest: sourceDigest, RequestDigest: requestDigest,
+	}); err != nil {
+		t.Fatalf("seed former member Machine request: %v", err)
+	}
+	if _, err := store.DecideMachineConnection(ctx, machine.DecideConnectionCommand{
+		BrowserSessionID: formerSessionID, RequestID: requestID, SpaceID: manager.SpaceID, Decision: "approved",
+		IdempotencyKey: uuid.NewString(), PreparedMachineID: uuid.NewString(), CodeDigest: codeDigest, RequestDigest: [32]byte{5},
+	}); !errors.Is(err, machine.ErrMachineAuthority) {
+		t.Fatalf("former member Machine approval = %v", err)
 	}
 	if err := invitations.Revoke(ctx, space.RevokeInvitationCommand{
 		SpaceID: manager.SpaceID, InvitationID: pending.InvitationID, ActorUserID: target, IdempotencyKey: "former-revoke",

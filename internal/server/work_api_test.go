@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/ApexReasoning/carry/internal/identity"
-	"github.com/ApexReasoning/carry/internal/machine"
 	"github.com/ApexReasoning/carry/internal/work"
 )
 
@@ -329,7 +328,7 @@ func workTestAPI(t *testing.T, commands WorkCommands, queries WorkQueries) http.
 	member.authentication = authentication
 	member.works = workRoutes
 	runStore := &recordingMachineRuns{}
-	machine, err := NewMachineRoutes(runStore, unavailableMachineConversations{})
+	machine, err := NewMachineRoutes(runStore, unavailableMachineConversations{}, unavailableMachineConnections{})
 	if err != nil {
 		t.Fatalf("compose Machine routes: %v", err)
 	}
@@ -383,5 +382,3 @@ func (s *recordingWorkQueries) LoadWork(_ context.Context, command work.LoadComm
 	s.loadCommand = command
 	return s.details, s.loadErr
 }
-
-var _ machine.EnrollmentPersistence = (*recordingMachineEnrollments)(nil)

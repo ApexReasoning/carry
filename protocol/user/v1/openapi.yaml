@@ -776,9 +776,10 @@ paths:
           $ref: "#/components/responses/Error"
         "409":
           $ref: "#/components/responses/Error"
-  /v1/machines/enroll:
+  /v1/machine-connections:
     post:
-      operationId: enrollMachine
+      operationId: beginMachineConnection
+      security: []
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -788,27 +789,162 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [space_id, display_name, public_key]
+              required:
+                [
+                  request_id,
+                  display_name,
+                  user_code,
+                  poll_secret,
+                  public_key,
+                  key_proof,
+                ]
               properties:
-                space_id:
+                request_id:
                   type: string
                   format: uuid
                 display_name:
                   type: string
                   minLength: 1
+                  maxLength: 128
+                user_code:
+                  type: string
+                poll_secret:
+                  type: string
                 public_key:
+                  type: string
+                  format: byte
+                key_proof:
                   type: string
                   format: byte
       responses:
         "201":
-          description: Machine enrolled or idempotently replayed
+          description: >-
+            Short-lived Machine connection ceremony created or exactly replayed
           headers:
             Cache-Control:
               $ref: "#/components/headers/NoStore"
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/MachineEnrollment"
+                $ref: "#/components/schemas/BegunMachineConnection"
+        "400":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "429":
+          $ref: "#/components/responses/Error"
+  /v1/machine-connections/status:
+    post:
+      operationId: pollMachineConnection
+      security: []
+      parameters:
+        - name: X-Carry-Machine-Connection
+          in: header
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Exact approved Machine certificate
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConnectedMachine"
+        "202":
+          description: Awaiting Browser decision
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "410":
+          $ref: "#/components/responses/Error"
+        "429":
+          $ref: "#/components/responses/Error"
+  /v1/machine-connections/cancel:
+    post:
+      operationId: cancelMachineConnection
+      security: []
+      parameters:
+        - name: X-Carry-Machine-Connection
+          in: header
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Connection request cancelled or exactly replayed
+        "401":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "410":
+          $ref: "#/components/responses/Error"
+  /v1/machine-connections/lookup:
+    post:
+      operationId: lookupMachineConnection
+      security:
+        - browserSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [user_code]
+              properties:
+                user_code:
+                  type: string
+      responses:
+        "200":
+          description: Exact pending Machine facts for Browser review
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MachineConnectionPreview"
+        "401":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "429":
+          $ref: "#/components/responses/Error"
+  /v1/machine-connections/{requestID}/approve:
+    parameters:
+      - $ref: "#/components/parameters/MachineConnectionRequestID"
+    post:
+      operationId: approveMachineConnection
+      security:
+        - browserSession: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [request_id, user_code, space_id]
+              properties:
+                request_id:
+                  type: string
+                  format: uuid
+                user_code:
+                  type: string
+                space_id:
+                  type: string
+                  format: uuid
+      responses:
+        "204":
+          description: Machine connection approved or exactly replayed
         "400":
           $ref: "#/components/responses/Error"
         "401":
@@ -817,9 +953,17 @@ paths:
           $ref: "#/components/responses/Error"
         "409":
           $ref: "#/components/responses/Error"
-  /v1/machines/revoke:
+        "410":
+          $ref: "#/components/responses/Error"
+  /v1/machine-connections/{requestID}/deny:
+    parameters:
+      - $ref: "#/components/parameters/MachineConnectionRequestID"
     post:
-      operationId: revokeMachine
+      operationId: denyMachineConnection
+      security:
+        - browserSession: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -827,37 +971,80 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [space_id, machine_id]
+              required: [request_id, user_code]
               properties:
-                space_id:
+                request_id:
                   type: string
                   format: uuid
-                machine_id:
+                user_code:
                   type: string
-                  format: uuid
+      responses:
+        "204":
+          description: Machine connection denied or exactly replayed
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "410":
+          $ref: "#/components/responses/Error"
+  /v1/spaces/{spaceID}/machines:
+    parameters:
+      - $ref: "#/components/parameters/SpaceID"
+    get:
+      operationId: listMachines
+      security:
+        - browserSession: []
+      parameters:
+        - name: after
+          in: query
+          schema:
+            type: string
+            format: uuid
       responses:
         "200":
-          description: Machine revoked
+          description: Persistent authoritative Space Machine inventory
           headers:
             Cache-Control:
               $ref: "#/components/headers/NoStore"
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: false
-                required: [status]
-                properties:
-                  status:
-                    type: string
-                    const: revoked
-        "400":
+                $ref: "#/components/schemas/MachinePage"
+        "401":
           $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+  /v1/spaces/{spaceID}/machines/{machineID}/revoke:
+    parameters:
+      - $ref: "#/components/parameters/SpaceID"
+      - $ref: "#/components/parameters/MachineID"
+    post:
+      operationId: revokeMachine
+      security:
+        - browserSession: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: >-
+            Server-side Machine authority revoked or authoritative winner
+            replayed
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MachineRecord"
         "401":
           $ref: "#/components/responses/Error"
         "403":
           $ref: "#/components/responses/Error"
         "404":
+          $ref: "#/components/responses/Error"
+        "409":
           $ref: "#/components/responses/Error"
   /v1/spaces/{spaceID}/conversation/messages:
     parameters:
@@ -1408,6 +1595,20 @@ components:
         type: string
         minLength: 1
         maxLength: 255
+    MachineConnectionRequestID:
+      name: requestID
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    MachineID:
+      name: machineID
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
     SpaceID:
       name: spaceID
       in: path
@@ -1832,10 +2033,92 @@ components:
           type: boolean
         already_member:
           type: boolean
-    MachineEnrollment:
+    BegunMachineConnection:
       type: object
       additionalProperties: false
-      required: [machine_id, space_id, certificate_pem]
+      required:
+        [
+          request_id,
+          display_name,
+          user_code,
+          poll_secret,
+          fingerprint,
+          verification_path,
+          expires_at,
+          interval_seconds,
+        ]
+      properties:
+        request_id:
+          type: string
+          format: uuid
+        display_name:
+          type: string
+        user_code:
+          type: string
+        poll_secret:
+          type: string
+        fingerprint:
+          type: string
+        verification_path:
+          type: string
+          const: /machine-connect
+        expires_at:
+          type: string
+          format: date-time
+        interval_seconds:
+          type: integer
+          minimum: 5
+          maximum: 30
+    MachineConnectionPreview:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          request_id,
+          user_code,
+          display_name,
+          fingerprint,
+          server,
+          created_at,
+          expires_at,
+        ]
+      properties:
+        request_id:
+          type: string
+          format: uuid
+        user_code:
+          type: string
+        display_name:
+          type: string
+        fingerprint:
+          type: string
+        server:
+          type: string
+          format: uri
+        decision:
+          type: string
+          enum: [approved, denied]
+        approved_space_id:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+    ConnectedMachine:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          machine_id,
+          space_id,
+          display_name,
+          certificate_pem,
+          redeemed_at,
+          replay_until,
+        ]
       properties:
         machine_id:
           type: string
@@ -1843,8 +2126,81 @@ components:
         space_id:
           type: string
           format: uuid
+        display_name:
+          type: string
         certificate_pem:
           type: string
+        redeemed_at:
+          type: string
+          format: date-time
+        replay_until:
+          type: string
+          format: date-time
+    MachineRecord:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          machine_id,
+          space_id,
+          space_name,
+          display_name,
+          fingerprint,
+          state,
+          enrolled_by_user_id,
+          enrolled_by_name,
+          enrolled_at,
+          can_revoke,
+        ]
+      properties:
+        machine_id:
+          type: string
+          format: uuid
+        space_id:
+          type: string
+          format: uuid
+        space_name:
+          type: string
+        display_name:
+          type: string
+        fingerprint:
+          type: string
+        state:
+          type: string
+          enum: [Active, Revoked]
+        enrolled_by_user_id:
+          type: string
+          format: uuid
+        enrolled_by_name:
+          type: string
+        enrolled_at:
+          type: string
+          format: date-time
+        revocation_actor:
+          type: string
+        revoked_by_user_id:
+          type: string
+          format: uuid
+        revoked_by_name:
+          type: string
+        revoked_at:
+          type: string
+          format: date-time
+        can_revoke:
+          type: boolean
+    MachinePage:
+      type: object
+      additionalProperties: false
+      required: [machines]
+      properties:
+        machines:
+          type: array
+          maxItems: 50
+          items:
+            $ref: "#/components/schemas/MachineRecord"
+        next_cursor:
+          type: string
+          format: uuid
     ConversationMessage:
       type: object
       additionalProperties: false

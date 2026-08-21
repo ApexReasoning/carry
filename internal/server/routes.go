@@ -141,26 +141,38 @@ func (routes *UserSpaceRoutes) mount(router chi.Router) {
 	router.Post("/spaces/{space_id}/invitations/{invitation_id}/revoke", routes.invitations.revoke)
 }
 
-// UserMachineRoutes owns User-authorized Machine enrollment and revocation routes.
+// UserMachineRoutes owns the public terminal ceremony and Browser-only
+// Machine approval, inventory, and remote revocation surface.
 type UserMachineRoutes struct {
-	machines userMachineAPI
+	machines machineConnectionAPI
 }
 
 func NewUserMachineRoutes(
-	enrollment MachineEnrollment,
-	revocation MachineRevocation,
+	connections MachineConnections,
+	credentials identity.Credentials,
+	origin ExternalOrigin,
+	requestSources RequestSource,
 ) (*UserMachineRoutes, error) {
-	if enrollment == nil || revocation == nil {
+	if connections == nil || origin.value == "" {
 		return nil, errors.New("User Machine route dependencies are required")
 	}
-	return &UserMachineRoutes{machines: userMachineAPI{
-		enrollment: enrollment, revocation: revocation,
+	return &UserMachineRoutes{machines: machineConnectionAPI{
+		connections: connections, credentials: credentials, origin: origin, requestSources: requestSources,
 	}}, nil
 }
 
-func (routes *UserMachineRoutes) mount(router chi.Router) {
-	router.Post("/machines/enroll", routes.machines.enroll)
-	router.Post("/machines/revoke", routes.machines.revoke)
+func (routes *UserMachineRoutes) mountPublic(router chi.Router) {
+	router.Post("/machine-connections", routes.machines.begin)
+	router.Post("/machine-connections/status", routes.machines.poll)
+	router.Post("/machine-connections/cancel", routes.machines.cancel)
+}
+
+func (routes *UserMachineRoutes) mountBrowser(router chi.Router) {
+	router.Post("/machine-connections/lookup", routes.machines.lookup)
+	router.Post("/machine-connections/{request_id}/approve", routes.machines.approve)
+	router.Post("/machine-connections/{request_id}/deny", routes.machines.deny)
+	router.Get("/spaces/{space_id}/machines", routes.machines.list)
+	router.Post("/spaces/{space_id}/machines/{machine_id}/revoke", routes.machines.revokeFromBrowser)
 }
 
 // ConversationRoutes owns the User-authenticated Conversation HTTP routes.
@@ -234,15 +246,16 @@ func (routes *UserRoutes) mount(router chi.Router) {
 	router.Group(func(userSurface chi.Router) {
 		userSurface.Use(rejectMachinePrincipal)
 		routes.identity.mountPublic(userSurface)
+		routes.machines.mountPublic(userSurface)
 		userSurface.Group(func(browser chi.Router) {
 			browser.Use(routes.authentication.authenticator.requireBrowserUser)
 			routes.identity.mountBrowser(browser)
 			routes.spaces.mount(browser)
+			routes.machines.mountBrowser(browser)
 		})
 		userSurface.Group(func(user chi.Router) {
 			user.Use(routes.authentication.authenticator.requireUser)
 			routes.identity.mountUser(user)
-			routes.machines.mount(user)
 			routes.conversations.mount(user)
 			routes.works.mount(user)
 		})
@@ -253,21 +266,24 @@ func (routes *UserRoutes) mount(router chi.Router) {
 type MachineRoutes struct {
 	runs          machineAPI
 	conversations machineConversationAPI
+	connections   machineConnectionAPI
 }
 
-func NewMachineRoutes(runs MachineRuns, conversations MachineConversations) (*MachineRoutes, error) {
-	if runs == nil || conversations == nil {
+func NewMachineRoutes(runs MachineRuns, conversations MachineConversations, connections MachineConnections) (*MachineRoutes, error) {
+	if runs == nil || conversations == nil || connections == nil {
 		return nil, errors.New("Machine route dependencies are required")
 	}
 	return &MachineRoutes{
 		runs:          machineAPI{runs: runs},
 		conversations: machineConversationAPI{conversations: conversations},
+		connections:   machineConnectionAPI{connections: connections},
 	}, nil
 }
 
 func (routes *MachineRoutes) mount(router chi.Router) {
 	router.Group(func(machine chi.Router) {
 		machine.Use(requireMachine)
+		machine.Post("/machine/revoke", routes.connections.revokeFromHost)
 		machine.Post("/runs/claim", routes.runs.claimRun)
 		machine.Post("/runs/{run_id}/attempts/{attempt_id}/renew", routes.runs.renewRun)
 		machine.Post("/runs/{run_id}/attempts/{attempt_id}/understanding", routes.runs.commitUnderstanding)

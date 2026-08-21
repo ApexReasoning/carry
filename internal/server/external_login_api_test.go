@@ -237,7 +237,7 @@ func externalLoginTestAPI(t *testing.T, external ExternalLogin, sessions Browser
 	}
 	member.authentication = authentication
 	member.identity = identityRoutes
-	machine, err := NewMachineRoutes(&recordingMachineRuns{}, unavailableMachineConversations{})
+	machine, err := NewMachineRoutes(&recordingMachineRuns{}, unavailableMachineConversations{}, unavailableMachineConnections{})
 	if err != nil {
 		t.Fatalf("compose Machine routes: %v", err)
 	}

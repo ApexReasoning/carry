@@ -4,18 +4,22 @@ import {
   appendWorkMessage as appendWorkMessageRequest,
   acceptSpaceInvitation as acceptSpaceInvitationRequest,
   approveCliLogin as approveCliLoginRequest,
+  approveMachineConnection as approveMachineConnectionRequest,
   createFirstSpace as createFirstSpaceRequest,
   createWork as createWorkRequest,
   denyCliLogin as denyCliLoginRequest,
+  denyMachineConnection as denyMachineConnectionRequest,
   issueSpaceInvitation as issueSpaceInvitationRequest,
   listCliCredentials as listCliCredentialsRequest,
   listConversationMessages as listConversationMessagesRequest,
   listInvitationInbox as listInvitationInboxRequest,
   listManagedInvitations as listManagedInvitationsRequest,
+  listMachines as listMachinesRequest,
   listSpaceMembers as listSpaceMembersRequest,
   listWorks as listWorksRequest,
   loadCurrentUser,
   lookupCliLogin as lookupCliLoginRequest,
+  lookupMachineConnection as lookupMachineConnectionRequest,
   loadIdentityMethods as loadIdentityMethodsRequest,
   loadWork as loadWorkRequest,
   requestEmailCode as requestEmailCodeRequest,
@@ -25,6 +29,7 @@ import {
   resendSpaceInvitation as resendSpaceInvitationRequest,
   retryWork as retryWorkRequest,
   revokeCliCredential as revokeCliCredentialRequest,
+  revokeMachine as revokeMachineRequest,
   revokeSpaceInvitation as revokeSpaceInvitationRequest,
   revokeCurrentBrowserSession,
   sendConversationMessage as sendConversationMessageRequest,
@@ -42,6 +47,9 @@ import type {
   IdentityMethods,
   InvitationInbox,
   ManagedInvitation,
+  MachineConnectionPreview,
+  MachinePage,
+  MachineRecord,
   Membership,
   SpaceMember,
   User,
@@ -78,6 +86,95 @@ client.setConfig({
 });
 
 const sameOrigin = { credentials: "same-origin" as const };
+
+export async function lookupMachineConnection(
+  userCode: string,
+): Promise<MachineConnectionPreview> {
+  const result = await lookupMachineConnectionRequest({
+    ...sameOrigin,
+    body: { user_code: userCode },
+  });
+  return requireData(
+    result.data,
+    result.response,
+    result.error,
+    "Machine connection lookup",
+  );
+}
+
+export async function approveMachineConnection(
+  preview: MachineConnectionPreview,
+  spaceID: string,
+  key: string,
+): Promise<void> {
+  const result = await approveMachineConnectionRequest({
+    ...sameOrigin,
+    path: { requestID: preview.request_id },
+    headers: { "Idempotency-Key": key },
+    body: {
+      request_id: preview.request_id,
+      user_code: preview.user_code,
+      space_id: spaceID,
+    },
+  });
+  requireMutationSuccess(
+    result.response,
+    result.error,
+    "Machine connection approval",
+  );
+}
+
+export async function denyMachineConnection(
+  preview: MachineConnectionPreview,
+  key: string,
+): Promise<void> {
+  const result = await denyMachineConnectionRequest({
+    ...sameOrigin,
+    path: { requestID: preview.request_id },
+    headers: { "Idempotency-Key": key },
+    body: { request_id: preview.request_id, user_code: preview.user_code },
+  });
+  requireMutationSuccess(
+    result.response,
+    result.error,
+    "Machine connection denial",
+  );
+}
+
+export async function machines(
+  spaceID: string,
+  after?: string,
+): Promise<MachinePage> {
+  const result = await listMachinesRequest({
+    ...sameOrigin,
+    path: { spaceID },
+    query: after ? { after } : undefined,
+  });
+  return requireData(
+    result.data,
+    result.response,
+    result.error,
+    "Machine inventory",
+  );
+}
+
+export async function revokeMachine(
+  spaceID: string,
+  machineID: string,
+  key: string,
+): Promise<MachineRecord> {
+  const result = await revokeMachineRequest({
+    ...sameOrigin,
+    path: { spaceID, machineID },
+    headers: { "Idempotency-Key": key },
+  });
+  return requireMutationData(
+    result.data,
+    result.response,
+    result.error,
+    "Machine revocation",
+  );
+}
 
 export async function lookupCliLogin(
   userCode: string,

@@ -8,10 +8,8 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/base64"
 	"encoding/pem"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -24,70 +22,6 @@ import (
 	"github.com/ApexReasoning/carry/internal/space"
 	"github.com/ApexReasoning/carry/internal/work"
 )
-
-func TestEnrollMachineUsesAuthenticatedMemberAuthority(t *testing.T) {
-	t.Parallel()
-	const (
-		memberID  = "76fa247e-e9ef-4036-ac5d-87463cabb2ff"
-		spaceID   = "a30f0a9a-8cb2-4ae4-9a7e-ae85e207788a"
-		machineID = "38a0e783-2f61-4de4-a264-91fe1c099893"
-	)
-
-	authority := testAuthority(t)
-	tokens := &recordingCLICredentials{user: identity.AuthenticatedUser{UserID: memberID}}
-	machines := &recordingMachineEnrollments{enrollment: machine.MachineEnrollment{
-		MachineID: machineID, SpaceID: spaceID, CertificatePEM: []byte("machine-certificate"),
-	}}
-	publicKey, _, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatalf("generate Machine key: %v", err)
-	}
-	publicKeyDER, err := x509.MarshalPKIXPublicKey(publicKey)
-	if err != nil {
-		t.Fatalf("marshal Machine public key: %v", err)
-	}
-	body := fmt.Sprintf(
-		`{"space_id":"`+spaceID+`","display_name":"research-mac","public_key":%q}`,
-		base64.StdEncoding.EncodeToString(publicKeyDER),
-	)
-	request := httptest.NewRequest(http.MethodPost, "/v1/machines/enroll", bytes.NewBufferString(body))
-	request.Header.Set("Authorization", "Bearer "+testCLIBearer(t))
-	request.Header.Set("Idempotency-Key", "enroll-research-mac")
-	response := httptest.NewRecorder()
-
-	testAPI(t, authority, tokens, machines, &recordingMachineRuns{}).ServeHTTP(response, request)
-
-	if response.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want %d; body = %s", response.Code, http.StatusCreated, response.Body.String())
-	}
-	if tokens.authenticatedCredentialID != testCLICredentialID {
-		t.Fatalf("authenticated CLI credential = %q", tokens.authenticatedCredentialID)
-	}
-	if machines.command.EnrolledByUserID != memberID || machines.command.SpaceID != spaceID {
-		t.Fatalf("enrollment command = %#v", machines.command)
-	}
-	if machines.command.IdempotencyKey != "enroll-research-mac" {
-		t.Fatalf("idempotency key = %q", machines.command.IdempotencyKey)
-	}
-}
-
-func TestEnrollMachineRejectsMissingCLICredential(t *testing.T) {
-	t.Parallel()
-
-	machines := &recordingMachineEnrollments{}
-	request := httptest.NewRequest(http.MethodPost, "/v1/machines/enroll", bytes.NewBufferString(`{}`))
-	response := httptest.NewRecorder()
-
-	testAPI(t, testAuthority(t), &recordingCLICredentials{}, machines, &recordingMachineRuns{}).
-		ServeHTTP(response, request)
-
-	if response.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want %d", response.Code, http.StatusUnauthorized)
-	}
-	if machines.command.MachineID != "" {
-		t.Fatal("unauthenticated request reached enrollment")
-	}
-}
 
 func TestMachineClaimReturnsCompleteWorkContextWithoutSecondCredential(t *testing.T) {
 	t.Parallel()
@@ -104,7 +38,7 @@ func TestMachineClaimReturnsCompleteWorkContextWithoutSecondCredential(t *testin
 	request.TLS = verifiedMachineTLS(machineCertificate)
 	response := httptest.NewRecorder()
 
-	testAPI(t, authority, &recordingCLICredentials{}, &recordingMachineEnrollments{}, runs).
+	testAPI(t, authority, &recordingCLICredentials{}, &recordingMachineConnectionStub{}, runs).
 		ServeHTTP(response, request)
 
 	if response.Code != http.StatusOK {
@@ -137,7 +71,7 @@ func TestMachineCommitBindsCertificateIdentity(t *testing.T) {
 	request.TLS = verifiedMachineTLS(machineCertificate)
 	response := httptest.NewRecorder()
 
-	testAPI(t, authority, &recordingCLICredentials{}, &recordingMachineEnrollments{}, runs).
+	testAPI(t, authority, &recordingCLICredentials{}, &recordingMachineConnectionStub{}, runs).
 		ServeHTTP(response, request)
 
 	if response.Code != http.StatusNoContent {
@@ -161,7 +95,7 @@ func TestMachineMutationRejectsMalformedAuthorityPath(t *testing.T) {
 	)
 	request.TLS = verifiedMachineTLS(machineCertificate)
 	response := httptest.NewRecorder()
-	testAPI(t, authority, &recordingCLICredentials{}, &recordingMachineEnrollments{}, runs).
+	testAPI(t, authority, &recordingCLICredentials{}, &recordingMachineConnectionStub{}, runs).
 		ServeHTTP(response, request)
 	if response.Code != http.StatusBadRequest || runs.renewRunID != "" {
 		t.Fatalf("malformed authority response = %d %s; renew Run = %q", response.Code, response.Body.String(), runs.renewRunID)
@@ -180,7 +114,7 @@ func testAPI(
 	t *testing.T,
 	authority *machine.CertificateAuthority,
 	tokens CLICredentialAuthenticator,
-	machines machine.EnrollmentPersistence,
+	machines MachineConnections,
 	runs *recordingMachineRuns,
 ) http.Handler {
 	t.Helper()
@@ -190,15 +124,14 @@ func testAPI(
 		t.Fatalf("compose User authentication: %v", err)
 	}
 	userMachines, err := NewUserMachineRoutes(
-		testMachineEnrollment(t, machines, authority),
-		machines.(MachineRevocation),
+		machines, testIdentityCredentials(t), testExternalOrigin(t), NewRequestSource(nil),
 	)
 	if err != nil {
 		t.Fatalf("compose User Machine routes: %v", err)
 	}
 	user.authentication = authentication
 	user.machines = userMachines
-	machine, err := NewMachineRoutes(runs, unavailableMachineConversations{})
+	machine, err := NewMachineRoutes(runs, unavailableMachineConversations{}, machines)
 	if err != nil {
 		t.Fatalf("compose Machine routes: %v", err)
 	}
@@ -351,7 +284,6 @@ func testUserRoutes(t *testing.T, authority *machine.CertificateAuthority) *User
 	if err != nil {
 		t.Fatalf("compose test first Space: %v", err)
 	}
-	machines := &recordingMachineEnrollments{}
 	authentication, err := NewUserAuthentication(&recordingCLICredentials{}, sessions, credentials, testExternalOrigin(t))
 	if err != nil {
 		t.Fatalf("compose test User authentication: %v", err)
@@ -374,7 +306,7 @@ func testUserRoutes(t *testing.T, authority *machine.CertificateAuthority) *User
 	if err != nil {
 		t.Fatalf("compose test User Space routes: %v", err)
 	}
-	machineRoutes, err := NewUserMachineRoutes(testMachineEnrollment(t, machines, authority), machines)
+	machineRoutes, err := NewUserMachineRoutes(unavailableMachineConnections{}, credentials, testExternalOrigin(t), NewRequestSource(nil))
 	if err != nil {
 		t.Fatalf("compose test User Machine routes: %v", err)
 	}
@@ -401,15 +333,6 @@ func testUserRoutes(t *testing.T, authority *machine.CertificateAuthority) *User
 		t.Fatalf("compose test User routes: %v", err)
 	}
 	return routes
-}
-
-func testMachineEnrollment(t *testing.T, persistence machine.EnrollmentPersistence, authority *machine.CertificateAuthority) *machine.Enrollment {
-	t.Helper()
-	enrollment, err := machine.NewEnrollment(persistence, authority)
-	if err != nil {
-		t.Fatalf("compose test Machine enrollment: %v", err)
-	}
-	return enrollment
 }
 
 type unavailableExternalLogin struct{}
@@ -477,19 +400,37 @@ func (emptyMemberships) ListMemberships(context.Context, string) ([]space.Member
 	return nil, nil
 }
 
-type recordingMachineEnrollments struct {
-	enrollment machine.MachineEnrollment
-	command    machine.EnrollMachineCommand
+type unavailableMachineConnections struct{}
+
+func (unavailableMachineConnections) Begin(context.Context, machine.BeginConnectionRequest) (machine.BegunConnection, error) {
+	return machine.BegunConnection{}, errors.New("not implemented")
+}
+func (unavailableMachineConnections) Lookup(context.Context, machine.LookupConnectionRequest) (machine.ConnectionPreview, error) {
+	return machine.ConnectionPreview{}, errors.New("not implemented")
+}
+func (unavailableMachineConnections) Approve(context.Context, machine.DecideConnectionRequest) error {
+	return errors.New("not implemented")
+}
+func (unavailableMachineConnections) Deny(context.Context, machine.DecideConnectionRequest) error {
+	return errors.New("not implemented")
+}
+func (unavailableMachineConnections) Poll(context.Context, string) (machine.ConnectedMachine, error) {
+	return machine.ConnectedMachine{}, errors.New("not implemented")
+}
+func (unavailableMachineConnections) Cancel(context.Context, string) error {
+	return errors.New("not implemented")
+}
+func (unavailableMachineConnections) List(context.Context, string, string, string) (machine.MachinePage, error) {
+	return machine.MachinePage{}, errors.New("not implemented")
+}
+func (unavailableMachineConnections) RevokeFromBrowser(context.Context, string, string, string, string) (machine.MachineRecord, error) {
+	return machine.MachineRecord{}, errors.New("not implemented")
+}
+func (unavailableMachineConnections) RevokeFromHost(context.Context, string, string, string) (machine.MachineRecord, error) {
+	return machine.MachineRecord{}, errors.New("not implemented")
 }
 
-func (store *recordingMachineEnrollments) EnrollMachine(_ context.Context, command machine.EnrollMachineCommand) (machine.MachineEnrollment, error) {
-	store.command = command
-	return store.enrollment, nil
-}
-
-func (*recordingMachineEnrollments) RevokeMachine(context.Context, string, string, string) error {
-	return nil
-}
+type recordingMachineConnectionStub struct{ unavailableMachineConnections }
 
 type recordingMachineRuns struct {
 	claimMachineID string

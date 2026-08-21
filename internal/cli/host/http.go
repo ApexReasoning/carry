@@ -34,9 +34,12 @@ func parseServerURL(raw string) (string, error) {
 }
 
 func newTLSClient(caCertificatePEM string, certificate *tls.Certificate) (*http.Client, error) {
-	roots := x509.NewCertPool()
-	if !roots.AppendCertsFromPEM([]byte(caCertificatePEM)) {
-		return nil, errors.New("CA certificate is invalid")
+	var roots *x509.CertPool
+	if strings.TrimSpace(caCertificatePEM) != "" {
+		roots = x509.NewCertPool()
+		if !roots.AppendCertsFromPEM([]byte(caCertificatePEM)) {
+			return nil, errors.New("CA certificate is invalid")
+		}
 	}
 	configuration := &tls.Config{MinVersion: tls.VersionTLS13, RootCAs: roots}
 	if certificate != nil {

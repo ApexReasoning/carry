@@ -773,7 +773,23 @@ func composeExternalLoginTestAPI(
 	if err != nil {
 		t.Fatalf("compose User Space routes: %v", err)
 	}
-	machineRoutes, err := carryserver.NewUserMachineRoutes(unavailableMachineEnrollment{}, store)
+	bundle, err := machine.CreateCertificateBundle([]string{"localhost"}, time.Now())
+	if err != nil {
+		t.Fatalf("create Machine test PKI: %v", err)
+	}
+	authority, err := machine.LoadCertificateAuthority(bundle.CACertificatePEM, bundle.CAPrivateKeyPEM)
+	if err != nil {
+		t.Fatalf("load Machine test authority: %v", err)
+	}
+	connectionRoot, err := machine.ParseConnectionRoot(base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{9}, 32)))
+	if err != nil {
+		t.Fatalf("create Machine connection credentials: %v", err)
+	}
+	connections, err := machine.NewConnections(store, connectionRoot, authority, origin.String())
+	if err != nil {
+		t.Fatalf("compose Machine connections: %v", err)
+	}
+	machineRoutes, err := carryserver.NewUserMachineRoutes(connections, credentials, origin, carryserver.NewRequestSource(nil))
 	if err != nil {
 		t.Fatalf("compose User Machine routes: %v", err)
 	}
@@ -791,7 +807,7 @@ func composeExternalLoginTestAPI(
 	if err != nil {
 		t.Fatalf("compose User routes: %v", err)
 	}
-	hostRoutes, err := carryserver.NewMachineRoutes(store, store)
+	hostRoutes, err := carryserver.NewMachineRoutes(store, store, connections)
 	if err != nil {
 		t.Fatalf("compose Machine routes: %v", err)
 	}
@@ -885,12 +901,6 @@ func (unavailableEmailCodeSubmitter) SubmitEmailCode(
 	[sha256.Size]byte,
 ) identity.EmailSubmission {
 	return identity.EmailSubmission{State: identity.EmailSubmissionRejected}
-}
-
-type unavailableMachineEnrollment struct{}
-
-func (unavailableMachineEnrollment) Enroll(context.Context, machine.EnrollmentRequest) (machine.MachineEnrollment, error) {
-	return machine.MachineEnrollment{}, errors.New("Machine enrollment is unavailable in external login test")
 }
 
 type googleProviderFixture struct {
