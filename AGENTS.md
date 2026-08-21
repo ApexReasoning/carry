@@ -1,103 +1,85 @@
 # Carry Agent Contract
 
-This file is the execution entry point for coding agents. It does not replace the canonical design documents; it tells agents which documents to read and how to turn them into bounded work.
+Current Node: **Roadmap reset (documentation-only; no production implementation).**
+Until it closes, only the seven canonical files below may change.
 
-## Sources of Truth
+Carry is an AI teammate: a person hands a responsibility over in carry.ai Web, a named Agent owns keeping it moving, and the Work stays true across Conversations, Agent sessions, Hosts, channels and time.
 
-Before a material change, read the relevant sections of:
+Nodes 0–12 are technical evidence for an older contract. The old Node 13–19 route is void. `docs/implementation.md` owns the only active route, Nodes 13–30.
 
-- `docs/product.md` for user language, journeys, privacy, and product invariants;
-- `docs/architecture.md` for fact owners, transactions, authority, and dependency direction;
-- `docs/code-style.md` for Go, TypeScript, React, SQL, naming, and test quality;
-- `docs/repository.md` for paths, commands, generated code, CI, experiments, and deletion rules;
-- `docs/implementation.md` for the current V1 Node, sequence, review budget, and closing evidence.
+## Canonical documents
 
-Do not silently choose between conflicting instructions. Stop, identify the conflict, and ask for a decision. An explicit current user decision overrides older text; update the affected canonical document before implementing the conflicting design.
+| File | Owns |
+| --- | --- |
+| `AGENTS.md` | this contract and the gate order |
+| `README.md` | repository entry point |
+| `docs/product.md` | screens, actions, product vocabulary, privacy, invariants |
+| `docs/architecture.md` | fact owners, topology, authority, concurrency, package direction |
+| `docs/code-style.md` | enforceable aesthetics gates |
+| `docs/repository.md` | paths, generation, commands, CI, Issue-owned artifacts, deletion |
+| `docs/implementation.md` | Node route, research procedure, review protocol, evidence |
 
-## Four Operating Principles
+Read the parts that own the change you are making. A current explicit user decision wins; update the owning document before implementing against it. Do not keep an obsolete path alive unless a real published consumer depends on it.
 
-These principles turn Carry's restraint and freedom philosophy into coding behavior:
+## Settled topology
 
-1. **Surface uncertainty before code.** Read the owning facts first. State assumptions and materially different interpretations instead of choosing silently. Ask only when the answer changes the user journey, owner, authority, consequence, or approved scope; make routine engineering judgments without pushing them back to the user.
-2. **Build only earned structure.** Implement the smallest complete structure required by the current journey. Do not add speculative flexibility, but retain every type, transaction, failure path, and test needed to protect truth. Line count is not a simplicity metric.
-3. **Keep scope constrained and the vertical change complete.** Do not make unrelated improvements. Within the approved behavior, include every necessary owner, migration, protocol, generated artifact, test, and document, and delete the path it replaces. A small diff that leaves two truths is not surgical.
-4. **Define completion with evidence.** Before implementation, name success, failure, authority/concurrency, and user-journey evidence. Loop until the required evidence is observed; a green command alone does not prove that the changed path executed or that the product promise is true.
+Do not reopen silently:
 
-At every Node entry, include read-only archaeology of the user-designated historical implementation alongside the five external primary-source comparisons. Cite exact files and symbols, extract strengths and failure modes, and re-derive the Carry design from the current journey. Never copy its package tree, schema, API, migrations, generated code, compatibility paths, or Web routes. Nodes 0 and 1 must receive this archaeology before M0 closes.
+- humans use carry.ai Web; sign-in is GitHub, Google or Email, and GitHub sign-in grants no repository authority; MVP has no onboarding form; after sign-in a member accepts an invited Space or chooses/creates one;
+- a Space has a display name that may repeat and a globally unique normalized slug derived from it; MVP slugs are immutable; invite links are single-use, expiring and revocable; Membership carries only the two already-earned independent authorities to manage members and connect Hosts, with no role hierarchy or generic permission system; until Space end each authority has at least one Active holder;
+- a Space has many Hosts, a Host exposes many concrete Agents (Pi, Codex), and an Agent belongs to exactly one Host;
+- Agent is a durable fact owner and a user-visible identity: stable ID, Space, Space-unique normalized name, deterministic preset avatar, one human owner, one Host binding, Active/Removed lifecycle, created time; a new Agent's human owner is the authenticated member who approved that Host connection, while repeat discovery never changes an existing Agent's owner, name or lifecycle; every active Agent is selectable by members of its Space, and a Host going offline does not delete Agent identity;
+- Online, Last active, current Runs and any optional model choice are derived observations, never stored identity, and there is no provider/model/runtime registry;
+- the `carry` executable is the long-running Host, shallow operator commands for Host setup, and an Agent-facing interface; it is never a parallel human product, and an Agent never holds member credentials, the Machine private key or a direct Server path;
+- a Conversation fixes its Agent at the first message; changing Agent starts a new Conversation; provider continuation handles stay private to the owning Host and there is no public Session API;
+- every Work has exactly one human owner (goal, scope, external authorization, Inbox response, acceptance, closure) and exactly one Agent owner (progress, plan, comment interpretation and routing, collaborator choice, notices, schedules); Host or Agent loss never deletes Work or silently replaces that owner;
+- Work is created only through an Agent — Conversation, the Web `Create with <Agent>` form, or a registered local Agent calling the CLI — never by a direct Server or Web bypass;
+- Server never pushes work: Conversation, Work and Run record the exact target Agent, the owning Host pulls and claims through PostgreSQL, and an unavailable target becomes explicit user-visible state instead of a fallback to another Agent;
+- emergency Host/Agent revoke takes effect without waiting for handoff; removal authority never grants authority over affected Work; only each Work's human owner may transfer future Agent responsibility to an Active Agent in the same Space that is available at commit time; owner-unavailable Work derives directly into that human owner's Inbox; the old Agent remains historical, old submissions are rejected, schedules pause, and the replacement starts from durable Work facts rather than provider-private state;
+- a current owner may voluntarily transfer only their own Work or Agent responsibility; a member manager who forcibly removes another member cannot choose third-party successors and must atomically take human ownership of that member's Open/Paused Work while the removed member's Active Agents become Removed; if the target is the last Host-connection authority holder, the remover also inherits that one narrow authority; Membership revocation and both Web-request/local Agent Work creation serialize in PostgreSQL so no Active Agent or Open/Paused Work points to an invalid member;
+- Space end never closes Work on another human owner's behalf: every Open/Paused Work must first be closed through its ordinary lifecycle; ending then revokes future Space authority while preserving existing Work lifecycle and history under the researched retention boundary;
+- Work shows both owners, participating Agents, each Agent's current activity, an ordered plan that is display truth only, and outputs; Inbox is a query over Work facts; email and Feishu deliver automatically once a channel is connected, and delivery failure or Unknown never changes Inbox;
+- V1 needs one real non-code journey before code-to-PR.
 
-## Node Contract Before Code
+Representation is not topology. Table shapes, columns, indexes, cardinalities, transports and command names are earned by a Node's research and frozen in its design freeze, not assumed here.
 
-Before writing production code, identify the current Node and state a short contract in the conversation, Issue, or PR. Do not create another plan file.
+Forbidden without a new user loss, identity, lifecycle and authority boundary: `Assignment`, `Coordinate`, a `Plan`/`Step`/`Artifact` owner, a generic `Effect`/`Action`/`Capability`, a Session owner, a participant owner, a notification owner, a scheduler owner, a workflow engine, a provider/model/runtime registry, and `Orchestrator`/`Manager`/`common`/`utils` layers. Try an existing owner, field, function or local value first.
 
-```text
-Node:
-User journey:
-Fact owners:
-Allowed paths:
-Not doing:
-Success evidence:
-Failure evidence:
-Authority/concurrency evidence:
-Focused commands:
-Milestone:
-```
+## Operating rules
 
-The contract is set after Node research and design, before implementation. If implementation needs a new owner, root directory, public protocol, or materially different journey, pause and update the contract and closing evidence first.
+1. Ask only when the answer changes the journey, owner, authority, consequence or approved scope. Decide ordinary engineering yourself.
+2. Use the fewest concepts that still protect truth, privacy, authority, failure and evidence.
+3. A Node is vertically complete: owner, migration, query, protocol, client, UI, CLI, test, docs and deletion. New and old paths never both live at Node close.
+4. A green command is not evidence. Observe the changed path succeed, fail, recover and reach the user.
 
-## Repository Skeleton and Boundaries
+## Gate order
 
-- Start from the buildable skeleton established by Node 0 and the target shape in `docs/repository.md`.
-- Create only packages required by the current Node. Do not create empty future directories.
-- Domain packages must not import server, PostgreSQL, connector, or Agent process adapters.
-- `carry-server` must not import local Pi or Codex process implementations.
-- Do not create `common`, `utils`, `platform`, `integration`, `registry`, `resource`, `runtime`, `orchestrator`, `readmodel`, or similarly generic ownership buckets.
-- Do not maintain a central allowlist of every package. Boundary checks express stable forbidden directions.
+Before a Node starts, open one GitHub Issue. That Issue is the durable owner of the Node's journey freeze, research, evidence rows, canaries, design freeze and exact file budget. The repository never gains plan, review, audit, handoff or evidence documents.
 
-## Product and Architecture Guardrails
+Every Node runs these gates in order; skipping one is a blocker. The executable procedures live in `docs/implementation.md`.
 
-`docs/product.md` and `docs/architecture.md` own the full rules. This entry point repeats only the boundaries an implementation agent must not cross silently:
+1. **Journey freeze** — the ten-field block in `docs/implementation.md` §2, recorded in the Issue. A product reviewer may reject it before any research.
+2. **Question-led research** — `docs/implementation.md` §3: a frozen question plus a disconfirming question, sources chosen by the relevance matrix rather than popularity, an exact read-only archaeology target in `/Users/zane/Dev/loop`, the eight-column evidence rows, and a real or explicitly blocked canary.
+3. **`carry.supervisor` research audit** — `docs/implementation.md` §3.7. Blockers stop the design freeze.
+4. **Exact design freeze** — `docs/implementation.md` §4: owners, packages, exact files, deletions, transaction phases, evidence, commands, not-doing. Needing another package, file family, route, table or credential means reopening the contract first.
+5. **`carry.supervisor` design audit.**
+6. **Implementation** — inside the frozen budget: read the owner, add one failing behavior test, make the smallest vertical change, run formatter/LSP/focused tests, delete the replaced path in the same Node, reread the diff.
+7. **Three fresh-context Node-close reviews** — `docs/implementation.md` §6, run in parallel, read-only, blockers only.
+8. **`carry.supervisor` diff audit**, then `make check`, one Node-scoped commit, push, terminal CI.
 
-- users understand Space, Carry, and Work; current persistent owners are Identity, Space, Conversation, Work, Machine, and Run;
-- explicit delegation creates Work directly; private Conversation content never becomes shared Work automatically or through a readable source relation;
-- content and model output never grant authority, and Unknown is never guessed into failure or success;
-- Work and Run are independent of Git, provider, model, Host and Runtime; Pi and Codex remain concrete native adapters, not a registry;
-- PostgreSQL owns transactions, idempotency, claims, leases and fences; Machine mTLS plus the exact current claim facts grants execution authority;
-- a new owner, credential, protocol audience or external consequence requires a current journey and an updated canonical decision before code.
+The open research gates in `docs/implementation.md` §8 must be closed with first-party evidence before the Node they guard writes code. Deciding one without evidence is a blocker.
 
-## Implementation and Review Budget
+`carry.supervisor` (Claude Opus 5, read-only) is a continuity gate at steps 3, 5 and 8. It never replaces the three independent reviews. Give it the frozen contract, the delta and the changed files only.
 
-Within a Node:
+One writer owns the worktree. Children do not redesign the route or launch subagents.
 
-1. read the current owner;
-2. add a failing behavior or contract test;
-3. implement the smallest vertical behavior;
-4. run focused checks;
-5. delete replaced code and scaffolding.
+## Aesthetics gates
 
-Implementation steps receive author self-review, formatter, LSP, and focused tests only. Do not launch a reviewer for every step.
+`docs/code-style.md` is binding. The blockers most often hit: an `if` that combines more than three independent facts (including one hidden behind a helper), a command literal carrying facts the receiver owns or can derive, a function mixing wire parsing, product policy, transaction and network I/O, a transaction without named phases, an abstraction that only forwards, and a test that protects ceremony instead of behavior. A package exists for a fact owner, a concrete process adapter, or an explicitly named composition/transport boundary that owns no product policy; a file is named after one cohesive behavior at that boundary. Split by responsibility and transaction phase, never by line count. Generated code is excluded.
 
-Every Node close requires three independent fresh-context reviews:
+`less is more` means fewer concepts and decisions for the reader, not fewer lines.
 
-1. **Logic/evidence:** verify the frozen user journey, success and failure behavior, PostgreSQL concurrency/authority evidence, and direct proof that the changed path executed. Keep uncertainty explicit; never infer success, failure, retry safety, or completion from a green command alone.
-2. **Architecture/product/AI-native:** apply **responsibility fixed, path free**. Verify one authoritative owner for identity, authority, causality, time, privacy, and external outcome; reject content-derived authority and unearned structure; preserve natural-language, concrete-adapter, and execution freedom inside those boundaries.
-3. **Implementation aesthetics:** verify accurate names and file ownership, a linear main path, restrained dependencies, deletion of replaced/scaffold code, and vertical completeness. Fewer lines are not simpler when they weaken truth, authority, failure handling, or evidence.
-
-All three gates apply the four operating principles: surface uncertainty before code; build only earned structure; keep scope constrained while completing the vertical journey; and define completion with direct evidence. Reviewers receive the same frozen Node contract and inspect only their assigned gate. They report blockers and high-value deletion opportunities, not speculative future scope.
-
-After blocker fixes, the reviewer who found the blocker may perform one narrow confirmation. Do not rerun the full three-review fleet unless fixes materially cross multiple gates. A Milestone boundary runs the same three gates over the complete cumulative Milestone diff and journeys, rather than substituting for Node-close review.
-
-Review must not expand the frozen closing evidence unless it finds a correctness blocker, data risk, authority/privacy vulnerability, or a direct violation of the current journey or architecture philosophy.
-
-## Delegated Agents
-
-- Launch every child with the repository root as its working directory so project instructions are discovered.
-- The task must explicitly say: read `AGENTS.md`, name the current Node, and obey its contract.
-- Give one child one bounded role. Do not let ordinary implementation children redesign the roadmap or launch further review fleets.
-- Fresh-context reviewers receive the frozen Node contract and report only blockers in their assigned gate.
-
-## Verification
-
-Use repository commands as the stable interface when they exist:
+## Commands
 
 ```text
 make check-go
@@ -106,19 +88,6 @@ make check-product
 make check
 ```
 
-- `check-*` targets are read-only; they must not format or generate before passing.
-- PostgreSQL focused tests use a real isolated database. A missing database or skipped test is not a pass.
-- Go HTTP routing uses chi; do not mix routers or add a controller framework.
-- The nested `carry` CLI uses Cobra only inside `internal/cli/`; construct commands explicitly without globals, `init()` registration, registries, or a universal dependency factory. Keep `carry-server` on standard `flag` while its operator surface remains shallow.
-- PostgreSQL application queries use sqlc and generated code stays in `internal/postgres/dbsqlc/`.
-- Run sqlc only through `make generate`; do not hand-edit generated files.
-- Web uses the repository-pinned Node version and pnpm lockfile.
-- Local and CI checks must invoke the same Make targets.
+PostgreSQL tests use a real isolated database; a skipped database test is a failure. Go routing uses chi. Cobra lives only in `internal/cli/`. Application SQL goes through sqlc and `make generate`. Web uses the pinned Node version and the `apps/web` lockfile.
 
-## Documentation and Git Hygiene
-
-- Keep current design in the five documents listed above. Node research and review details belong in Issues or PRs.
-- Do not add `docs/plans`, `docs/reviews`, `docs/handoffs`, `docs/audits`, or evidence archives.
-- Delete experiments, scripts, dependencies, generated artifacts, and docs when their consumer or decision disappears.
-- At Node close, after required checks and reviews pass, inspect the complete diff, exclude unrelated files, create one ordinary Node-scoped commit, and push the current branch before stopping for user feedback.
-- Do not force-push, rewrite history, reset, clean, or stage unrelated work unless the user explicitly asks.
+Never force-push, rewrite history, reset, clean, or stage unrelated work. Preserve unrelated user changes in the worktree.

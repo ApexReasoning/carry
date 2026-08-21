@@ -1,354 +1,164 @@
-# Carry：持续把工作向前推进的 AI 同事
+# Carry 产品定义
 
-## 产品定义
+本文件拥有界面、动作、产品词汇、隐私边界和不变量。owner、权限与并发见 `docs/architecture.md`；节点与研究见 `docs/implementation.md`。这里不写事务细节。
 
-Carry 是团队可以长期托付工作的 AI 同事。
+Carry 是用户可以长期托付责任的 AI 同事：用户在 carry.ai Web 把一件事交给一个有名字的 Agent，那个 Agent 负责推进这份 Work，并在真的需要人的信息、判断或授权时回来。
 
-成员用自然语言告诉 Carry 想实现什么、需要持续关注什么，或者当前发生了什么。Carry 负责理解目标、持续推进、保留上下文、呈现结果，并在确实需要人的判断、权限或补充信息时回来询问。
+## 1. 用户可见概念
 
-Carry 不是聊天机器人、任务清单、工作流编辑器、Agent 管理平台或只面向研发团队的自动化工具。它的价值不是完成一次模型调用，而是让一份责任跨越时间、成员、工具、模型和机器后仍然可理解、可纠正、可继续。
+`Space`、`Agent`、`Conversation`、`Work`、`Host`、`Inbox`。
 
-除明确标注为未来方向的段落外，本文件描述当前 M1 基线与 Node 6–9 的公开身份、首个 Space、显式登录方式管理和成员加入合同。后续 Node 的顺序和进入条件只由 `docs/implementation.md` 定义；未来方向不是当前 API、状态或用户承诺。
+- **Space**：成员、Host、Agent、Conversation 和 Work 的协作边界。有可重复的显示名和一个全局唯一的 URL slug。
+- **Agent**：一个有名字、有头像、属于一台 Host 的持久身份。用户对它说话、把 Work 交给它、在 Work 页面看到它。它不是用户创造的人格或职位，而是那台机器上一个真实 runtime 的产品身份。
+- **Conversation**：成员与一个确定 Agent 的连续对话。
+- **Work**：一份持续责任，有一名人类负责人和一名 Agent 负责人。
+- **Host**：一台已接入 Space 的机器，用户在设置里增删。
+- **Inbox**：所有需要人处理的 Work 事项。
 
-## 设计哲学：克制与自由
+以下永不出现在人看到的界面、文案和邮件里：Run、attempt、lease、fence、version、digest、credential、socket、session handle。它们是内部机制，不是产品词汇。面向 Agent 的机器接口可以暴露研究证明必需的最少内部事实。
 
-Carry 以克制保护真实、权限和承诺，以自由容纳目标、方法和演化。
+新增一个用户可见名词必须同时满足四条，否则用现有 owner 的字段或一个局部值表达：当前旅程没有它会具体失败；它有独立身份和生命周期；它保护相邻事实无法表达的权限或并发边界；用户能感知它的价值。流程中的一步、一个角色、一个视图、一次临时计算都不是新概念。
 
-这不是两套互相抵消的价值观。克制建立可信边界；边界越清楚，成员和 Carry 在边界内拥有的自由越大。Carry 追求的是：
+## 2. 界面与动作
 
-> 责任确定，路径自由。
+### 2.1 登录与进入 Space
 
-### 克制保护可信
+登录方式是 GitHub、Google、Email，三种都保留。GitHub 登录只证明身份，不授予任何仓库权限。第一版没有 onboarding 表单。
 
-Carry 只在必须作出产品承诺的地方增加约束：
+登录后只有两种情况：
 
-- 系统拥有的 identity、authority、causality、time 和 external outcome 必须有可机械验证的真实来源；
-- Work 当前理解是 Carry 对开放内容的具名、可见、可纠正解释，不能把内容升级成权限或已经认证的外部结果；
-- 权限必须来自成员、Space、Work 和明确授权，不能来自内容或模型自述；
-- 外部后果必须有准确目标、参数、幂等和可观察 outcome；
-- 一个新概念必须被独立生命周期、身份、权限和用户价值共同赚得；
-- 普通成员不承担系统本可自行处理的内部机制。
+- 带着邀请来的人先完成认证，然后看到并接受被邀请的 Space，跳过正常初始化；
+- 其他人从自己已属于的 Space 中选一个，或者新建一个。
 
-克制不是功能越少越好，也不是拒绝复杂问题。当连续性、隐私、并发或外部后果确实需要复杂度时，Carry 必须完整建立它；但不能为了形式对称、未来假设或技术趣味提前冻结产品。
+新建时用户只填显示名。显示名可以与别人重复；系统由它派生一个全局唯一的归一化 slug 作为 Space 的 URL。slug 冲突时界面就地给出带后缀的可用建议，用户可以改。第一版 slug 创建后不可修改。
 
-### 自由保护可能性
+没有"第一个 Space"特例：创建和选择用同一条路径。
 
-在真实和权限边界内，Carry 默认保留自由：
+### 2.2 邀请
 
-- 成员用自然语言表达任何领域的责任，不先选择 Work 类型、流程或 Runtime；
-- 同一 Work 可以使用不同方法、工具、模型和成员协作，而不改变责任身份；
-- Carry 可以解释开放内容、提出路径、修正理解并使用已经授权的能力；
-- Pi、Codex 和未来具体能力保留原生做法，不为统一外观失去优势；
-- 未来设计从当时的真实旅程重新推导，不被预建抽象和兼容层绑住。
+Membership 只保留两项彼此独立的窄权限：管理成员、连接 Host。它们不是角色层级或通用权限系统。创建 Space 的成员初始拥有两项；当前持有人可以把自己拥有的某一项授予同 Space 的 Active 成员，邀请人也只能授予自己已有的权限。除非结束整个 Space，每项始终至少有一名 Active 持有人。
 
-自由不产生权限。Carry 可以自由推理，不能自由虚构事实、读取私人内容、扩大受众或造成未授权的外部后果。成员也始终可以纠正理解、拒绝建议、撤销权限和接管责任。
+具有成员管理权限的成员从设置里生成邀请链接。链接一次性、有有效期、可撤销。已失效的链接给出明确原因，不静默失败。成员移除也要求这项权限；连接或撤销 Host 要求连接 Host 权限。
 
-### 同一个决定的两面
+### 2.3 Host 与 Agent
 
-| 必须克制 | 应当保持自由 |
-| --- | --- |
-| identity、authority、causality、time、outcome | goal、自然语言和解释路径 |
-| 核心持久事实和用户承诺 | 实现方法与具体 adapter |
-| 外部后果和隐私边界 | 边界内的推理与只读探索 |
-| 已发布协议和兼容责任 | 尚未发布的内部结构演化 |
-| 用户必须理解的产品对象 | 系统可以替换的执行路径 |
+用户在设置里选择 Add Host，在目标机器上运行显示出来的命令（`carry setup`），然后在浏览器里核对这台机器确实是自己刚才操作的那一台。确认后 Web 显示这台 Host 以及它上面的 Agent 清单。设置里可以增加和移除 Host。
 
-每个设计决定依次回答：
+Agent 清单上每个 Agent 显示：名字（在 Space 内唯一）、确定性生成的头像、所属 Host、人类 owner、状态（Active / Removed），以及在线、最近活跃和正在参与的 Work。Space 内所有成员都可以选择其中的 Active Agent；第一版没有 per-Agent access mode。当具体 Agent 能可靠报告当前可选模型时，界面才显示模型选择；发现失败时使用 provider 默认值且不显示选择器。没有头像上传，没有模型或 provider 目录。
 
-1. 它是否涉及真实、权限、隐私、责任或外部后果？如果是，明确 owner 并强约束。
-2. 它是否只是目标表达、解释或完成方法？如果是，默认不分类、不枚举、不冻结。
-3. 新约束阻止的是当前可描述的伤害，还是只让内部看起来完整？后者不建立。
-4. 新自由是否穿透了成员授权或事实边界？如果是，立即停止。
-5. 删除一个概念后，产品承诺是否仍完整且合法路径更多？如果是，删除。
+一个新 Agent 的人类 owner 是在浏览器中批准这台 Host 接入的已认证成员，不来自 setup shell、进程发现内容或模型输出。再次 setup 或发现只更新在场：不改写已有 Agent 的人类 owner、名字或生命周期，也不复活 Removed Agent。自愿情况下，只有当前人类 owner 可以把 Agent 转给同一 Space 的另一名 Active 成员，或把它转为 Removed；安全撤销 Host/Agent 与成员强制移除是独立的强制路径，不因此获得 Work owner 权限。
 
-## 产品承诺
+Host 掉线不删除 Agent 身份：Agent 仍在清单里，只是不在线。
 
-### 连续性属于 Work
+### 2.4 对话
 
-一次回复、一个 Agent Session、一台机器或一个进程都可以结束；尚未完成的责任不能随之消失。
+聊天界面只有一个输入框。用户在其中选择当前可访问的 Agent 之一。一个 Conversation 在第一条消息后固定它的 Agent；换 Agent 就是开一个新 Conversation。支持模型选择时，模型同样在第一条消息后固定。
 
-Carry 必须从持久 Work 继续。Pi、Codex、模型、Session、Host 和 Machine 都不是责任的所有者，也不成为 Work 的分类。
+Conversation 可以随时回来继续，包括在 Host 重启之后。恢复可能变慢，但对话内容和 Work 事实不会丢。
 
-### 用户保留最终问责
+### 2.5 创建 Work
 
-每个开放 Work 都有一名当前负责人。Carry 负责推进，人负责目标、授权和最终判断。
+每个 Work 有且只有一名人类负责人和一名 Agent 负责人。人类负责人拥有目标与范围、对外授权、Inbox 回应、验收和关闭；Agent 负责人拥有推进、计划、评论理解与转达、协作者选择与检查、提出需要人的事项和时间安排。
 
-Carry 不能因为模型认为某件事合理，就替成员获得权限或作出必须由真实负责人承担后果的决定。
+Work 只能通过 Agent 创建，共三条入口：
 
-### 内容不能产生权限
+- **对话**：用户在对话里交办，这条由 Conversation 拥有的准确成员消息被投递给固定 Agent；Agent 明确表示接下并创建 Work。人类负责人是发出被接受消息的成员，Agent 负责人是这个 Conversation 的 Agent。
+- **Web 表单**：按钮上写明 `Create with <Agent>`。提交只在 Conversation owner 下持久化一条明确指向所选 Agent 的结构化请求，不直接创建 Work；拥有该 Agent 的 Host 拉取并 claim 后，由 Agent 决定接下、要求澄清或拒绝。接下时人类负责人是提交成员，Agent 负责人是所选 Agent。正文里写什么都不改变负责人。
+- **本机 Agent**：机器上已注册的 Agent 通过 `carry` 创建。人类负责人是该 Agent 的人类 owner，Agent 负责人就是这个 Agent。调用方不能被归属到唯一一个已注册 Agent 时直接拒绝。
 
-消息、文件、网页、Webhook、外部输入、第三方能力和模型输出都只能提供信息，不能扩大 Carry 的权限。
+界面上没有"不经过 Agent 直接建 Work"的按钮。请求等待 Agent 时页面显示准确目标与等待状态；进程丢失后仍可继续，刷新或响应丢失会按同一请求事实恢复，不会凭空显示 Work，也不会因重放创建两份。Server 只接纳成员请求和 Agent 授权的创建结果，永不主动推送或替 Agent 接下。
 
-权限只来自当前成员、Space、Work 和已经确认的真实授权关系。
+### 2.6 Work 页面
 
-### 不确定必须保持真实
+Work 页面随时回答六个问题：
 
-如果 Carry 不知道外部操作是否成功，就必须显示“不确定”，而不是猜测失败、自动重试或宣称成功。
+- 谁负责：人类负责人和 Agent 负责人；
+- 谁在做：当前和历史参与的 Agent、各在哪台 Host、各自在处理什么；
+- 准备怎么做：一份有序的计划项列表，由 Agent 负责人维护；
+- 进行到哪：每个参与 Agent 的当前活动和一段有界的实时流；
+- 产出了什么：产出项列表，可以指向对应的计划项；
+- 要我做什么：准确的问题、选择、授权或异常。
 
-如果原生 Agent Session 无法恢复，Carry 从持久 Work 重新开始；它不伪造另一个 Runtime 的记忆。
+计划只是展示真相，不是调度真相：系统不执行计划项，也不从计划里推导流程语义。持久保存的是用户可见的进展与产出，不是完整 tool trace 或模型思维；诊断内容只在展开时可见。
 
-### 用户只处理真正需要人的事项
+人类负责人可以验收一个准确的产出版本。验收只表示这个版本被接受，不会自动关闭 Work；产出后续修订需要重新验收。没有独立 Result owner，也不把产出内容或 checks 通过推断成人已经接受。
 
-Carry 自行处理执行、等待和恢复。普通成员只应看到：
+### 2.7 评论与协作
 
-- 当前情况；
-- 已经确认的进展；
-- 可以检查的结果；
-- 下一步；
-- 需要自己回答、批准或决定的事项。
+用户的评论一律送到 Agent 负责人。它理解、澄清，并按语义把相关部分转达给正在参与的协作者。用户不需要点名某个 Agent，也没有任务分派界面。
 
-## 产品概念预算
+一个 Work 可以有一个或多个正在进行的 Agent session，顺序或并行。协作者不改变任何一位负责人。多个 Agent 参与是 Agent 负责人在有用且可用时的选择，不是产品要求：只有一个 Agent 的 Work 必须同样完整可用。
 
-普通成员只需要理解三个对象：
+目标 Agent 不可用时，界面直接说明是哪个 Agent、为什么不可用、用户可以做什么。系统永不按名字换一个"差不多的"Agent 顶上。
 
-```text
-Space
-Carry
-Work
-```
+### 2.8 Inbox 与渠道
 
-`Needs You` 是从 Work 中得出的个人视图，不是第四种产品对象。
+Agent 负责人认为需要人时，在 Work 上提出需要人的事项，它们出现在 Inbox。每一项说明：为什么需要人、谁来处理、要回答什么、各选择的后果、是否阻塞 Work、是否已过时或被解决。一个 Work 同时可以有不止一项。除此之外，当前 Agent 负责人 Removed 或不再在场的 Open/Paused Work，也根据已有 Work、Agent 与 Machine 事实直接出现在其人类负责人的 Inbox；这不是由失联 Agent 创建的新事项，也不新增 owner。Inbox 是这些权威事实的查询，不是 activity feed。
 
-一个词只有同时拥有独立生命周期、持久身份、独立权限边界和明确用户价值时，才可以升级成新的产品对象。一个事实在某次判断中的用途不构成新对象；未来候选词及其进入顺序只在 `docs/implementation.md` 维护。
+用户连接邮件或飞书渠道后，投递自动发生，不需要对每一条事项再批准一次。由系统事实派生的 owner unavailable 同样投递给准确的人类负责人，不依赖 Agent 生成通知内容。渠道只是投递：发送成功不等于已读；投递失败或结果未知不改变 Work 与 Inbox 的真实状态；从渠道回到产品仍需正常登录和权限。
 
-## User 与 Browser Session
+### 2.9 时间
 
-官方 Carry Cloud 允许公开注册。Node 6 的第一条入口通过生产事务邮件发送一次性验证码，证明用户当前可以接收该邮箱的邮件；它不宣称 MFA、NIST AAL 或抗钓鱼能力。
+Agent 负责人可以为这份 Work 约定一次未来继续，或者按天/按周周期继续。用户能看到下次时间、时区、是否启用和上次结果。第一版人只有只读显示，以及在安全需要时的暂停与取消；不提供通用的人类日程编辑器。关闭 Work 停止未来继续。时间条件属于这份 Work，不构成通用调度器或 workflow builder。
 
-邮箱 proof 只建立或找回稳定 Carry User，并签发 Carry-owned、HttpOnly、可撤销的 Browser Session。新 User 可以暂时没有姓名和 Membership；系统不能从邮箱 local part、domain、相似名称或既有 Space 推断姓名、团队或权限。用户只有在验证后明确填写姓名和 Space 名并提交创建，才获得首个 Space Membership。
+### 2.10 结束、下线与交接
 
-验证码只在五分钟内有效，最多接受五次唯一错误尝试；resend 创建新验证码并永久使旧验证码失效。邮件 provider 接受请求不等于送达、进入 inbox 或已读，响应丢失保持 Unknown。OTP、Session 和 member bearer 不进入 URL、browser storage 或日志。
+生命周期只表达 `Open`、`Paused`、`Closed`。只有人类负责人可以暂停、恢复、关闭和重开。
 
-Google 和 GitHub 与邮箱方法最终只建立或找回 User，并签发同一种 Carry Browser Session。Google 的稳定身份是经过签名、issuer、audience、expiry、issued time 与一次性 nonce 验证后的 `(https://accounts.google.com, sub)`；GitHub 的稳定身份是每次 code exchange 后通过 authenticated `/user` 重新读取的正整数 numeric ID。两种方法都使用 browser-bound one-time state 与 PKCE S256；provider code、token、nonce 和 verifier 不成为 Carry credential，也不长期保存。
+暂停后 Work 仍可读，但不再产生新 claim，旧执行提交被拒绝，未来继续暂停；已经提交到外部而结果 Unknown 的动作仍保持 Unknown。恢复从当前持久事实开始新的执行机会，不复活旧 lease、fence、批准或 provider session。
 
-三种方法默认彼此独立。相同邮箱、相同字符串 subject 或 provider profile 不能自动关联、合并 User、选择邮箱 identity 或产生 Membership。已登录用户可以在 Settings 只按 Email、Google、GitHub 标签查看和显式管理自己的方式；页面不公开 canonical email、provider subject、numeric ID、profile 或 token。
+关闭表示不再继续承担这份责任，停止新的 claim 与未来继续，但不删除历史，也不把未验收产出或 Unknown 外部动作改写成成功或失败。重开保留两位负责人和全部历史，从新权威开始；如果 Agent 负责人不可用，重开后仍明确显示 owner unavailable。关闭与产出验收是两件事。
 
-关联新方式要求最近十分钟内证明当前 User 已有关联的一种方式，并单独完成待关联方式的 fresh proof；一个最近创建的 Browser Session 已包含前一种 proof。重新确认只更新当前 User 的 session authority，不创建 User 或登录方式。GitHub 或 Google ceremony 可能使用 provider 已有会话，因此产品只承诺“最近确认了这个登录方式”，不宣称重新输入凭证、MFA、NIST AAL 或抗钓鱼认证。
+Host 暂时掉线不会改写 Agent 负责人。Work 保持 Open，但不再接受旧执行提交的新进展，并显示 `Agent owner unavailable`。人类负责人可以等待原 Agent 恢复，也可以暂停、关闭，或把 agent ownership 转给同一 Space 中另一个 Active 且提交当时可用的 Agent；系统永不自动挑一个替代者。
 
-待关联 identity 已属于另一 User 时明确拒绝，绝不移动或合并 User。移除一种方式只要求最近确认仍可使用的另一种方式，并必须在并发下保留至少一种方式；无法再使用任何已关联方式时没有弱人工绕过。每次成功关联或移除都撤销所有旧 Browser Sessions，为当前浏览器原子签发一个 replacement Session；其他设备退出而当前旅程继续。response loss 的准确重放只恢复同一个仍有效 replacement Session，不制造新 session 或 resurrect 已撤销 credential。
+计划移除 Host 或 Agent 时，确认界面先列出它负责的全部 Open/Paused Work，但不在这里批量改 owner。当前操作者只可以打开自己作为人类负责人的 Work 并逐份移交；其他 Work 由各自的人类负责人处理。移除 Host 或 Agent 的权限本身不授予修改这些 Work 的权限。安全撤销不能被交接阻塞；用户可以立即撤销 Host 或 Agent。被撤销 Host 绑定的 Agent 与被单独移除的 Agent 都转为 Removed；Carry 立即拒绝它们后续提交，但不声称失联机器上的本地进程已经停止。受影响的 Work 进入 owner unavailable，直接出现在各自人类负责人的 Inbox，之后再逐份移交。
 
-provider login 成功后的无 Membership User 继续现有显式创建首个 Space 旅程，不建立默认 Space。当前 Browser logout 只撤销准确 Browser Session；旧 cookie fail closed。
+只有 Work 的人类负责人可以确认 Agent 负责人转移。确认界面显示旧负责人、新负责人、会失去提交权的执行和暂停的未来继续。转移在一个权威状态变化里完成：旧 Agent 的当前执行立即失去提交权；旧 Agent 保留为历史参与者；已有产出、评论、计划、需要人的事项和 Unknown 外部动作都不被改写；未来与周期继续先暂停，由新 Agent 阅读交接事实后重新确认。
 
-成员 CLI 不接受可粘贴 token、邮箱验证码、provider token 或 Browser Session。成员对一个显式 HTTPS Carry server 运行 `carry login`，终端显示准确 server、有限的 CLI label、十五分钟有效的人类 code 与固定 `/cli-login` 页面；已登录 Browser 重复显示相同 code 和 server，成员选择一个当前 Space 后明确批准或拒绝。所选 Space 只是本地默认 context，不成为 credential scope，也不创建或扩大 Membership。
+新 Agent 不继承旧 Agent 的 provider 私有 session、完整 tool trace 或私人 Conversation。转移提交时会校验替代 Agent 当时可用，但不承诺它随后持续在线；如果它在提交后掉线，同一份 Work 再次进入 owner unavailable，系统仍不自动换人。可用时，新 Agent 从这份 Work 的持久目标、评论、计划、产出、参与活动、未解决问题和 Unknown 事项开始一个新 session，并先给出用户可见的接手摘要，再继续推进；摘要不是负责人转移事务的完成条件。转移不需要旧 Agent 在线或批准，也不会把 Work 的人类负责人一起改变。
 
-人类 code、仅供 CLI poll/cancel 的 secret 与最终 `carry_cli_` credential 是三个不同 audience。首次有效 poll 才原子建立一个九十天有效的 User CLI credential；response loss 的有界准确重放只恢复同一个仍有效 secret，不建立第二个 credential。credential 只识别准确 User 与 server，每个 User Space 或 Work 请求仍由当前 Membership 裁决；它不参与 Machine connection、approval 或 revocation。Browser Settings 可以查看并撤销自己的 active CLI access；`carry logout` 先确认服务端撤销，再删除 private `cli.json`。丢失、过期或撤销后只能重新批准，不能恢复旧 secret。旧 member bearer、operator bootstrap 与 `member.json` 不再是产品入口或兼容路径。
+成员自愿离场时，必须先用普通 owner 转移清空自己负责的每一个 Open/Paused Work，并把自己拥有的 Active Agent 转给另一名 Active 成员或置为 Removed；否则离场失败并列出剩余项。
 
-## Space
+具有成员管理权限的人可以强制移除不合作或失联成员。确认页只读列出目标的 Open/Paused Work 与 Active Agent，并明确：目标的 Agent 会转为 Removed，目标的 Open/Paused Work 会由执行移除的人立即承接。执行者不能替目标选择第三方。如果目标是连接 Host 权限的最后持有人，该项同时由执行者承接；成员管理权限不可能随目标消失，因为执行者本人已经持有。移除事务完成后，承接的 Work 直接进入执行者 Inbox，说明负责人变化来自成员移除；执行者再用普通规则逐份转移、暂停或关闭。强制撤销不等待目标、Host 或 Agent 确认。
 
-Space 是当前的团队边界，包含成员、团队权限、共同 Work 和允许的执行机器。外部连接尚未进入 M1。
+任何时刻都不允许出现没有有效人类负责人的 Open/Paused Work，也不允许出现人类 owner 已不是当前 Space 成员的 Active Agent。
 
-Space 不是文件夹。它决定哪些人和能力可以共同参与一份责任。
+结束整个 Space 是另一条明确旅程。具有成员管理权限的人必须先看到仍存在的 Open/Paused Work、Host、Agent、渠道、Unknown 外部动作与数据保留后果；所有 Open/Paused Work 必须先由各自人类负责人关闭，Space 结束不会替他们批量关闭。确认后未来登录、claim、schedule 和本机创建失权，Space 从普通选择中消失，既有 Work lifecycle 与历史不被改写。Carry 不承诺远端进程、已投递内容或副本已经被擦除。
 
-持有 `can_manage_members` 的当前成员可以邀请一个准确邮箱。邀请固定 Space、recipient、邀请人、七天期限，以及现有 `can_manage_members`、`can_enroll_machines` 两个窄 authority；两项默认关闭，邀请人不能授予自己当前不持有的 authority。这里没有 Owner、Admin 或 Role framework。
+不同产物用不同方式检查：代码看 diff、checks 和 PR；研究看来源和未解决的不确定性；运营动作看目标和外部回执。合并一个 PR 不定义通用的 Work 成功。
 
-邮件只引导用户打开固定 `/invitations` 页面，不携带 invitation credential、recipient、Space、OTP 或 Session。Resend 接受提交只表示 provider accepted，不表示 delivered、inbox 或 read；Rejected 与 Unknown 保持准确，resend 是成员明确触发的新 submission，不延长期限、不改变 recipient 或 authority。
+## 3. 产品不变量
 
-邀请只对当前 Carry User 准确关联的受邀 Email method 可见。接受还要求当前 Browser Session 在数据库时间十分钟内以 Email 完成 proof；Google/GitHub profile email、成功认证、打开邮件、关联邮箱或查看邀请都不会自动建立 Membership。成员查看 Space、邀请人和准确权限后显式接受，PostgreSQL 才原子建立 Membership。没有准确邮箱 proof 时不能加入，也不能通过同邮箱猜测、merge、管理员 impersonation 或私人 Conversation 访问绕过。
+以下事实永远不能互相冒充：已收到 ≠ 已理解；正在执行 ≠ 有可用 Agent；一个 session 结束 ≠ Work 完成；一个产出项 ≠ 用户已接受；已发送 ≠ 已读；已批准 ≠ 已执行；Failed ≠ Unknown；Host 掉线 ≠ Agent 不存在。
 
-持有 `can_manage_members` 的当前成员可以从 Members 中选择一名 active member 移出 Space。若目标仍负责 Open Work，管理者必须显式选择一名准确 active member；Carry 只在同一事务中把该目标负责的全部 Open Work 转给这名 successor 并撤销 Membership，绝不按职位、活跃度或最后发言自动猜测。Space 必须始终保留至少一名 `can_manage_members` 与至少一名 `can_enroll_machines` 成员；管理者移除自己也遵守相同规则，普通成员自行离开仍未进入。
+Unknown 不能被猜成成功或失败，也不会被自动重放。重试必须说明会复用什么、会重新执行什么、是否可能重复外部后果。
 
-移除只终止该 Space 的当前 Membership authority。原 Browser/CLI credential 仍可识别 User 及其其他 Space，Space Machine 仍是独立 principal；后续对已移除 Space 的请求全部由当前 Membership fail closed。真实作者、共享 Work、私人 Conversation 与已经签发的固定期限 invitation 都不被改写或删除；其他成员不会因此获得私人 Conversation，当前 manager 仍可单独撤销 pending invitation。
+Host 或 Agent 失败后 Work 仍然存在：旧执行失去提交权；只有人类负责人显式转移后，新 Agent 才从持久事实继续。本地失败不能表现成系统已经接受。丢失一个 provider 侧的会话续接可能降低效率，但不丢失 Conversation 与 Work 的真相。
 
-Space-enrolled Machine 是该 Space 的受信 Carry 执行基础设施，不是普通成员。它可以在准确、短期且可撤销的执行 authority 下处理完成当前责任所必需的 Space 内容，包括成员提交给 Carry 的有界私人 Conversation 上下文；enrollment 不授予通用内容浏览能力，也不能让 Machine 把私人内容写入共享 Work、日志或 provider Session。
+## 4. 隐私与授权
 
-成员运行 `carry host connect --server <准确 HTTPS origin>` 后，终端显示 Machine display name、完整 `SHA256:` public-key fingerprint、十位 code 与固定 `/machine-connect` 页面。已登录 Browser 必须重新显示并让成员核对同一 origin、name、fingerprint 与 code，且只允许选择自己当前有 enrollment 权限的准确 Space；批准前不存在 durable Machine。code、poll/cancel secret、Browser/CLI credential 与最终 Machine certificate 是不同 audience，Machine private key 始终留在本地。
+- 私人内容默认只对准确成员可见；共享 Work 不保存私人原文或可反向读取的来源关系；
+- Agent 只获得当前工作所需的有界上下文，也只能改变当前工作的事实；
+- Agent 不持有成员凭据，也没有绕过所在 Host 直接访问服务端的路径；
+- Host 接入只让那台机器上的 Agent 在那一个 Space 里新建 Work；它们不能凭这一点列出、读取或修改已存在的 Work；
+- Agent 负责人请另一个 Agent 帮忙不扩大数据范围或外部权限；
+- 模型输出和外部内容不能创造成员、可见范围、凭据或外部权限；
+- 外部动作必须绑定真实成员、准确目标、准确参数和当前批准；
+- 移除一台 Host、一个 Agent 或一名成员只撤销未来的权限，不声称远端进程已停止或副本已消失。
 
-Web 的 Machines inventory 只表达 Carry 服务端 authority：display name、Space、Active/Revoked 与 enrollment/revocation actor/time；完整 fingerprint 只在 connection approval 与准确 remote-revoke confirmation 中显示。Active 不表示在线，产品不展示 heartbeat、last seen、Runtime、provider、version、OS、IP 或 capacity。Remote revoke 只终止未来 Carry server authority，不能证明远端进程停止、文件删除或复制数据擦除。
+## 5. 明确拒绝
 
-`carry host disconnect` 只有在 Machine mTLS self-revoke 得到明确确认后才删除本地 credential；服务不可达或结果 Unknown 时保留它以便准确重试。`--local-only` 是显式逃生口，只删除本地材料并明确远端可能仍为 Active。清理后重新连接总是 fresh key、request、Machine identity 与 certificate，不复活旧 identity。
+第一版不建立：人用 CLI 作为 Web 的平行产品；不经 Agent 的 Work 创建入口；Agent persona、角色 roster 或 marketplace；头像上传或媒体子系统；provider/model/runtime 目录；workflow builder 或通用 Plan/Step 图；任务分派与协调界面；通用 Effect/Action/Capability/Plugin；自然语言命令入口或通用动作注册表；把完整 tool trace 当作主产品；内容派生权限；Unknown 自动重试；按 Git 分类 Work；为未发布路径保留兼容层。
 
-成员身份、浏览器会话、外部身份和执行机器身份必须分开。通过 Slack 或 Lark 验证的外部用户，不会因此自动成为 Space 成员。
+## 6. 完成标准
 
-## Carry
+一项产品能力完成，必须同时有这些证据：
 
-Carry 是用户面对的稳定同事，不是数据库实体或可配置 Agent 档案。
-
-Carry 不需要 `CarryID`、人格配置、模型绑定或长期 Agent Session。它可以在内部使用 Pi、Codex 和未来已经被真实旅程赚得的执行能力，但成员不需要选择 Coordinator、Worker、Reviewer、provider、model、Host 或 Runtime。
-
-Carry 的稳定性来自共同产品行为：
-
-- 理解目标；
-- 判断是否承担一份 Work；
-- 维持 Work 的当前理解；
-- 继续安全执行；
-- 在需要时找到正确的人；
-- 呈现依据、结果和不确定性。
-
-## Work
-
-Work 是一份由 Carry 持续推进、由具名成员最终负责的责任。
-
-Work 可以有终点，也可以持续观察。Carry 不按一次性/周期、研究/开发、软件/内容、Git、provider、model、Host 或 Runtime 分类 Work。
-
-### 创建
-
-明确委托直接创建 Work，不建立 Work Offer。
-
-创建时只要求：
-
-- Carry 当前理解的一句话目标；
-- 一名当前负责人，默认是委托成员。
-
-普通讨论不会自动创建 Work。外部内容、Webhook、文件或 Agent 也不能自行创建团队责任。
-
-### 当前理解
-
-Work 保存 Carry 对以下问题的最新有效理解：
-
-- 正在负责什么；
-- 谁最终负责；
-- 当前已经确认了什么；
-- 下一步是什么；
-- 在等待谁或什么；
-- 什么情况下需要成员介入。
-
-当前理解不是聊天摘要、模型思维或执行日志。它是成员可以阅读、纠正和接管的产品事实。
-
-新的消息被记录，不等于已经反映到当前理解。产品只表达“新信息尚未应用”；在没有独立活动事实时，不推断或描述后台处理状态，也不向普通成员暴露 input sequence、revision、Run、Attempt、lease 或 fence。
-
-如果一次原生推进已经明确结束但没有形成可确认更新，Work 会显示需要成员选择是否重新推进。Carry 不自动重放 Failed 或 Unknown；成员显式选择 `Try again` 后，才允许从同一持久 Work 创建一次新的推进。成员不需要理解 Run、Attempt 或终态分类。
-
-### 消息与协作
-
-成员可以在 Work 中补充事实、纠正 Carry、回答问题、提出限制或评论结果。
-
-Work Message 保存真实作者和来源。私人 Conversation 内容不会因为语义相关自动进入共享 Work；需要共享时，应由成员明确形成一条新的 Work Message。
-
-多个内部执行者未来可能产生输出，但“贡献”或“证据”不因此自动成为新的持久实体。输出必须落到当时已经成立的 owner；当前优先是 Work Message 或当前理解，只有 Artifact 或外部回执已被自己的真实旅程 promotion 后才能引用它们。
-
-### 负责人
-
-当前每个 Work 有且只有一名负责人，创建者是第一任负责人。成员移除时，管理者可以为目标名下全部 Open Work 显式选择一名 active successor；这次批量转交只作为撤销 Membership 的同事务前置后果，不能独立调用。通用逐 Work 转交仍属于后续 journey，任何转交都不能由 Carry 根据职位、活跃度或最后发言者推断。
-
-### 当前生命周期
-
-M1 的正式生命周期只有 `Open`。`Paused`、`Closed` 与 `Reopen` 属于后续 Responsibility journey，尚不是当前状态或 API。正在推进、等待回复、计划稍后继续和需要成员决定始终是从事实派生的描述，不自动成为生命周期。
-
-### 当前结果表达
-
-当前结果直接表达在 Work 的 understanding、next step 和 Messages 中，不存在独立 Result。Carry 将一次准确覆盖当前输入的重要阶段结果标记为需要检查时，当前负责人可以在 Web 的 Needs You 查询中打开同一响应里的准确内容并接受它。接受只确认这版阶段结果已经检查，不关闭 Work、不自动开始下一次推进，也不授予外部权限。
-
-Review identity 是绑定内部 understanding version 与内容 digest 的不透明并发事实，不是成员需要管理的新对象，也不提供结果历史浏览。新 Work Message 会使尚未接受的旧检查立即过时；成员通过现有 Message 提交纠正。Needs You 只查询当前负责人拥有的准确待检查结果或明确 `Try again` 选择，不从普通进度、未应用输入、Run 活动或内部恢复推断。
-
-成员显式 `Try again` 只是允许一次 fresh Run，不改变 Work 生命周期。
-
-## 未来产品方向（当前尚未实现）
-
-- 官方云端是主要产品形态，自托管是同一产品的部署选项；两者共享 User、Space、Membership、Browser Session 与隐私语义，不以共享 token 或无用户模式换取部署简单；
-- 权限编辑按 `docs/implementation.md` 后续 Node 进入；相同邮箱不能让 provider identity 自动关联、合并 User 或产生 Membership；
-- 只有独立结果确实需要历史正文、独立引用及接受、修改或撤回生命周期时，才考虑 Result identity；
-- 第一条未来继续优先是 Work 的一个明确时间条件，不预建 Timer；
-- Pause、Close、Reopen、负责人转交、渠道、第三方能力和外部 Action 按 `docs/implementation.md` 的后续 journey 逐条重新设计。
-
-## 私人对话
-
-当前成员可以在原生 Web 界面中私下与 Carry 交谈；连接渠道属于后续 journey，M1 尚未实现。
-
-第一条原生旅程在每个成员与 Space 之间维持一段私人 Conversation。Carry 是隐含参与者；成员不需要创建、命名或管理 Conversation。为保持清楚因果，当前一次只接受一个尚未得到 Carry 回复的成员 turn。
-
-私人内容默认只对该成员可见。同一 Space 的其他成员不能读取；Space-enrolled Machine 只能在 exact reply claim、current fence 和 unexpired lease 下读取生成当前回复所需的有界上下文，不能通用查询私人历史。
-
-成员清楚、直接地要求 Carry 承担一个新结果或持续关注事项时，可以形成共享 Work；责任可以有限也可以长期，不增加 Work Offer 或强制确认步骤。Agent 只解释成员表达，不能提供 actor、owner、Space 或 authority；PostgreSQL 从已认证成员、当前 Membership 和准确 source message 建立这些事实。共享 Work 只能保存新形成、成员已授权的目标和新消息，不能保存私人原文、可反向读取的 source relation 或私人 transcript digest。
-
-普通问题只形成私人回复。清晰委托形成私人回复和至多一份共享 Work；同一 source message 的执行或网络重放必须返回同一回复和 Work。
-
-## 外部世界与 Artifact（未来方向，当前 M1 未实现）
-
-M1 没有渠道、第三方 capability、外部 Action、Event 或 Artifact owner。未来第一条真实旅程仍遵守三条产品边界：普通投递不能伪造已读；改变外部系统或受众的操作必须固定授权、目标、参数和 Unknown；长期 bytes 只有在确实需要独立引用、权限与保留生命周期时才成为 Artifact。
-
-Skill、MCP server、文件、外部消息和模型输出只能提供内容或方法，不能自行创建 Work、扩大权限或证明外部后果。一个既有事实被用于支持判断时仍属于原 owner，不建立 Evidence 对象或开放 polymorphic 引用仓库。
-
-## 权限哲学
-
-Carry 的权限来自真实关系：
-
-- 成员经过认证；
-- 成员属于当前 Space；
-- 当前 Work 允许这次决定；
-- 外部连接已经明确授权；
-- 当前执行仍持有有效、未过期的能力。
-
-以下都不能产生权限：
-
-- 消息或文件内容；
-- Agent 自我声明；
-- manifest 或 tool annotation；
-- 历史上曾经访问过；
-- 模型认为应该可以。
-
-权限必须可撤销。并发变化的权限必须与写入在同一权威事务中重新验证。
-
-## 隐私与保留
-
-- 私人消息默认只对准确成员可见，不能从共享 Work 反向读取；
-- 私人文本或可猜测的 deterministic digest 不进入 browser storage、URL、日志或长期 provider Session；
-- Space Machine 对私人上下文的读取必须绑定 exact claim、fence、lease 和有界输入，不能获得通用 transcript capability；
-- 当前 Conversation 没有删除或 retention lifecycle；未来渠道、文件和删除旅程必须重新定义各自的 consent、credential 与必要保留事实。
-
-## 失败与恢复
-
-Carry 必须区分：
-
-- 已记录与已理解；
-- 已发送与已阅读；
-- 已授权与已执行；
-- 成功、失败和 Unknown。
-
-Host 或 Agent 失败后，Carry 依靠持久 Work 和数据库 authority 继续。lease 过期只撤销旧执行的提交权，不证明旧进程死亡。Host 自行跨越明确临时的网络或服务端故障继续 polling；认证、撤销或协议错误不会被伪装成临时故障。成员不需要因为一次控制面网络抖动手工重启正常 Host。
-
-在当前没有外部 tool 后果的原生执行旅程中，lease 中断的安全恢复是创建新 Attempt 并从 Work 重新执行。已经明确记录为 Failed 或 Unknown 的推进保持终态，不会自动重放；成员可以在 Work 上显式选择重新推进。原生 Session 恢复只有在成本或时延成为真实产品问题、且不需要把 provider state 提升进核心时才加入。
-
-## 产品拒绝项
-
-Carry 第一阶段明确不做：
-
-- 让普通成员管理 Agent、模型、Session 或执行机器；
-- workflow builder、Plan/Step 或角色编排；
-- 用 cron、JSON 或 DSL 创建日常 Work；
-- provider、Runtime、Git 或内容类型驱动 Work 分类；
-- Evidence、Contribution、Question、Timer、Result 等没有独立生命周期的预建实体；
-- 任意群消息自动创建 Work；
-- 私人内容自动进入共享 Work；
-- 未知外部结果自动失败并重试；
-- provider/tool/Runtime registry；
-- 把内部执行日志、tool call 或模型思维作为产品主要界面。
-
-## 产品语言
-
-当前推荐：
-
-```text
-Carry 已收到这份责任
-你补充的信息尚未应用
-等待 Carry 回复
-这个阶段结果需要你检查
-你已接受这个阶段结果；Work 仍保持开放
-Carry 没有形成可确认的更新；由你选择是否重新推进
-```
-
-当前只在准确 Work result check 或 terminal retry 事实成立时使用 Needs You。只有后续 journey 建立了独立的人类等待、时间或外部 outcome 事实后，才使用“等待 Alice”“将在下周一继续”或“结果尚不确定”。没有独立活动事实时不说“正在推进”。
-
-避免：
-
-```text
-Run pending
-Agent target selected
-Runtime reported
-Evidence uploaded
-Revision 3 committed
-Lease expired
-Generation conflict
-```
-
-## 新概念检查
-
-任何新名词、表、package、API 或状态都必须回答：
-
-1. 用户旅程具体失去什么，才需要它？
-2. 它是否拥有独立生命周期和持久身份？
-3. 它是否拥有相邻 owner 不能表达的权限边界？
-4. 它是事实，还是既有事实在当前步骤中的角色？
-5. 删除它后，产品是否仍能完成同一责任？
-6. 它是否同样适用于非研发 Work？
-
-如果主要价值只是让内部实现看起来对称或完整，就不建立。
+- 新用户能从真实 Web 入口走完整条 journey，没有预置数据；
+- 真实 Agent（Pi 或 Codex）真的改变了这条 journey 的结果；
+- 目标 Agent 不可用、Host 掉线、Agent 被移除、负责人转移、响应丢失都有用户能理解的恢复；旧执行恢复后仍不能写；
+- 数据库直接证明并发唯一 winner、幂等、过期与迟到写入被拒绝；
+- 权限和隐私不能被模型内容或本地进程绕过；
+- 两位负责人在界面上都成立：人能验收和关闭，Agent 的推进和提问可追溯；
+- 同一设计在至少一条真实非代码 Work 上同样成立；
+- 被替代的界面、路由、schema、查询、客户端、测试和文档已经删除。
