@@ -225,7 +225,11 @@ func TestEmailLinkAndReauthenticationRotateWithoutCreatingOrSwitchingUser(t *tes
 	store := NewStore(pool)
 	credentials := testEmailCredentials(t)
 	userID := uuid.NewString()
-	if _, err := pool.Exec(ctx, `insert into carry_users (user_id) values ($1)`, userID); err != nil {
+	displayName, err := identity.FallbackDisplayName(userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `insert into carry_users (user_id,display_name) values ($1,$2)`, userID, displayName); err != nil {
 		t.Fatalf("seed Google-only User: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `insert into google_identities (issuer, subject, user_id) values ('https://accounts.google.com', 'email-link-owner', $1)`, userID); err != nil {
@@ -573,7 +577,11 @@ func seedIdentityUser(
 ) (string, []string) {
 	t.Helper()
 	userID := uuid.NewString()
-	if _, err := store.pool.Exec(ctx, `insert into carry_users (user_id) values ($1)`, userID); err != nil {
+	displayName, err := identity.FallbackDisplayName(userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.pool.Exec(ctx, `insert into carry_users (user_id,display_name) values ($1,$2)`, userID, displayName); err != nil {
 		t.Fatalf("seed Identity User: %v", err)
 	}
 	if email != "" {

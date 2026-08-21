@@ -114,11 +114,16 @@ func (q *Queries) CreateExternalLogin(ctx context.Context, arg CreateExternalLog
 
 const createExternalLoginUser = `-- name: CreateExternalLoginUser :exec
 INSERT INTO carry_users (user_id, display_name)
-VALUES ($1, NULL)
+VALUES ($1, $2)
 `
 
-func (q *Queries) CreateExternalLoginUser(ctx context.Context, userID string) error {
-	_, err := q.db.Exec(ctx, createExternalLoginUser, userID)
+type CreateExternalLoginUserParams struct {
+	UserID      string
+	DisplayName string
+}
+
+func (q *Queries) CreateExternalLoginUser(ctx context.Context, arg CreateExternalLoginUserParams) error {
+	_, err := q.db.Exec(ctx, createExternalLoginUser, arg.UserID, arg.DisplayName)
 	return err
 }
 

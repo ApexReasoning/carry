@@ -235,15 +235,9 @@ func (api spaceInvitationAPI) accept(response http.ResponseWriter, request *http
 	if !ok {
 		return
 	}
-	var body struct {
-		DisplayName string `json:"display_name"`
-	}
-	if !decodeJSON(response, request, &body) {
-		return
-	}
 	accepted, err := api.invitations.Accept(request.Context(), space.AcceptInvitationCommand{
 		InvitationID: chi.URLParam(request, "invitation_id"), UserID: user.UserID, SessionID: sessionID,
-		DisplayName: body.DisplayName, IdempotencyKey: key,
+		IdempotencyKey: key,
 	})
 	if err != nil {
 		writeInvitationError(response, err)

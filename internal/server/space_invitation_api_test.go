@@ -24,7 +24,7 @@ func TestInvitationRoutesRequireBrowserOriginAndNeverMutateOnGET(t *testing.T) {
 		t.Fatalf("origin: %v", err)
 	}
 	behavior := &invitationBehaviorStub{}
-	routes, err := NewUserSpaceRoutesWithInvitations(firstSpaceStub{}, behavior, behavior, credentials, origin)
+	routes, err := NewUserSpaceRoutesWithInvitations(spaceCreationStub{}, behavior, behavior, credentials, origin)
 	if err != nil {
 		t.Fatalf("routes: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestRemoveMemberRouteRequiresOriginAndMapsRemovalOutcomes(t *testing.T) {
 		t.Fatalf("origin: %v", err)
 	}
 	behavior := &invitationBehaviorStub{}
-	routes, err := NewUserSpaceRoutesWithInvitations(firstSpaceStub{}, behavior, behavior, credentials, origin)
+	routes, err := NewUserSpaceRoutesWithInvitations(spaceCreationStub{}, behavior, behavior, credentials, origin)
 	if err != nil {
 		t.Fatalf("routes: %v", err)
 	}
@@ -150,9 +150,9 @@ func (invitationBrowserSessions) AuthenticateBrowserSession(context.Context, str
 }
 func (invitationBrowserSessions) RevokeBrowserSession(context.Context, string) error { return nil }
 
-type firstSpaceStub struct{}
+type spaceCreationStub struct{}
 
-func (firstSpaceStub) Create(context.Context, space.CreateFirstRequest) (space.CreatedSpace, error) {
+func (spaceCreationStub) Create(context.Context, space.CreateSpaceRequest) (space.CreatedSpace, error) {
 	return space.CreatedSpace{}, nil
 }
 

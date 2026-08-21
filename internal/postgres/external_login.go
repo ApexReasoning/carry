@@ -298,7 +298,14 @@ func resolveGoogleIdentity(
 	if purpose == identity.LoginPurpose {
 		if errors.Is(ownerErr, pgx.ErrNoRows) {
 			owner = uuid.NewString()
-			if err := queries.CreateExternalLoginUser(ctx, owner); err != nil {
+			fallbackLabel, err := identity.FallbackDisplayName(owner)
+			if err != nil {
+				return "", fmt.Errorf("derive Google User label: %w", err)
+			}
+			if err := queries.CreateExternalLoginUser(ctx, dbsqlc.CreateExternalLoginUserParams{
+				UserID:      owner,
+				DisplayName: fallbackLabel,
+			}); err != nil {
 				return "", fmt.Errorf("create Google User: %w", err)
 			}
 			if err := queries.CreateGoogleIdentity(ctx, dbsqlc.CreateGoogleIdentityParams{Issuer: issuer, Subject: subject, UserID: owner}); err != nil {
@@ -395,7 +402,14 @@ func resolveGitHubIdentity(
 	if purpose == identity.LoginPurpose {
 		if errors.Is(ownerErr, pgx.ErrNoRows) {
 			owner = uuid.NewString()
-			if err := queries.CreateExternalLoginUser(ctx, owner); err != nil {
+			fallbackLabel, err := identity.FallbackDisplayName(owner)
+			if err != nil {
+				return "", fmt.Errorf("derive GitHub User label: %w", err)
+			}
+			if err := queries.CreateExternalLoginUser(ctx, dbsqlc.CreateExternalLoginUserParams{
+				UserID:      owner,
+				DisplayName: fallbackLabel,
+			}); err != nil {
 				return "", fmt.Errorf("create GitHub User: %w", err)
 			}
 			if err := queries.CreateGitHubIdentity(ctx, dbsqlc.CreateGitHubIdentityParams{GithubUserID: githubUserID, UserID: owner}); err != nil {

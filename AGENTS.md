@@ -1,7 +1,7 @@
 # Carry Agent Contract
 
-Current Node: **Roadmap reset (documentation-only; no production implementation).**
-Until it closes, only the seven canonical files below may change.
+Current Node: **Node 13 — choose or create a Space (implementation active).**
+Issue #2 owns the approved journey, research and exact design budget; implementation must stay inside it.
 
 Carry is an AI teammate: a person hands a responsibility over in carry.ai Web, a named Agent owns keeping it moving, and the Work stays true across Conversations, Agent sessions, Hosts, channels and time.
 

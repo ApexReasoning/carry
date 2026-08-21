@@ -478,7 +478,7 @@ func TestRepeatEmailLoginKeepsUserAndCreatesFreshBrowserSession(t *testing.T) {
 	}
 }
 
-func TestFirstSpaceCreationIsAtomicIdempotentAndSingleWinner(t *testing.T) {
+func TestEmailUserHasFallbackLabelAndCanCreateMultipleSpaces(t *testing.T) {
 	ctx := context.Background()
 	pool := openMigratedTestPool(t, ctx)
 	store := NewStore(pool)
@@ -488,59 +488,43 @@ func TestFirstSpaceCreationIsAtomicIdempotentAndSingleWinner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("verify creator: %v", err)
 	}
-	creator, err := space.NewFirstSpace(store)
+	user, err := store.AuthenticateBrowserSession(ctx, session.SessionID)
 	if err != nil {
-		t.Fatalf("compose first Space: %v", err)
+		t.Fatalf("authenticate fallback-labeled User: %v", err)
 	}
-	request := space.CreateFirstRequest{
-		UserID: session.UserID, DisplayName: "Ada", SpaceName: "Research", IdempotencyKey: "create-research",
+	fallback, err := identity.FallbackDisplayName(session.UserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if user.DisplayName != fallback {
+		t.Fatalf("authenticated User label = %q, want %q", user.DisplayName, fallback)
+	}
+	creator, err := space.NewCreator(store)
+	if err != nil {
+		t.Fatalf("compose Space creator: %v", err)
+	}
+	request := space.CreateSpaceRequest{
+		UserID: session.UserID, Name: "Research", IdempotencyKey: "create-research",
 	}
 	first, err := creator.Create(ctx, request)
 	if err != nil {
-		t.Fatalf("create first Space: %v", err)
+		t.Fatalf("create Space: %v", err)
 	}
 	replayed, err := creator.Create(ctx, request)
-	if err != nil {
-		t.Fatalf("replay first Space: %v", err)
+	if err != nil || replayed != first {
+		t.Fatalf("replayed Space = %#v, first = %#v, error = %v", replayed, first, err)
 	}
-	if replayed.SpaceID != first.SpaceID || !replayed.CanManageMembers || !replayed.CanEnrollMachines {
-		t.Fatalf("replayed first Space = %#v, first = %#v", replayed, first)
-	}
-	request.SpaceName = "Operations"
+	request.Name = "Operations"
 	if _, err := creator.Create(ctx, request); !errors.Is(err, space.ErrIdempotencyConflict) {
 		t.Fatalf("changed replay error = %v", err)
 	}
-
-	otherChallenge, otherCode := prepareAcceptedEmailChallenge(t, ctx, store, credentials, "race-space@example.com", "request-race-space")
-	otherSession, err := verifyEmail(t, ctx, store, credentials, otherChallenge, otherCode, "verify-race-space", uuid.NewString())
+	request.IdempotencyKey = "create-operations"
+	second, err := creator.Create(ctx, request)
 	if err != nil {
-		t.Fatalf("verify racing creator: %v", err)
+		t.Fatalf("create additional Space: %v", err)
 	}
-	start := make(chan struct{})
-	results := make(chan error, 2)
-	for index := range 2 {
-		go func() {
-			<-start
-			_, err := creator.Create(ctx, space.CreateFirstRequest{
-				UserID: otherSession.UserID, DisplayName: "Grace", SpaceName: fmt.Sprintf("Space %d", index),
-				IdempotencyKey: fmt.Sprintf("space-%d", index),
-			})
-			results <- err
-		}()
-	}
-	close(start)
-	var won, rejected int
-	for range 2 {
-		if err := <-results; err == nil {
-			won++
-		} else if errors.Is(err, space.ErrAlreadyHasSpace) {
-			rejected++
-		} else {
-			t.Fatalf("concurrent first Space error = %v", err)
-		}
-	}
-	if won != 1 || rejected != 1 {
-		t.Fatalf("first Space outcomes = %d won, %d rejected", won, rejected)
+	if second.SpaceID == first.SpaceID || second.Slug != "operations" {
+		t.Fatalf("additional Space = %#v, first = %#v", second, first)
 	}
 }
 

@@ -17,11 +17,10 @@ func (s *Store) AuthenticateBrowserSession(ctx context.Context, sessionID string
 	if err != nil {
 		return identity.AuthenticatedUser{}, fmt.Errorf("authenticate browser session: %w", err)
 	}
-	displayName := ""
-	if user.DisplayName != nil {
-		displayName = *user.DisplayName
-	}
-	return identity.AuthenticatedUser{UserID: user.UserID, DisplayName: displayName}, nil
+	return identity.AuthenticatedUser{
+		UserID:      user.UserID,
+		DisplayName: user.DisplayName,
+	}, nil
 }
 
 func (s *Store) RevokeBrowserSession(ctx context.Context, sessionID string) error {

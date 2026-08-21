@@ -56,7 +56,7 @@ type ListActiveSpaceMembersParams struct {
 
 type ListActiveSpaceMembersRow struct {
 	UserID            string
-	DisplayName       *string
+	DisplayName       string
 	CanManageMembers  bool
 	CanEnrollMachines bool
 	JoinedAt          pgtype.Timestamptz
@@ -94,6 +94,7 @@ const listMemberships = `-- name: ListMemberships :many
 SELECT
     m.space_id,
     s.name,
+    s.slug,
     m.can_manage_members,
     m.can_enroll_machines
 FROM space_memberships AS m
@@ -107,6 +108,7 @@ ORDER BY s.name, m.space_id
 type ListMembershipsRow struct {
 	SpaceID           string
 	Name              string
+	Slug              string
 	CanManageMembers  bool
 	CanEnrollMachines bool
 }
@@ -123,6 +125,7 @@ func (q *Queries) ListMemberships(ctx context.Context, userID string) ([]ListMem
 		if err := rows.Scan(
 			&i.SpaceID,
 			&i.Name,
+			&i.Slug,
 			&i.CanManageMembers,
 			&i.CanEnrollMachines,
 		); err != nil {

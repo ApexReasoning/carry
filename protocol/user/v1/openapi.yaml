@@ -737,7 +737,7 @@ paths:
           $ref: "#/components/responses/Error"
   /v1/spaces:
     post:
-      operationId: createFirstSpace
+      operationId: createSpace
       security:
         - browserSession: []
       parameters:
@@ -749,18 +749,20 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [display_name, name]
+              required: [name]
               properties:
-                display_name:
-                  type: string
-                  minLength: 1
                 name:
                   type: string
                   minLength: 1
+                  maxLength: 80
+                suffix:
+                  type: integer
+                  minimum: 2
+                  maximum: 9999
       responses:
         "201":
           description: >-
-            First Space and creator Membership created or exactly replayed
+            Space and creator Membership created or exactly replayed
           headers:
             Cache-Control:
               $ref: "#/components/headers/NoStore"
@@ -775,7 +777,14 @@ paths:
         "403":
           $ref: "#/components/responses/Error"
         "409":
-          $ref: "#/components/responses/Error"
+          description: Idempotency conflict or losing immutable Space URL
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SpaceCreationConflict"
   /v1/machine-connections:
     post:
       operationId: beginMachineConnection
@@ -1523,18 +1532,6 @@ paths:
         - browserSession: []
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: false
-              required: [display_name]
-              properties:
-                display_name:
-                  type: string
-                  maxLength: 255
       responses:
         "200":
           description: Exact Membership consequence
@@ -1706,6 +1703,21 @@ components:
       properties:
         error:
           type: string
+    SpaceCreationConflict:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: string
+        slug:
+          type: string
+        suggested_slug:
+          type: string
+        suggested_suffix:
+          type: integer
+          minimum: 2
+          maximum: 9999
     BegunCliLogin:
       type: object
       additionalProperties: false
@@ -1861,13 +1873,17 @@ components:
     Membership:
       type: object
       additionalProperties: false
-      required: [space_id, name, can_manage_members, can_enroll_machines]
+      required: [space_id, name, slug, can_manage_members, can_enroll_machines]
       properties:
         space_id:
           type: string
           format: uuid
         name:
           type: string
+        slug:
+          type: string
+          minLength: 1
+          maxLength: 32
         can_manage_members:
           type: boolean
         can_enroll_machines:
@@ -1881,7 +1897,8 @@ components:
           type: string
           format: uuid
         display_name:
-          type: [string, "null"]
+          type: string
+          minLength: 1
         spaces:
           type: array
           items:

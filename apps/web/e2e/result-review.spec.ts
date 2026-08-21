@@ -17,6 +17,7 @@ test("responsible User reviews an exact result after response loss", async ({
 
   await page.goto("/");
   await signInWithEmail(page, emailCaptureFile, "reviewer@example.com");
+  await page.getByRole("link", { name: /Carry Space/ }).click();
   await page.getByRole("button", { name: "Needs You" }).click();
   await page.getByRole("button", { name: workGoal }).click();
 

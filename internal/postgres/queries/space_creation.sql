@@ -1,5 +1,5 @@
 -- name: LockSpaceCreator :one
-SELECT display_name
+SELECT user_id
 FROM carry_users
 WHERE user_id = sqlc.arg(user_id)
 FOR UPDATE;
@@ -8,6 +8,7 @@ FOR UPDATE;
 SELECT
     s.space_id,
     s.name,
+    s.slug,
     s.created_by_user_id,
     s.create_request_digest,
     m.can_manage_members,
@@ -19,36 +20,24 @@ INNER JOIN space_memberships AS m
 WHERE s.created_by_user_id = sqlc.arg(user_id)
     AND s.create_idempotency_key = sqlc.arg(idempotency_key);
 
--- name: HasActiveMembership :one
-SELECT exists(
-    SELECT 1
-    FROM space_memberships
-    WHERE user_id = sqlc.arg(user_id)
-        AND revoked_at IS NULL
-);
-
--- name: SetInitialDisplayName :exec
-UPDATE carry_users
-SET display_name = sqlc.arg(display_name)
-WHERE user_id = sqlc.arg(user_id)
-    AND display_name IS NULL;
-
--- name: CreateFirstSpace :exec
+-- name: CreateSpace :exec
 INSERT INTO spaces (
     space_id,
     name,
+    slug,
     created_by_user_id,
     create_idempotency_key,
     create_request_digest
 ) VALUES (
     sqlc.arg(space_id),
     sqlc.arg(name),
+    sqlc.arg(slug),
     sqlc.arg(user_id),
     sqlc.arg(idempotency_key),
     sqlc.arg(request_digest)
 );
 
--- name: CreateFirstSpaceMembership :exec
+-- name: CreateSpaceMembership :exec
 INSERT INTO space_memberships (
     space_id,
     user_id,

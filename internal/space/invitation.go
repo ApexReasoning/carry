@@ -187,11 +187,9 @@ func (invitations *Invitations) Revoke(ctx context.Context, command RevokeInvita
 	return invitations.persistence.RevokeInvitation(ctx, command)
 }
 func (invitations *Invitations) Accept(ctx context.Context, command AcceptInvitationCommand) (AcceptedInvitation, error) {
-	command.DisplayName = strings.TrimSpace(command.DisplayName)
 	command.RequestDigest = digest(struct {
 		InvitationID string `json:"invitation_id"`
-		DisplayName  string `json:"display_name"`
-	}{command.InvitationID, command.DisplayName})
+	}{command.InvitationID})
 	return invitations.persistence.AcceptInvitation(ctx, command)
 }
 
@@ -221,8 +219,8 @@ type RevokeInvitationCommand struct {
 	RequestDigest                                      [sha256.Size]byte
 }
 type AcceptInvitationCommand struct {
-	InvitationID, UserID, SessionID, DisplayName, IdempotencyKey string
-	RequestDigest                                                [sha256.Size]byte
+	InvitationID, UserID, SessionID, IdempotencyKey string
+	RequestDigest                                   [sha256.Size]byte
 }
 
 type InvitationSubmission struct {

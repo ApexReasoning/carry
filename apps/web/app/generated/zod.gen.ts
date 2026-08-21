@@ -6,6 +6,13 @@ export const zApiError = z.object({
   error: z.string(),
 });
 
+export const zSpaceCreationConflict = z.object({
+  error: z.string(),
+  slug: z.string().optional(),
+  suggested_slug: z.string().optional(),
+  suggested_suffix: z.int().gte(2).lte(9999).optional(),
+});
+
 export const zBegunCliLogin = z.object({
   request_id: z.uuid(),
   user_code: z.string(),
@@ -61,13 +68,14 @@ export const zIdentityMethods = z.object({
 export const zMembership = z.object({
   space_id: z.uuid(),
   name: z.string(),
+  slug: z.string().min(1).max(32),
   can_manage_members: z.boolean(),
   can_enroll_machines: z.boolean(),
 });
 
 export const zUser = z.object({
   user_id: z.uuid(),
-  display_name: z.string().nullable(),
+  display_name: z.string().min(1),
   spaces: z.array(zMembership),
 });
 
@@ -499,19 +507,19 @@ export const zRevokeCurrentBrowserSessionResponse = z.void();
  */
 export const zLoadCurrentUserResponse = zUser;
 
-export const zCreateFirstSpaceBody = z.object({
-  display_name: z.string().min(1),
-  name: z.string().min(1),
+export const zCreateSpaceBody = z.object({
+  name: z.string().min(1).max(80),
+  suffix: z.int().gte(2).lte(9999).optional(),
 });
 
-export const zCreateFirstSpaceHeaders = z.object({
+export const zCreateSpaceHeaders = z.object({
   "Idempotency-Key": z.string().min(1).max(255),
 });
 
 /**
- * First Space and creator Membership created or exactly replayed
+ * Space and creator Membership created or exactly replayed
  */
-export const zCreateFirstSpaceResponse = zMembership;
+export const zCreateSpaceResponse = zMembership;
 
 export const zBeginMachineConnectionBody = z.object({
   request_id: z.uuid(),
@@ -850,10 +858,6 @@ export const zRevokeSpaceInvitationResponse = z.void();
  * Invitations for the current User's exact Email method
  */
 export const zListInvitationInboxResponse = zInvitationInbox;
-
-export const zAcceptSpaceInvitationBody = z.object({
-  display_name: z.string().max(255),
-});
 
 export const zAcceptSpaceInvitationHeaders = z.object({
   "Idempotency-Key": z.string().min(1).max(255),

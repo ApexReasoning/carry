@@ -30,7 +30,7 @@ INSERT INTO cli_login_requests (
 RETURNING *;
 
 -- name: LockBrowserSessionForCLILogin :one
-SELECT session.user_id, coalesce(carry_user.display_name, '') AS display_name
+SELECT session.user_id, carry_user.display_name AS display_name
 FROM browser_sessions AS session
 INNER JOIN carry_users AS carry_user ON carry_user.user_id = session.user_id
 WHERE session.session_id = sqlc.arg(session_id)
@@ -168,7 +168,7 @@ WHERE credential.user_id = sqlc.arg(user_id)
 ORDER BY credential.created_at DESC, credential.credential_id;
 
 -- name: AuthenticateCLICredential :one
-SELECT credential.user_id, coalesce(carry_user.display_name, '') AS display_name
+SELECT credential.user_id, carry_user.display_name AS display_name
 FROM cli_credentials AS credential
 INNER JOIN carry_users AS carry_user ON carry_user.user_id = credential.user_id
 WHERE credential.credential_id = sqlc.arg(credential_id)

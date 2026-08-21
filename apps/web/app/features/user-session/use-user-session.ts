@@ -21,13 +21,11 @@ import {
   newEmailVerification,
   verifyExactEmailChallenge,
 } from "./email-verification";
-import { createExactFirstSpace, newFirstSpace } from "./first-space-creation";
 
 type SessionPhase =
   | "checking"
   | "email"
   | "code"
-  | "first-space"
   | "invitations"
   | "ready"
   | "failed"
@@ -43,7 +41,6 @@ export function useUserSession() {
   const [requestRetryPending, setRequestRetryPending] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [restoreAttempt, setRestoreAttempt] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -69,7 +66,7 @@ export function useUserSession() {
     return () => {
       active = false;
     };
-  }, [restoreAttempt]);
+  }, []);
 
   async function routeUser(loaded: User | null) {
     setUser(loaded);
@@ -78,21 +75,37 @@ export function useUserSession() {
       setPhase("email");
       return;
     }
+    const invitations = await invitationInbox();
     if (
-      loaded.spaces.length === 0 ||
+      invitations.invitations.length > 0 ||
       window.location.pathname === "/invitations"
     ) {
-      const invitations = await invitationInbox();
-      if (
-        invitations.invitations.length > 0 ||
-        window.location.pathname === "/invitations"
-      ) {
-        setInbox(invitations);
-        setPhase("invitations");
-        return;
-      }
+      setInbox(invitations);
+      setPhase("invitations");
+      return;
     }
-    setPhase(loaded.spaces.length === 0 ? "first-space" : "ready");
+    setPhase("ready");
+  }
+
+  async function refresh() {
+    try {
+      const loaded = await currentUser();
+      await routeUser(loaded);
+    } catch (caught) {
+      setError(errorMessage(caught));
+    }
+  }
+
+  async function retryRestore() {
+    setPhase("checking");
+    setError(null);
+    try {
+      const loaded = await currentUser();
+      await routeUser(loaded);
+    } catch (caught) {
+      setError(errorMessage(caught));
+      setPhase("failed");
+    }
   }
 
   async function sendCode(address: string) {
@@ -161,21 +174,6 @@ export function useUserSession() {
     }
   }
 
-  async function createSpace(displayName: string, name: string) {
-    setBusy(true);
-    setError(null);
-    try {
-      await routeUser(
-        await createExactFirstSpace(newFirstSpace(displayName, name)),
-      );
-    } catch (caught) {
-      setError(errorMessage(caught));
-      setPhase("first-space");
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function signOut() {
     setUser(null);
     setPhase("signing-out");
@@ -218,10 +216,12 @@ export function useUserSession() {
     canRetryCodeRequest: requestRetryPending,
     busy,
     error,
-    retry: () => setRestoreAttempt((attempt) => attempt + 1),
-    refresh: () => setRestoreAttempt((attempt) => attempt + 1),
-    skipInvitations: () =>
-      setPhase(user?.spaces.length === 0 ? "first-space" : "ready"),
+    retry: () => void retryRestore(),
+    refresh: () => void refresh(),
+    skipInvitations: () => {
+      window.history.replaceState(null, "", "/");
+      setPhase("ready");
+    },
     sendCode,
     retryCodeRequest,
     verifyCode,
@@ -232,21 +232,21 @@ export function useUserSession() {
       setRequestRetryPending(false);
       setPhase("email");
     },
-    createSpace,
     signOut,
     finishSignOut: () => finishSignOut(),
   };
 }
 
 function takeExternalSignInStatus(): string | null {
-  const url = new URL(window.location.href);
-  const status = url.searchParams.get("sign_in");
+  const parameters = new URLSearchParams(window.location.search);
+  const status = parameters.get("sign_in");
   if (status === null) return null;
-  url.searchParams.delete("sign_in");
+  parameters.delete("sign_in");
+  const query = parameters.toString();
   window.history.replaceState(
     null,
     "",
-    `${url.pathname}${url.search}${url.hash}`,
+    `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`,
   );
   switch (status) {
     case "cancelled":

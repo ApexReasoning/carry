@@ -85,7 +85,7 @@ func TestRemoveSpaceMemberWorklessTransferReplayAndRetention(t *testing.T) {
 	target := seedRemovalMember(t, ctx, pool, manager.SpaceID, true, true)
 	successor := seedRemovalMember(t, ctx, pool, manager.SpaceID, true, true)
 	otherSpace := uuid.NewString()
-	if _, err := pool.Exec(ctx, `insert into spaces (space_id, name) values ($1, 'Retained Space')`, otherSpace); err != nil {
+	if _, err := pool.Exec(ctx, `insert into spaces (space_id, name, slug) values ($1::uuid, 'Retained Space', replace(($1::uuid)::text, '-', ''))`, otherSpace); err != nil {
 		t.Fatalf("seed retained Space: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `insert into space_memberships (space_id, user_id, can_manage_members, can_enroll_machines) values ($1, $2, false, false)`, otherSpace, target); err != nil {
@@ -726,7 +726,7 @@ func seedRemovalMember(t *testing.T, ctx context.Context, pool *pgxpool.Pool, sp
 
 func seedRemovalSpaceMember(t *testing.T, ctx context.Context, pool *pgxpool.Pool, spaceID string, manage, enroll bool) string {
 	t.Helper()
-	if _, err := pool.Exec(ctx, `insert into spaces (space_id, name) values ($1, 'Other Space')`, spaceID); err != nil {
+	if _, err := pool.Exec(ctx, `insert into spaces (space_id, name, slug) values ($1::uuid, 'Other Space', replace(($1::uuid)::text, '-', ''))`, spaceID); err != nil {
 		t.Fatalf("seed removal Space: %v", err)
 	}
 	return seedRemovalMember(t, ctx, pool, spaceID, manage, enroll)

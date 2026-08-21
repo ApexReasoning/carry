@@ -19,6 +19,7 @@ type userAPI struct {
 type membershipWire struct {
 	SpaceID           string `json:"space_id"`
 	Name              string `json:"name"`
+	Slug              string `json:"slug"`
 	CanManageMembers  bool   `json:"can_manage_members"`
 	CanEnrollMachines bool   `json:"can_enroll_machines"`
 }
@@ -36,18 +37,20 @@ func (api userAPI) me(response http.ResponseWriter, request *http.Request) {
 	spaces := make([]membershipWire, 0, len(memberships))
 	for _, membership := range memberships {
 		spaces = append(spaces, membershipWire{
-			SpaceID: membership.SpaceID, Name: membership.Name,
+			SpaceID:           membership.SpaceID,
+			Name:              membership.Name,
+			Slug:              membership.Slug,
 			CanManageMembers:  membership.CanManageMembers,
 			CanEnrollMachines: membership.CanEnrollMachines,
 		})
 	}
-	var displayName *string
-	if user.DisplayName != "" {
-		displayName = &user.DisplayName
-	}
 	writeJSON(response, http.StatusOK, struct {
 		UserID      string           `json:"user_id"`
-		DisplayName *string          `json:"display_name"`
+		DisplayName string           `json:"display_name"`
 		Spaces      []membershipWire `json:"spaces"`
-	}{UserID: user.UserID, DisplayName: displayName, Spaces: spaces})
+	}{
+		UserID:      user.UserID,
+		DisplayName: user.DisplayName,
+		Spaces:      spaces,
+	})
 }

@@ -5,95 +5,94 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/ApexReasoning/carry/internal/postgres/dbsqlc"
 	"github.com/ApexReasoning/carry/internal/space"
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
-func (s *Store) CreateFirstSpace(ctx context.Context, command space.CreateFirstCommand) (space.CreatedSpace, error) {
-	displayName := strings.TrimSpace(command.DisplayName)
-	spaceName := strings.TrimSpace(command.SpaceName)
-	if uuid.Validate(command.SpaceID) != nil || uuid.Validate(command.UserID) != nil ||
-		displayName == "" || spaceName == "" || strings.TrimSpace(command.IdempotencyKey) == "" ||
-		len(command.IdempotencyKey) > 255 {
-		return space.CreatedSpace{}, space.ErrInvalidSpaceCreation
-	}
+func (s *Store) CreateSpace(ctx context.Context, command space.CreateSpaceCommand) (space.CreatedSpace, error) {
 	transaction, err := s.pool.Begin(ctx)
 	if err != nil {
-		return space.CreatedSpace{}, fmt.Errorf("begin first Space creation: %w", err)
+		return space.CreatedSpace{}, fmt.Errorf("begin Space creation: %w", err)
 	}
 	defer func() { _ = transaction.Rollback(context.Background()) }()
 	queries := s.queries.WithTx(transaction)
-	existingName, err := queries.LockSpaceCreator(ctx, command.UserID)
+
+	lockedUserID, err := queries.LockSpaceCreator(ctx, command.UserID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return space.CreatedSpace{}, space.ErrForbidden
 	}
 	if err != nil {
-		return space.CreatedSpace{}, fmt.Errorf("lock first Space creator: %w", err)
+		return space.CreatedSpace{}, fmt.Errorf("lock Space creator: %w", err)
 	}
-	userUUID, err := postgresUUID(command.UserID)
+	userID, err := postgresUUID(lockedUserID)
 	if err != nil {
-		return space.CreatedSpace{}, space.ErrInvalidSpaceCreation
+		return space.CreatedSpace{}, fmt.Errorf("parse locked Space creator: %w", err)
 	}
+
 	idempotencyKey := command.IdempotencyKey
 	existing, err := queries.LoadCreatedSpaceByRequest(ctx, dbsqlc.LoadCreatedSpaceByRequestParams{
-		UserID: userUUID, IdempotencyKey: &idempotencyKey,
+		UserID:         userID,
+		IdempotencyKey: &idempotencyKey,
 	})
 	if err == nil {
-		if existing.Name != spaceName || !bytes.Equal(existing.CreateRequestDigest, command.RequestDigest[:]) {
+		if !bytes.Equal(existing.CreateRequestDigest, command.RequestDigest[:]) {
 			return space.CreatedSpace{}, space.ErrIdempotencyConflict
 		}
 		if err := transaction.Commit(ctx); err != nil {
-			return space.CreatedSpace{}, fmt.Errorf("commit first Space replay: %w", err)
+			return space.CreatedSpace{}, fmt.Errorf("commit Space creation replay: %w", err)
 		}
 		return restoreCreatedSpace(existing), nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
-		return space.CreatedSpace{}, fmt.Errorf("load first Space replay: %w", err)
+		return space.CreatedSpace{}, fmt.Errorf("load Space creation replay: %w", err)
 	}
-	hasMembership, err := queries.HasActiveMembership(ctx, command.UserID)
+
+	err = queries.CreateSpace(ctx, dbsqlc.CreateSpaceParams{
+		SpaceID:        command.SpaceID,
+		Name:           command.Name,
+		Slug:           command.Slug,
+		UserID:         userID,
+		IdempotencyKey: &idempotencyKey,
+		RequestDigest:  command.RequestDigest[:],
+	})
+	if isSlugUniqueViolation(err) {
+		return space.CreatedSpace{}, space.NewSlugConflictError(command)
+	}
 	if err != nil {
-		return space.CreatedSpace{}, fmt.Errorf("check first Space eligibility: %w", err)
+		return space.CreatedSpace{}, fmt.Errorf("create Space: %w", err)
 	}
-	if hasMembership {
-		return space.CreatedSpace{}, space.ErrAlreadyHasSpace
-	}
-	if existingName != nil && *existingName != displayName {
-		return space.CreatedSpace{}, space.ErrIdempotencyConflict
-	}
-	if existingName == nil {
-		if err := queries.SetInitialDisplayName(ctx, dbsqlc.SetInitialDisplayNameParams{
-			DisplayName: &displayName, UserID: command.UserID,
-		}); err != nil {
-			return space.CreatedSpace{}, fmt.Errorf("set initial User name: %w", err)
-		}
-	}
-	if err := queries.CreateFirstSpace(ctx, dbsqlc.CreateFirstSpaceParams{
-		SpaceID: command.SpaceID, Name: spaceName, UserID: userUUID,
-		IdempotencyKey: &idempotencyKey, RequestDigest: command.RequestDigest[:],
+	if err := queries.CreateSpaceMembership(ctx, dbsqlc.CreateSpaceMembershipParams{
+		SpaceID: command.SpaceID,
+		UserID:  command.UserID,
 	}); err != nil {
-		return space.CreatedSpace{}, fmt.Errorf("create first Space: %w", err)
-	}
-	if err := queries.CreateFirstSpaceMembership(ctx, dbsqlc.CreateFirstSpaceMembershipParams{
-		SpaceID: command.SpaceID, UserID: command.UserID,
-	}); err != nil {
-		return space.CreatedSpace{}, fmt.Errorf("create first Space Membership: %w", err)
+		return space.CreatedSpace{}, fmt.Errorf("create Space Membership: %w", err)
 	}
 	if err := transaction.Commit(ctx); err != nil {
-		return space.CreatedSpace{}, fmt.Errorf("commit first Space: %w", err)
+		return space.CreatedSpace{}, fmt.Errorf("commit Space creation: %w", err)
 	}
 	return space.CreatedSpace{
-		SpaceID: command.SpaceID, Name: spaceName,
-		CanManageMembers: true, CanEnrollMachines: true,
+		SpaceID:           command.SpaceID,
+		Name:              command.Name,
+		Slug:              command.Slug,
+		CanManageMembers:  true,
+		CanEnrollMachines: true,
 	}, nil
+}
+
+func isSlugUniqueViolation(err error) bool {
+	var postgresError *pgconn.PgError
+	return errors.As(err, &postgresError) && postgresError.Code == "23505" && postgresError.ConstraintName == "spaces_slug_unique"
 }
 
 func restoreCreatedSpace(row dbsqlc.LoadCreatedSpaceByRequestRow) space.CreatedSpace {
 	return space.CreatedSpace{
-		SpaceID: row.SpaceID, Name: row.Name,
-		CanManageMembers: row.CanManageMembers, CanEnrollMachines: row.CanEnrollMachines,
+		SpaceID:           row.SpaceID,
+		Name:              row.Name,
+		Slug:              row.Slug,
+		CanManageMembers:  row.CanManageMembers,
+		CanEnrollMachines: row.CanEnrollMachines,
 	}
 }

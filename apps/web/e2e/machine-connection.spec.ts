@@ -56,6 +56,7 @@ test("member approves, inventories, and remotely revokes one exact Machine", asy
   // cadence-conforming redeem and certificate installation.
   await page.waitForTimeout(6_000);
   await page.goto(webURL);
+  await page.getByRole("link", { name: new RegExp(spaceName) }).click();
   await page.getByRole("button", { name: "Settings" }).click();
   await page.getByRole("button", { name: "Machines" }).click();
   const machineRow = page

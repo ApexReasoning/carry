@@ -142,7 +142,12 @@ func TestSpaceInvitationReplayEligibilityAndExactSpaceAuthority(t *testing.T) {
 		t.Fatalf("issue accepted terminal: %v", err)
 	}
 	acceptedUser, sessions := seedIdentityUser(t, ctx, store, "terminal-accepted@example.com", 1)
-	if _, err := invitations.Accept(ctx, space.AcceptInvitationCommand{InvitationID: acceptedIssue.InvitationID, UserID: acceptedUser, SessionID: sessions[0], DisplayName: "Accepted", IdempotencyKey: "accept-terminal"}); err != nil {
+	if _, err := invitations.Accept(ctx, space.AcceptInvitationCommand{
+		InvitationID:   acceptedIssue.InvitationID,
+		UserID:         acceptedUser,
+		SessionID:      sessions[0],
+		IdempotencyKey: "accept-terminal",
+	}); err != nil {
 		t.Fatalf("accept terminal: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `update space_invitation_submissions set state = 'prepared', provider_message_id = null, recorded_at = null where submission_id = $1`, acceptedIssue.Submission.SubmissionID); err != nil {
@@ -179,7 +184,7 @@ func TestSpaceInvitationReplayEligibilityAndExactSpaceAuthority(t *testing.T) {
 		t.Fatalf("prepare Space A resend: %v", err)
 	}
 	spaceB := uuid.NewString()
-	if _, err := pool.Exec(ctx, `insert into spaces (space_id, name) values ($1, 'Space B')`, spaceB); err != nil {
+	if _, err := pool.Exec(ctx, `insert into spaces (space_id, name, slug) values ($1::uuid, 'Space B', replace(($1::uuid)::text, '-', ''))`, spaceB); err != nil {
 		t.Fatalf("create Space B: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `insert into space_memberships (space_id, user_id, can_manage_members, can_enroll_machines) values ($1, $2, true, false)`, spaceB, manager.UserID); err != nil {
@@ -264,7 +269,7 @@ func TestSpaceInvitationRequiresExactRecentEmailProofAndReplaysAcceptance(t *tes
 	}
 	if _, err := invitations.Accept(ctx, space.AcceptInvitationCommand{
 		InvitationID: issued.InvitationID, UserID: wrongUserID, SessionID: wrongSessions[0],
-		DisplayName: "Wrong User", IdempotencyKey: "accept-wrong",
+		IdempotencyKey: "accept-wrong",
 	}); !errors.Is(err, space.ErrInvitationUnavailable) {
 		t.Fatalf("wrong-email acceptance = %v", err)
 	}
@@ -280,7 +285,7 @@ func TestSpaceInvitationRequiresExactRecentEmailProofAndReplaysAcceptance(t *tes
 	}
 	if _, err := invitations.Accept(ctx, space.AcceptInvitationCommand{
 		InvitationID: issued.InvitationID, UserID: inviteeID, SessionID: googleSession,
-		DisplayName: "Invited Member", IdempotencyKey: "accept-invitee",
+		IdempotencyKey: "accept-invitee",
 	}); !errors.Is(err, space.ErrInvitationProofRequired) {
 		t.Fatalf("Google acceptance = %v", err)
 	}
@@ -294,14 +299,14 @@ func TestSpaceInvitationRequiresExactRecentEmailProofAndReplaysAcceptance(t *tes
 	}
 	if _, err := invitations.Accept(ctx, space.AcceptInvitationCommand{
 		InvitationID: issued.InvitationID, UserID: inviteeID, SessionID: emailSession,
-		DisplayName: "Invited Member", IdempotencyKey: "accept-invitee",
+		IdempotencyKey: "accept-invitee",
 	}); !errors.Is(err, space.ErrInvitationProofRequired) {
 		t.Fatalf("stale Email acceptance = %v", err)
 	}
 	emailSession = createIdentityTestSession(t, ctx, store, inviteeID, identity.EmailMethod)
 	accepted, err := invitations.Accept(ctx, space.AcceptInvitationCommand{
 		InvitationID: issued.InvitationID, UserID: inviteeID, SessionID: emailSession,
-		DisplayName: "Invited Member", IdempotencyKey: "accept-invitee",
+		IdempotencyKey: "accept-invitee",
 	})
 	if err != nil {
 		t.Fatalf("accept invitation: %v", err)
@@ -311,27 +316,25 @@ func TestSpaceInvitationRequiresExactRecentEmailProofAndReplaysAcceptance(t *tes
 	}
 	replayed, err := invitations.Accept(ctx, space.AcceptInvitationCommand{
 		InvitationID: issued.InvitationID, UserID: inviteeID, SessionID: emailSession,
-		DisplayName: "Invited Member", IdempotencyKey: "accept-invitee",
+		IdempotencyKey: "accept-invitee",
 	})
 	if err != nil || replayed != accepted {
 		t.Fatalf("accept replay = %#v, %v", replayed, err)
 	}
-	if _, err := invitations.Accept(ctx, space.AcceptInvitationCommand{
-		InvitationID: issued.InvitationID, UserID: inviteeID, SessionID: emailSession,
-		DisplayName: "Changed Name", IdempotencyKey: "accept-invitee",
-	}); !errors.Is(err, space.ErrIdempotencyConflict) {
-		t.Fatalf("changed accept replay = %v", err)
+	expectedName, err := identity.FallbackDisplayName(inviteeID)
+	if err != nil {
+		t.Fatal(err)
 	}
-	var name *string
-	if err := pool.QueryRow(ctx, `select display_name from carry_users where user_id = $1`, inviteeID).Scan(&name); err != nil || name == nil || *name != "Invited Member" {
-		t.Fatalf("display name = %#v, err = %v", name, err)
+	var name string
+	if err := pool.QueryRow(ctx, `select display_name from carry_users where user_id = $1`, inviteeID).Scan(&name); err != nil || name != expectedName {
+		t.Fatalf("display name = %q, want %q, err = %v", name, expectedName, err)
 	}
 	if _, err := pool.Exec(ctx, `update space_memberships set revoked_at = transaction_timestamp() where space_id = $1 and user_id = $2`, manager.SpaceID, inviteeID); err != nil {
 		t.Fatalf("revoke resulting Membership: %v", err)
 	}
 	if _, err := invitations.Accept(ctx, space.AcceptInvitationCommand{
 		InvitationID: issued.InvitationID, UserID: inviteeID, SessionID: emailSession,
-		DisplayName: "Invited Member", IdempotencyKey: "accept-invitee",
+		IdempotencyKey: "accept-invitee",
 	}); !errors.Is(err, space.ErrInvitationUnavailable) {
 		t.Fatalf("replay after Membership removal = %v", err)
 	}
@@ -359,7 +362,7 @@ func TestSpaceInvitationAlreadyMemberUnchangedAndDatabaseTimeExpiry(t *testing.T
 	}
 	accepted, err := invitations.Accept(ctx, space.AcceptInvitationCommand{
 		InvitationID: issued.InvitationID, UserID: userID, SessionID: sessions[0],
-		DisplayName: "Already Member", IdempotencyKey: "accept-already",
+		IdempotencyKey: "accept-already",
 	})
 	if err != nil {
 		t.Fatalf("accept as already member: %v", err)
@@ -384,7 +387,7 @@ func TestSpaceInvitationAlreadyMemberUnchangedAndDatabaseTimeExpiry(t *testing.T
 	expiredUser, expiredSessions := seedIdentityUser(t, ctx, store, "expired@example.com", 1)
 	if _, err := invitations.Accept(ctx, space.AcceptInvitationCommand{
 		InvitationID: expired.InvitationID, UserID: expiredUser, SessionID: expiredSessions[0],
-		DisplayName: "Expired User", IdempotencyKey: "accept-expired",
+		IdempotencyKey: "accept-expired",
 	}); !errors.Is(err, space.ErrInvitationUnavailable) {
 		t.Fatalf("expired acceptance = %v", err)
 	}
@@ -465,7 +468,12 @@ func TestConcurrentInvitationAcceptsHaveOneWinner(t *testing.T) {
 		go func() {
 			defer wait.Done()
 			<-start
-			_, err := invitations.Accept(ctx, space.AcceptInvitationCommand{InvitationID: issued.InvitationID, UserID: userID, SessionID: sessions[0], DisplayName: "Two Accepts", IdempotencyKey: key})
+			_, err := invitations.Accept(ctx, space.AcceptInvitationCommand{
+				InvitationID:   issued.InvitationID,
+				UserID:         userID,
+				SessionID:      sessions[0],
+				IdempotencyKey: key,
+			})
 			errorsSeen <- err
 		}()
 	}
@@ -511,7 +519,12 @@ func TestConcurrentInvitationAcceptAndRevokeHaveOneTerminalWinner(t *testing.T) 
 	go func() {
 		defer wait.Done()
 		<-start
-		_, acceptErr = invitations.Accept(ctx, space.AcceptInvitationCommand{InvitationID: issued.InvitationID, UserID: userID, SessionID: sessions[0], DisplayName: "Concurrent", IdempotencyKey: "accept-concurrent"})
+		_, acceptErr = invitations.Accept(ctx, space.AcceptInvitationCommand{
+			InvitationID:   issued.InvitationID,
+			UserID:         userID,
+			SessionID:      sessions[0],
+			IdempotencyKey: "accept-concurrent",
+		})
 	}()
 	go func() {
 		defer wait.Done()

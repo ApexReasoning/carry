@@ -10,72 +10,120 @@ import (
 	"github.com/google/uuid"
 )
 
-var (
-	ErrInvalidSpaceCreation = errors.New("first Space creation is invalid")
-	ErrAlreadyHasSpace      = errors.New("User already belongs to a Space")
-	ErrIdempotencyConflict  = errors.New("Space idempotency key was reused for a different request")
-)
+var ErrIdempotencyConflict = errors.New("Space idempotency key was reused for a different request")
 
-// FirstSpacePersistence is the complete atomic mutation consumed by Space.
-type FirstSpacePersistence interface {
-	CreateFirstSpace(context.Context, CreateFirstCommand) (CreatedSpace, error)
+// SpaceCreationPersistence owns the atomic Space and creator Membership mutation.
+type SpaceCreationPersistence interface {
+	CreateSpace(context.Context, CreateSpaceCommand) (CreatedSpace, error)
 }
 
-type FirstSpace struct {
-	persistence FirstSpacePersistence
+// Creator derives one exact Space creation command from authenticated User input.
+type Creator struct {
+	persistence SpaceCreationPersistence
 }
 
-func NewFirstSpace(persistence FirstSpacePersistence) (*FirstSpace, error) {
+// NewCreator constructs the Space creation behavior.
+func NewCreator(persistence SpaceCreationPersistence) (*Creator, error) {
 	if persistence == nil {
-		return nil, errors.New("first Space persistence is required")
+		return nil, errors.New("Space creation persistence is required")
 	}
-	return &FirstSpace{persistence: persistence}, nil
+	return &Creator{persistence: persistence}, nil
 }
 
-type CreateFirstRequest struct {
+// CreateSpaceRequest contains only the authenticated User's creation intent.
+type CreateSpaceRequest struct {
 	UserID         string
-	DisplayName    string
-	SpaceName      string
+	Name           string
+	Suffix         int
 	IdempotencyKey string
 }
 
-func (creator *FirstSpace) Create(ctx context.Context, request CreateFirstRequest) (CreatedSpace, error) {
-	displayName := strings.TrimSpace(request.DisplayName)
-	spaceName := strings.TrimSpace(request.SpaceName)
-	digest, err := firstSpaceRequestDigest(displayName, spaceName)
+// Create creates or exactly replays one Space.
+func (creator *Creator) Create(ctx context.Context, request CreateSpaceRequest) (CreatedSpace, error) {
+	if uuid.Validate(request.UserID) != nil {
+		return CreatedSpace{}, ErrForbidden
+	}
+	key := strings.TrimSpace(request.IdempotencyKey)
+	if key == "" || len(key) > 255 {
+		return CreatedSpace{}, ErrIdempotencyConflict
+	}
+	name, slug, err := NormalizeSpaceName(request.Name, request.Suffix)
 	if err != nil {
 		return CreatedSpace{}, err
 	}
-	return creator.persistence.CreateFirstSpace(ctx, CreateFirstCommand{
-		SpaceID: uuid.NewString(), UserID: request.UserID, DisplayName: displayName, SpaceName: spaceName,
-		IdempotencyKey: request.IdempotencyKey, RequestDigest: digest,
+	digest, err := spaceCreationDigest(name, request.Suffix)
+	if err != nil {
+		return CreatedSpace{}, err
+	}
+	return creator.persistence.CreateSpace(ctx, CreateSpaceCommand{
+		SpaceID:        uuid.NewString(),
+		UserID:         request.UserID,
+		Name:           name,
+		Slug:           slug,
+		Suffix:         request.Suffix,
+		IdempotencyKey: key,
+		RequestDigest:  digest,
 	})
 }
 
-type CreateFirstCommand struct {
+// CreateSpaceCommand carries Space-owned canonical facts to persistence.
+type CreateSpaceCommand struct {
 	SpaceID        string
 	UserID         string
-	DisplayName    string
-	SpaceName      string
+	Name           string
+	Slug           string
+	Suffix         int
 	IdempotencyKey string
 	RequestDigest  [sha256.Size]byte
 }
 
+// CreatedSpace is the creator Membership returned after commit or exact replay.
 type CreatedSpace struct {
 	SpaceID           string
 	Name              string
+	Slug              string
 	CanManageMembers  bool
 	CanEnrollMachines bool
 }
 
-func firstSpaceRequestDigest(displayName string, spaceName string) ([sha256.Size]byte, error) {
-	if displayName == "" || spaceName == "" {
-		return [sha256.Size]byte{}, ErrInvalidSpaceCreation
+// SlugConflictError reports one losing slug and its next unreserved attempt.
+type SlugConflictError struct {
+	Slug            string
+	SuggestedSlug   string
+	SuggestedSuffix int
+}
+
+func (conflict *SlugConflictError) Error() string {
+	return "Space URL is already in use"
+}
+
+// NewSlugConflictError derives the next truthful, unreserved conflict suggestion.
+func NewSlugConflictError(command CreateSpaceCommand) *SlugConflictError {
+	conflict := &SlugConflictError{Slug: command.Slug}
+	next := command.Suffix + 1
+	if next == 1 {
+		next = 2
 	}
+	if next > MaxSpaceSlugSuffix {
+		return conflict
+	}
+	_, suggestion, err := NormalizeSpaceName(command.Name, next)
+	if err != nil {
+		return conflict
+	}
+	conflict.SuggestedSlug = suggestion
+	conflict.SuggestedSuffix = next
+	return conflict
+}
+
+func spaceCreationDigest(name string, suffix int) ([sha256.Size]byte, error) {
 	encoded, err := json.Marshal(struct {
-		DisplayName string `json:"display_name"`
-		SpaceName   string `json:"space_name"`
-	}{DisplayName: displayName, SpaceName: spaceName})
+		Name   string `json:"name"`
+		Suffix int    `json:"suffix,omitempty"`
+	}{
+		Name:   name,
+		Suffix: suffix,
+	})
 	if err != nil {
 		return [sha256.Size]byte{}, err
 	}

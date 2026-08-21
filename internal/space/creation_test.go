@@ -2,40 +2,128 @@ package space
 
 import (
 	"context"
+	"errors"
 	"testing"
 )
 
-func TestFirstSpaceOwnsIdentityNormalizationAndDigest(t *testing.T) {
+func TestCreatorOwnsCanonicalSpaceFactsAndRequestDigest(t *testing.T) {
 	t.Parallel()
-	persistence := &recordingFirstSpacePersistence{}
-	creator, err := NewFirstSpace(persistence)
+
+	persistence := &recordingSpaceCreationPersistence{}
+	creator, err := NewCreator(persistence)
 	if err != nil {
-		t.Fatalf("compose first Space: %v", err)
+		t.Fatal(err)
 	}
-	request := CreateFirstRequest{
-		UserID: "11111111-1111-4111-8111-111111111111", DisplayName: "  Ada  ",
-		SpaceName: "  Research  ", IdempotencyKey: "create-first",
+	created, err := creator.Create(context.Background(), CreateSpaceRequest{
+		UserID:         "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+		Name:           "  Research Team  ",
+		IdempotencyKey: "create-research",
+	})
+	if err != nil {
+		t.Fatalf("create Space: %v", err)
 	}
-	if _, err := creator.Create(context.Background(), request); err != nil {
-		t.Fatalf("create first Space: %v", err)
+	command := persistence.command
+	if command.SpaceID == "" || command.UserID != "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" {
+		t.Fatalf("identity = %#v", command)
 	}
-	first := persistence.command
-	if first.SpaceID == "" || first.DisplayName != "Ada" || first.SpaceName != "Research" {
-		t.Fatalf("first Space command = %#v", first)
+	if command.Name != "Research Team" || command.Slug != "research-team" || command.Suffix != 0 {
+		t.Fatalf("canonical facts = %#v", command)
 	}
-	if _, err := creator.Create(context.Background(), request); err != nil {
-		t.Fatalf("replay first Space: %v", err)
+	if command.IdempotencyKey != "create-research" || command.RequestDigest == ([32]byte{}) {
+		t.Fatalf("request identity = %#v", command)
 	}
-	if persistence.command.SpaceID == first.SpaceID || persistence.command.RequestDigest != first.RequestDigest {
-		t.Fatalf("replay identity/digest first = %#v replay = %#v", first, persistence.command)
+	if created.SpaceID != command.SpaceID || created.Name != command.Name || created.Slug != command.Slug {
+		t.Fatalf("created = %#v", created)
 	}
 }
 
-type recordingFirstSpacePersistence struct {
-	command CreateFirstCommand
+func TestCreatorBindsSuffixIntoRequestDigest(t *testing.T) {
+	t.Parallel()
+
+	persistence := &recordingSpaceCreationPersistence{}
+	creator, err := NewCreator(persistence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := CreateSpaceRequest{
+		UserID:         "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+		Name:           "Research",
+		Suffix:         2,
+		IdempotencyKey: "create-research-2",
+	}
+	if _, err := creator.Create(context.Background(), request); err != nil {
+		t.Fatal(err)
+	}
+	first := persistence.command.RequestDigest
+	request.Suffix = 3
+	if _, err := creator.Create(context.Background(), request); err != nil {
+		t.Fatal(err)
+	}
+	if persistence.command.RequestDigest == first {
+		t.Fatal("suffix did not change request digest")
+	}
 }
 
-func (persistence *recordingFirstSpacePersistence) CreateFirstSpace(_ context.Context, command CreateFirstCommand) (CreatedSpace, error) {
+func TestCreatorRejectsInvalidAuthorityOrRequestIdentity(t *testing.T) {
+	t.Parallel()
+
+	creator, err := NewCreator(&recordingSpaceCreationPersistence{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := creator.Create(context.Background(), CreateSpaceRequest{
+		Name:           "Research",
+		IdempotencyKey: "key",
+	}); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("missing User error = %v", err)
+	}
+	if _, err := creator.Create(context.Background(), CreateSpaceRequest{
+		UserID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+		Name:   "Research",
+	}); !errors.Is(err, ErrIdempotencyConflict) {
+		t.Fatalf("missing key error = %v", err)
+	}
+}
+
+func TestSlugConflictAdvancesWithoutPromisingAvailability(t *testing.T) {
+	t.Parallel()
+
+	conflict := NewSlugConflictError(CreateSpaceCommand{
+		Name: "Acme",
+		Slug: "acme",
+	})
+	if conflict.SuggestedSlug != "acme-2" || conflict.SuggestedSuffix != 2 {
+		t.Fatalf("first conflict = %#v", conflict)
+	}
+	conflict = NewSlugConflictError(CreateSpaceCommand{
+		Name:   "Acme",
+		Slug:   "acme-2",
+		Suffix: 2,
+	})
+	if conflict.SuggestedSlug != "acme-3" || conflict.SuggestedSuffix != 3 {
+		t.Fatalf("second conflict = %#v", conflict)
+	}
+	conflict = NewSlugConflictError(CreateSpaceCommand{
+		Name:   "Acme",
+		Slug:   "acme-9999",
+		Suffix: MaxSpaceSlugSuffix,
+	})
+	if conflict.SuggestedSlug != "" || conflict.SuggestedSuffix != 0 {
+		t.Fatalf("exhausted conflict = %#v", conflict)
+	}
+}
+
+type recordingSpaceCreationPersistence struct {
+	command CreateSpaceCommand
+}
+
+func (persistence *recordingSpaceCreationPersistence) CreateSpace(_ context.Context, command CreateSpaceCommand) (CreatedSpace, error) {
 	persistence.command = command
-	return CreatedSpace{SpaceID: command.SpaceID, Name: command.SpaceName}, nil
+	return CreatedSpace{
+		SpaceID:           command.SpaceID,
+		Name:              command.Name,
+		Slug:              command.Slug,
+		CanManageMembers:  true,
+		CanEnrollMachines: true,
+	}, nil
 }

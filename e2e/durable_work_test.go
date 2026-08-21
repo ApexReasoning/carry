@@ -147,16 +147,16 @@ func TestBrowserCreatesDurableWorkWithoutStoringBearer(t *testing.T) {
 	resetProductJourneyFacts(t, databaseURL)
 
 	serverAddress := freeAddress(t)
-	stopServer, serverLog, emailCaptureFile := startServer(t, root, carryServer, serverAddress, databaseURL, pkiDirectory)
+	webAddress := freeAddress(t)
+	webURL := "https://" + webAddress
+	stopServer, serverLog, emailCaptureFile := startServerWithOrigin(t, root, carryServer, serverAddress, databaseURL, pkiDirectory, webURL)
 	defer func() { stopServer() }()
 	serverURL := "https://" + serverAddress
 	waitForServer(t, serverURL, filepath.Join(pkiDirectory, "ca.pem"), serverLog)
 
 	run(t, root, nil, "pnpm", "--dir", "apps/web", "build")
-	webAddress := freeAddress(t)
 	stopWeb, webLog := startWeb(t, root, webAddress, serverURL, pkiDirectory)
 	defer func() { stopWeb() }()
-	webURL := "https://" + webAddress
 	waitForServer(t, webURL, filepath.Join(pkiDirectory, "ca.pem"), webLog)
 
 	loginEmail := fmt.Sprintf("new-user-%d@example.com", time.Now().UnixNano())
@@ -173,7 +173,7 @@ func TestBrowserCreatesDurableWorkWithoutStoringBearer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run browser product journey: %v\n%s", err, output)
 	}
-	if !strings.Contains(output, "6 passed") {
+	if !strings.Contains(output, "7 passed") {
 		t.Fatalf("email identity and durable Work Playwright specs did not execute:\n%s", output)
 	}
 	serverOutput := serverLog.String()

@@ -28,6 +28,37 @@ func TestParseServerURLRequiresHTTPSOrigin(t *testing.T) {
 	}
 }
 
+func TestLoadMemberAcceptsRequiredSpaceSlug(t *testing.T) {
+	t.Parallel()
+	origin, _ := url.Parse("https://carry.example")
+	transport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		return jsonResponse(request, `{
+			"user_id":"11111111-1111-4111-8111-111111111111",
+			"display_name":"Member 11111111",
+			"spaces":[{
+				"space_id":"22222222-2222-4222-8222-222222222222",
+				"name":"Research","slug":"research",
+				"can_manage_members":true,"can_enroll_machines":false
+			}]
+		}`), nil
+	})
+	client := Client{
+		origin:     origin,
+		credential: "member-secret",
+		client: &http.Client{
+			Transport: transport,
+		},
+	}
+
+	member, err := client.LoadMember(context.Background())
+	if err != nil {
+		t.Fatalf("load member: %v", err)
+	}
+	if len(member.Spaces) != 1 || member.Spaces[0].Slug != "research" {
+		t.Fatalf("member Spaces = %#v", member.Spaces)
+	}
+}
+
 func TestWorkMutationRetriesResponseLossWithSameIdentityAndBytes(t *testing.T) {
 	t.Parallel()
 	var requests []*http.Request

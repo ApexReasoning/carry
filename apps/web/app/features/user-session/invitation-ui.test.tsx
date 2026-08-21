@@ -67,15 +67,15 @@ test("manager invitation defaults grants off and keeps Unknown truthful", async 
   ).toBeVisible();
 });
 
-test("recipient explicitly accepts exact grants and supplies missing name", async () => {
-  let accepted: Record<string, unknown> | null = null;
+test("recipient accepts exact grants without a name prompt", async () => {
+  let acceptedBody: string | null = null;
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const request =
         input instanceof Request ? input : new Request(input, init);
       if (request.method === "POST") {
-        accepted = (await request.json()) as Record<string, unknown>;
+        acceptedBody = await request.text();
         return json({
           invitation_id: "10000000-0000-4000-8000-000000000001",
           space_id: "20000000-0000-4000-8000-000000000001",
@@ -94,7 +94,7 @@ test("recipient explicitly accepts exact grants and supplies missing name", asyn
     <InvitationInboxView
       user={{
         user_id: "30000000-0000-4000-8000-000000000001",
-        display_name: null,
+        display_name: "Member 30000000",
         spaces: [],
       }}
       initialInbox={{
@@ -116,9 +116,9 @@ test("recipient explicitly accepts exact grants and supplies missing name", asyn
       onSkip={() => undefined}
     />,
   );
-  await user.type(screen.getByLabelText("Display name"), "Invited Member");
+  expect(screen.queryByLabelText("Display name")).not.toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "Accept and join" }));
-  expect(accepted).toEqual({ display_name: "Invited Member" });
+  expect(acceptedBody).toBe("");
   expect(changed).toHaveBeenCalledOnce();
 });
 

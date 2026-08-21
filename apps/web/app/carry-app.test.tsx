@@ -13,7 +13,7 @@ const secondWorkID = "44444444-4444-4444-8444-444444444444";
 beforeEach(() => {
   window.localStorage.clear();
   window.sessionStorage.clear();
-  window.history.replaceState(null, "", "/");
+  window.history.replaceState(null, "", "/s/research");
 });
 
 test("self-removal closes Settings and refreshes current User routing", async () => {
@@ -36,6 +36,7 @@ test("self-removal closes Settings and refreshes current User routing", async ()
                 {
                   space_id: spaceID,
                   name: "Research",
+                  slug: "research",
                   can_manage_members: true,
                   can_enroll_machines: true,
                 },
@@ -103,7 +104,7 @@ test("self-removal closes Settings and refreshes current User routing", async ()
   await user.click(screen.getByRole("button", { name: "Remove Alex Morgan" }));
 
   expect(
-    await screen.findByRole("heading", { name: "Create your Space" }),
+    await screen.findByRole("heading", { name: "Space unavailable" }),
   ).toBeVisible();
   expect(currentUserLoads).toBe(2);
   expect(
@@ -127,6 +128,7 @@ test("reopens Settings for a method callback failure", async () => {
             {
               space_id: spaceID,
               name: "Research",
+              slug: "research",
               can_manage_members: true,
               can_enroll_machines: true,
             },
@@ -210,10 +212,12 @@ test("retries the exact email request after its response is lost", async () => {
   expect(window.sessionStorage.length).toBe(0);
 });
 
-test("verifies email and explicitly creates the first Space after response loss", async () => {
+test("verifies email and explicitly creates a Space after response loss", async () => {
+  window.history.replaceState(null, "", "/");
   let sessionEstablished = false;
   let spaceCreated = false;
   let submittedSpaceKey = "";
+  let spaceCreateCalls = 0;
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -225,12 +229,13 @@ test("verifies email and explicitly creates the first Space after response loss"
           return json({ error: "User authentication is required" }, 401);
         return json({
           user_id: authenticatedMemberID,
-          display_name: spaceCreated ? "Alex Morgan" : null,
+          display_name: "Member aaaaaaaa",
           spaces: spaceCreated
             ? [
                 {
                   space_id: spaceID,
                   name: "Research",
+                  slug: "research",
                   can_manage_members: true,
                   can_enroll_machines: true,
                 },
@@ -258,13 +263,25 @@ test("verifies email and explicitly creates the first Space after response loss"
         return new Response(null, { status: 204 });
       }
       if (request.method === "POST" && path === "/v1/spaces") {
-        submittedSpaceKey = request.headers.get("Idempotency-Key") ?? "";
-        expect(await request.json()).toEqual({
-          display_name: "Alex Morgan",
-          name: "Research",
-        });
+        spaceCreateCalls++;
+        const key = request.headers.get("Idempotency-Key") ?? "";
+        if (submittedSpaceKey) expect(key).toBe(submittedSpaceKey);
+        submittedSpaceKey = key;
+        expect(await request.json()).toEqual({ name: "Research" });
         spaceCreated = true;
-        throw new TypeError("first Space response lost after commit");
+        if (spaceCreateCalls === 1) {
+          throw new TypeError("Space response lost after commit");
+        }
+        return json(
+          {
+            space_id: spaceID,
+            name: "Research",
+            slug: "research",
+            can_manage_members: true,
+            can_enroll_machines: true,
+          },
+          201,
+        );
       }
       if (isConversationList(request, path)) return json({ messages: [] });
       if (request.method === "GET" && path === `/v1/spaces/${spaceID}/works`) {
@@ -279,12 +296,9 @@ test("verifies email and explicitly creates the first Space after response loss"
   const user = userEvent.setup();
   render(<App />);
   await signIn(user);
-  await user.type(await screen.findByLabelText("Your name"), "Alex Morgan");
-  await user.type(screen.getByLabelText("Space name"), "Research");
+  await user.type(await screen.findByLabelText("Space name"), "Research");
   await user.click(screen.getByRole("button", { name: "Create Space" }));
-  await screen.findByRole("heading", {
-    name: "What should Carry keep moving?",
-  });
+  await waitFor(() => expect(spaceCreateCalls).toBe(2));
 
   expect(submittedSpaceKey).toBeTruthy();
   expect(window.localStorage.length).toBe(0);
@@ -316,6 +330,7 @@ test("returns an email User to existing durable Work without storing credentials
             {
               space_id: spaceID,
               name: "Research",
+              slug: "research",
               can_manage_members: true,
               can_enroll_machines: true,
             },
@@ -437,6 +452,7 @@ test("clears a message draft when the member selects another Work", async () => 
             {
               space_id: spaceID,
               name: "Research",
+              slug: "research",
               can_manage_members: true,
               can_enroll_machines: true,
             },
@@ -536,6 +552,7 @@ test("reuses the same Work identity after a create response is lost", async () =
             {
               space_id: spaceID,
               name: "Research",
+              slug: "research",
               can_manage_members: true,
               can_enroll_machines: true,
             },
@@ -634,6 +651,7 @@ test("reuses a pending Work identity after remount", async () => {
             {
               space_id: spaceID,
               name: "Research",
+              slug: "research",
               can_manage_members: true,
               can_enroll_machines: true,
             },
@@ -702,6 +720,7 @@ test("reuses a pending Work identity after remount", async () => {
 });
 
 test("requires an explicit Space choice when several are available", async () => {
+  window.history.replaceState(null, "", "/");
   let sessionEstablished = false;
   const workLists: Array<string> = [];
   vi.stubGlobal(
@@ -721,12 +740,14 @@ test("requires an explicit Space choice when several are available", async () =>
             {
               space_id: spaceID,
               name: "Research",
+              slug: "research",
               can_manage_members: true,
               can_enroll_machines: true,
             },
             {
               space_id: secondWorkID,
               name: "Operations",
+              slug: "operations",
               can_manage_members: true,
               can_enroll_machines: false,
             },
@@ -759,14 +780,16 @@ test("requires an explicit Space choice when several are available", async () =>
   const user = userEvent.setup();
   render(<App />);
   await signIn(user);
-  await screen.findByText(
-    "Choose a Space before talking to Carry or opening shared Work.",
+  await screen.findByRole("heading", { name: "Choose a Space" });
+  expect(screen.getByRole("link", { name: /Research/ })).toHaveAttribute(
+    "href",
+    "/s/research",
+  );
+  expect(screen.getByRole("link", { name: /Operations/ })).toHaveAttribute(
+    "href",
+    "/s/operations",
   );
   expect(workLists).toEqual([]);
-  await user.selectOptions(screen.getByLabelText("Space"), secondWorkID);
-  await waitFor(() =>
-    expect(workLists).toEqual([`/v1/spaces/${secondWorkID}/works`]),
-  );
 });
 
 test("keeps Work hidden across an unconfirmed sign-out reload", async () => {
@@ -788,6 +811,7 @@ test("keeps Work hidden across an unconfirmed sign-out reload", async () => {
             {
               space_id: spaceID,
               name: "Research",
+              slug: "research",
               can_manage_members: true,
               can_enroll_machines: true,
             },
@@ -870,6 +894,7 @@ test("falls back from a failed URL latch without reopening Work", async () => {
             {
               space_id: spaceID,
               name: "Research",
+              slug: "research",
               can_manage_members: true,
               can_enroll_machines: true,
             },
@@ -945,6 +970,7 @@ test("reconciles a lost Work retry response by reloading the Work", async () => 
             {
               space_id: spaceID,
               name: "Research",
+              slug: "research",
               can_manage_members: true,
               can_enroll_machines: true,
             },
@@ -1013,6 +1039,7 @@ test("reconciles an old retry identity before authorizing a later terminal Run",
             {
               space_id: spaceID,
               name: "Research",
+              slug: "research",
               can_manage_members: true,
               can_enroll_machines: true,
             },
@@ -1097,6 +1124,7 @@ test("opens shared Work from a private Carry reply without copying private text"
             {
               space_id: spaceID,
               name: "Research",
+              slug: "research",
               can_manage_members: true,
               can_enroll_machines: true,
             },

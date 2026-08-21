@@ -11,10 +11,11 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const createFirstSpace = `-- name: CreateFirstSpace :exec
+const createSpace = `-- name: CreateSpace :exec
 INSERT INTO spaces (
     space_id,
     name,
+    slug,
     created_by_user_id,
     create_idempotency_key,
     create_request_digest
@@ -23,22 +24,25 @@ INSERT INTO spaces (
     $2,
     $3,
     $4,
-    $5
+    $5,
+    $6
 )
 `
 
-type CreateFirstSpaceParams struct {
+type CreateSpaceParams struct {
 	SpaceID        string
 	Name           string
+	Slug           string
 	UserID         pgtype.UUID
 	IdempotencyKey *string
 	RequestDigest  []byte
 }
 
-func (q *Queries) CreateFirstSpace(ctx context.Context, arg CreateFirstSpaceParams) error {
-	_, err := q.db.Exec(ctx, createFirstSpace,
+func (q *Queries) CreateSpace(ctx context.Context, arg CreateSpaceParams) error {
+	_, err := q.db.Exec(ctx, createSpace,
 		arg.SpaceID,
 		arg.Name,
+		arg.Slug,
 		arg.UserID,
 		arg.IdempotencyKey,
 		arg.RequestDigest,
@@ -46,7 +50,7 @@ func (q *Queries) CreateFirstSpace(ctx context.Context, arg CreateFirstSpacePara
 	return err
 }
 
-const createFirstSpaceMembership = `-- name: CreateFirstSpaceMembership :exec
+const createSpaceMembership = `-- name: CreateSpaceMembership :exec
 INSERT INTO space_memberships (
     space_id,
     user_id,
@@ -60,36 +64,21 @@ INSERT INTO space_memberships (
 )
 `
 
-type CreateFirstSpaceMembershipParams struct {
+type CreateSpaceMembershipParams struct {
 	SpaceID string
 	UserID  string
 }
 
-func (q *Queries) CreateFirstSpaceMembership(ctx context.Context, arg CreateFirstSpaceMembershipParams) error {
-	_, err := q.db.Exec(ctx, createFirstSpaceMembership, arg.SpaceID, arg.UserID)
+func (q *Queries) CreateSpaceMembership(ctx context.Context, arg CreateSpaceMembershipParams) error {
+	_, err := q.db.Exec(ctx, createSpaceMembership, arg.SpaceID, arg.UserID)
 	return err
-}
-
-const hasActiveMembership = `-- name: HasActiveMembership :one
-SELECT exists(
-    SELECT 1
-    FROM space_memberships
-    WHERE user_id = $1
-        AND revoked_at IS NULL
-)
-`
-
-func (q *Queries) HasActiveMembership(ctx context.Context, userID string) (bool, error) {
-	row := q.db.QueryRow(ctx, hasActiveMembership, userID)
-	var exists bool
-	err := row.Scan(&exists)
-	return exists, err
 }
 
 const loadCreatedSpaceByRequest = `-- name: LoadCreatedSpaceByRequest :one
 SELECT
     s.space_id,
     s.name,
+    s.slug,
     s.created_by_user_id,
     s.create_request_digest,
     m.can_manage_members,
@@ -110,6 +99,7 @@ type LoadCreatedSpaceByRequestParams struct {
 type LoadCreatedSpaceByRequestRow struct {
 	SpaceID             string
 	Name                string
+	Slug                string
 	CreatedByUserID     pgtype.UUID
 	CreateRequestDigest []byte
 	CanManageMembers    bool
@@ -122,6 +112,7 @@ func (q *Queries) LoadCreatedSpaceByRequest(ctx context.Context, arg LoadCreated
 	err := row.Scan(
 		&i.SpaceID,
 		&i.Name,
+		&i.Slug,
 		&i.CreatedByUserID,
 		&i.CreateRequestDigest,
 		&i.CanManageMembers,
@@ -131,32 +122,15 @@ func (q *Queries) LoadCreatedSpaceByRequest(ctx context.Context, arg LoadCreated
 }
 
 const lockSpaceCreator = `-- name: LockSpaceCreator :one
-SELECT display_name
+SELECT user_id
 FROM carry_users
 WHERE user_id = $1
 FOR UPDATE
 `
 
-func (q *Queries) LockSpaceCreator(ctx context.Context, userID string) (*string, error) {
+func (q *Queries) LockSpaceCreator(ctx context.Context, userID string) (string, error) {
 	row := q.db.QueryRow(ctx, lockSpaceCreator, userID)
-	var display_name *string
-	err := row.Scan(&display_name)
-	return display_name, err
-}
-
-const setInitialDisplayName = `-- name: SetInitialDisplayName :exec
-UPDATE carry_users
-SET display_name = $1
-WHERE user_id = $2
-    AND display_name IS NULL
-`
-
-type SetInitialDisplayNameParams struct {
-	DisplayName *string
-	UserID      string
-}
-
-func (q *Queries) SetInitialDisplayName(ctx context.Context, arg SetInitialDisplayNameParams) error {
-	_, err := q.db.Exec(ctx, setInitialDisplayName, arg.DisplayName, arg.UserID)
-	return err
+	var user_id string
+	err := row.Scan(&user_id)
+	return user_id, err
 }

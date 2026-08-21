@@ -135,7 +135,7 @@ func TestWorkReviewAcceptanceIsExactIdempotentAndLeavesWorkOpen(t *testing.T) {
 
 	otherSpaceID := uuid.NewString()
 	if _, err := fixture.store.pool.Exec(ctx, `
-		insert into spaces (space_id, name) values ($1, 'Other Space')
+		insert into spaces (space_id, name, slug) values ($1::uuid, 'Other Space', replace(($1::uuid)::text, '-', ''))
 	`, otherSpaceID); err != nil {
 		t.Fatalf("create other Space: %v", err)
 	}

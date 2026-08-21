@@ -163,11 +163,16 @@ func (q *Queries) CreateEmailIdentity(ctx context.Context, arg CreateEmailIdenti
 
 const createEmailUser = `-- name: CreateEmailUser :exec
 INSERT INTO carry_users (user_id, display_name)
-VALUES ($1, NULL)
+VALUES ($1, $2)
 `
 
-func (q *Queries) CreateEmailUser(ctx context.Context, userID string) error {
-	_, err := q.db.Exec(ctx, createEmailUser, userID)
+type CreateEmailUserParams struct {
+	UserID      string
+	DisplayName string
+}
+
+func (q *Queries) CreateEmailUser(ctx context.Context, arg CreateEmailUserParams) error {
+	_, err := q.db.Exec(ctx, createEmailUser, arg.UserID, arg.DisplayName)
 	return err
 }
 

@@ -236,11 +236,8 @@ func (s *Store) ListSpaceInvitations(ctx context.Context, userID, spaceID string
 	}
 	result := make([]space.ManagedInvitation, 0, len(rows))
 	for _, row := range rows {
-		inviter := ""
-		if row.InviterDisplayName != nil {
-			inviter = *row.InviterDisplayName
-		}
-		result = append(result, restoreManagedInvitation(row, inviter))
+		inviterDisplayName := row.InviterDisplayName
+		result = append(result, restoreManagedInvitation(row, inviterDisplayName))
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("commit managed invitation list: %w", err)
@@ -278,12 +275,9 @@ func (s *Store) ListUserInvitations(ctx context.Context, userID, sessionID strin
 	}
 	result := make([]space.RecipientInvitation, 0, len(rows))
 	for _, row := range rows {
-		inviter := ""
-		if row.InviterDisplayName != nil {
-			inviter = *row.InviterDisplayName
-		}
+		inviterDisplayName := row.InviterDisplayName
 		result = append(result, space.RecipientInvitation{
-			InvitationID: row.InvitationID, SpaceID: row.SpaceID, SpaceName: row.SpaceName, InviterDisplayName: inviter,
+			InvitationID: row.InvitationID, SpaceID: row.SpaceID, SpaceName: row.SpaceName, InviterDisplayName: inviterDisplayName,
 			CanManageMembers: row.CanManageMembers, CanEnrollMachines: row.CanEnrollMachines,
 			CreatedAt: row.CreatedAt.Time, ExpiresAt: row.ExpiresAt.Time,
 		})
@@ -365,7 +359,7 @@ func (s *Store) AcceptInvitation(ctx context.Context, command space.AcceptInvita
 	if err := q.LockEmailLogin(ctx, observed.RecipientEmail); err != nil {
 		return space.AcceptedInvitation{}, fmt.Errorf("lock invited Email identity: %w", err)
 	}
-	displayName, err := q.LockInvitationUser(ctx, command.UserID)
+	_, err = q.LockInvitationUser(ctx, command.UserID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return space.AcceptedInvitation{}, identity.ErrUnauthenticated
 	}
@@ -422,15 +416,6 @@ func (s *Store) AcceptInvitation(ctx context.Context, command space.AcceptInvita
 	}
 	if invitation.RevokedAt.Valid || !invitation.ExpiresAt.Time.After(now.Time) {
 		return space.AcceptedInvitation{}, space.ErrInvitationUnavailable
-	}
-	if displayName == nil {
-		name := strings.TrimSpace(command.DisplayName)
-		if name == "" {
-			return space.AcceptedInvitation{}, space.ErrInvalidInvitation
-		}
-		if err := q.SetInvitationAcceptedUserName(ctx, dbsqlc.SetInvitationAcceptedUserNameParams{DisplayName: &name, UserID: command.UserID}); err != nil {
-			return space.AcceptedInvitation{}, fmt.Errorf("set invited User name: %w", err)
-		}
 	}
 	membership, err := q.LoadMembershipForInvitation(ctx, dbsqlc.LoadMembershipForInvitationParams{SpaceID: invitation.SpaceID, UserID: command.UserID})
 	alreadyMember := err == nil && !membership.RevokedAt.Valid

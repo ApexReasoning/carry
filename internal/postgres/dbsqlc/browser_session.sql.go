@@ -27,7 +27,7 @@ WHERE
 
 type AuthenticateBrowserSessionRow struct {
 	UserID      string
-	DisplayName *string
+	DisplayName string
 }
 
 func (q *Queries) AuthenticateBrowserSession(ctx context.Context, sessionID string) (AuthenticateBrowserSessionRow, error) {

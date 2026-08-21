@@ -8,6 +8,13 @@ export type ApiError = {
   error: string;
 };
 
+export type SpaceCreationConflict = {
+  error: string;
+  slug?: string;
+  suggested_slug?: string;
+  suggested_suffix?: number;
+};
+
 export type BegunCliLogin = {
   request_id: string;
   user_code: string;
@@ -63,13 +70,14 @@ export type IdentityMethods = {
 export type Membership = {
   space_id: string;
   name: string;
+  slug: string;
   can_manage_members: boolean;
   can_enroll_machines: boolean;
 };
 
 export type User = {
   user_id: string;
-  display_name: string | null;
+  display_name: string;
   spaces: Array<Membership>;
 };
 
@@ -1236,10 +1244,10 @@ export type LoadCurrentUserResponses = {
 export type LoadCurrentUserResponse =
   LoadCurrentUserResponses[keyof LoadCurrentUserResponses];
 
-export type CreateFirstSpaceData = {
+export type CreateSpaceData = {
   body: {
-    display_name: string;
     name: string;
+    suffix?: number;
   };
   headers: {
     "Idempotency-Key": string;
@@ -1249,7 +1257,7 @@ export type CreateFirstSpaceData = {
   url: "/v1/spaces";
 };
 
-export type CreateFirstSpaceErrors = {
+export type CreateSpaceErrors = {
   /**
    * Request rejected
    */
@@ -1263,23 +1271,22 @@ export type CreateFirstSpaceErrors = {
    */
   403: ApiError;
   /**
-   * Request rejected
+   * Idempotency conflict or losing immutable Space URL
    */
-  409: ApiError;
+  409: SpaceCreationConflict;
 };
 
-export type CreateFirstSpaceError =
-  CreateFirstSpaceErrors[keyof CreateFirstSpaceErrors];
+export type CreateSpaceError = CreateSpaceErrors[keyof CreateSpaceErrors];
 
-export type CreateFirstSpaceResponses = {
+export type CreateSpaceResponses = {
   /**
-   * First Space and creator Membership created or exactly replayed
+   * Space and creator Membership created or exactly replayed
    */
   201: Membership;
 };
 
-export type CreateFirstSpaceResponse =
-  CreateFirstSpaceResponses[keyof CreateFirstSpaceResponses];
+export type CreateSpaceResponse =
+  CreateSpaceResponses[keyof CreateSpaceResponses];
 
 export type BeginMachineConnectionData = {
   body: {
@@ -2285,9 +2292,7 @@ export type ListInvitationInboxResponse =
   ListInvitationInboxResponses[keyof ListInvitationInboxResponses];
 
 export type AcceptSpaceInvitationData = {
-  body: {
-    display_name: string;
-  };
+  body?: never;
   headers: {
     "Idempotency-Key": string;
   };

@@ -148,7 +148,13 @@ func seedMemberRemovalHTTPFixture(
 		args []any
 	}{
 		{`insert into carry_users (user_id, display_name) values ($1, 'Removal Manager'), ($2, 'Former Member')`, []any{managerID, targetID}},
-		{`insert into spaces (space_id, name) values ($1, 'Removed Space'), ($2, 'Retained Space')`, []any{removedSpaceID, retainedSpaceID}},
+		{
+			sql: `insert into spaces (space_id, name, slug) values ($1::uuid, 'Removed Space', replace(($1::uuid)::text, '-', '')), ($2::uuid, 'Retained Space', replace(($2::uuid)::text, '-', ''))`,
+			args: []any{
+				removedSpaceID,
+				retainedSpaceID,
+			},
+		},
 		{`insert into space_memberships (space_id, user_id, can_manage_members, can_enroll_machines) values ($1, $2, true, true), ($1, $3, true, true), ($4, $3, false, false)`, []any{removedSpaceID, managerID, targetID, retainedSpaceID}},
 		{`insert into browser_sessions (session_id, user_id, identity_proof_method, expires_at) values ($1, $2, 'email', transaction_timestamp() + interval '30 days'), ($3, $4, 'email', transaction_timestamp() + interval '30 days')`, []any{managerSessionID, managerID, targetSessionID, targetID}},
 		{`insert into cli_login_requests (

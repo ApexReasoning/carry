@@ -148,6 +148,7 @@ func (client *Client) LoadMember(ctx context.Context) (Member, error) {
 		Spaces      []struct {
 			SpaceID           string `json:"space_id"`
 			Name              string `json:"name"`
+			Slug              string `json:"slug"`
 			CanManageMembers  bool   `json:"can_manage_members"`
 			CanEnrollMachines bool   `json:"can_enroll_machines"`
 		} `json:"spaces"`
@@ -155,10 +156,16 @@ func (client *Client) LoadMember(ctx context.Context) (Member, error) {
 	if err := client.send(ctx, http.MethodGet, "/v1/me", "", nil, &wire, false); err != nil {
 		return Member{}, err
 	}
-	member := Member{UserID: wire.UserID, DisplayName: wire.DisplayName, Spaces: make([]space.Membership, 0, len(wire.Spaces))}
+	member := Member{
+		UserID:      wire.UserID,
+		DisplayName: wire.DisplayName,
+		Spaces:      make([]space.Membership, 0, len(wire.Spaces)),
+	}
 	for _, membership := range wire.Spaces {
 		member.Spaces = append(member.Spaces, space.Membership{
-			SpaceID: membership.SpaceID, Name: membership.Name,
+			SpaceID:           membership.SpaceID,
+			Name:              membership.Name,
+			Slug:              membership.Slug,
 			CanManageMembers:  membership.CanManageMembers,
 			CanEnrollMachines: membership.CanEnrollMachines,
 		})

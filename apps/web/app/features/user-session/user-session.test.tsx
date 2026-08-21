@@ -51,6 +51,63 @@ test("shows a neutral provider callback outcome and removes it from the URL", as
   expect(window.sessionStorage.length).toBe(0);
 });
 
+test("pending invitation outranks a current Space for an existing member", async () => {
+  window.history.replaceState(null, "", "/s/research");
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request =
+        input instanceof Request ? input : new Request(input, init);
+      const path = new URL(request.url).pathname;
+      if (request.method === "GET" && path === "/v1/me") {
+        return json(
+          currentUser([
+            {
+              space_id: actualSpaceID,
+              name: "Research",
+              slug: "research",
+              can_manage_members: true,
+              can_enroll_machines: true,
+            },
+          ]),
+        );
+      }
+      if (request.method === "GET" && path === "/v1/invitations") {
+        return json({
+          invitations: [
+            {
+              invitation_id: "22222222-2222-4222-8222-222222222222",
+              space_id: "33333333-3333-4333-8333-333333333333",
+              space_name: "Operations",
+              inviter_display_name: "Member bbbbbbbb",
+              can_manage_members: false,
+              can_enroll_machines: false,
+              created_at: "2026-08-21T00:00:00Z",
+              expires_at: "2026-08-28T00:00:00Z",
+            },
+          ],
+          reauthentication_required: false,
+        });
+      }
+      if (request.method === "GET" && path.endsWith("/conversation/messages"))
+        return json({ messages: [] });
+      if (request.method === "GET" && path.endsWith("/works"))
+        return json({ works: [], has_earlier_works: false });
+      throw new Error(`unexpected request: ${request.method} ${path}`);
+    }),
+  );
+
+  render(<App />);
+
+  expect(
+    await screen.findByRole("heading", { name: "Space invitations" }),
+  ).toBeVisible();
+  expect(screen.getByText("Operations")).toBeVisible();
+  expect(
+    screen.queryByRole("heading", { name: "What should Carry keep moving?" }),
+  ).not.toBeInTheDocument();
+});
+
 test("shows a wrong email code and lets the User retry", async () => {
   mockUnauthenticatedEmail(async (request, path) => {
     if (request.method === "POST" && path.endsWith("/verify")) {
@@ -113,7 +170,7 @@ test("replays an unknown verification exactly before loading the User", async ()
   await requestCode(user);
   await user.type(await screen.findByLabelText("Email code"), "123456");
   await user.click(screen.getByRole("button", { name: "Verify" }));
-  await screen.findByRole("heading", { name: "Create your Space" });
+  await screen.findByRole("heading", { name: "Choose a Space" });
 
   const reconciliation = events.slice(-3);
   expect(reconciliation.map((event) => event.action)).toEqual([
@@ -181,7 +238,7 @@ test("explicit resend creates a new challenge and only its newest code succeeds"
   await user.clear(screen.getByLabelText("Email code"));
   await user.type(screen.getByLabelText("Email code"), "222222");
   await user.click(screen.getByRole("button", { name: "Verify" }));
-  await screen.findByRole("heading", { name: "Create your Space" });
+  await screen.findByRole("heading", { name: "Choose a Space" });
 
   expect(window.location.href).not.toContain("111111");
   expect(window.location.href).not.toContain("222222");
@@ -190,6 +247,7 @@ test("explicit resend creates a new challenge and only its newest code succeeds"
 });
 
 test("a committed logout with a lost response reconciles from current User 401", async () => {
+  window.history.replaceState(null, "", "/s/research");
   let revoked = false;
   vi.stubGlobal(
     "fetch",
@@ -205,6 +263,7 @@ test("a committed logout with a lost response reconciles from current User 401",
                 {
                   space_id: actualSpaceID,
                   name: "Research",
+                  slug: "research",
                   can_manage_members: true,
                   can_enroll_machines: true,
                 },
@@ -243,9 +302,9 @@ test("a committed logout with a lost response reconciles from current User 401",
   expect(window.sessionStorage.length).toBe(0);
 });
 
-test("first-Space unknown replays exactly then routes a concurrent other Space", async () => {
+test("ordinary Space creation replays exactly after response loss", async () => {
   let sessionEstablished = false;
-  let otherSpaceWon = false;
+  let spaceCreated = false;
   const spaceCommands: Array<{ body: unknown; key: string | null }> = [];
   vi.stubGlobal(
     "fetch",
@@ -256,18 +315,26 @@ test("first-Space unknown replays exactly then routes a concurrent other Space",
       if (request.method === "GET" && path === "/v1/me") {
         if (!sessionEstablished) return unauthenticated();
         return json(
-          currentUser(
-            otherSpaceWon
+          currentUser([
+            {
+              space_id: actualSpaceID,
+              name: "Operations",
+              slug: "operations",
+              can_manage_members: true,
+              can_enroll_machines: true,
+            },
+            ...(spaceCreated
               ? [
                   {
-                    space_id: actualSpaceID,
-                    name: "Operations",
+                    space_id: "22222222-2222-4222-8222-222222222222",
+                    name: "Attempted Research",
+                    slug: "attempted-research",
                     can_manage_members: true,
                     can_enroll_machines: true,
                   },
                 ]
-              : [],
-          ),
+              : []),
+          ]),
         );
       }
       if (request.method === "POST" && path === "/v1/auth/email/challenges") {
@@ -282,11 +349,20 @@ test("first-Space unknown replays exactly then routes a concurrent other Space",
           body: await request.json(),
           key: request.headers.get("Idempotency-Key"),
         });
+        spaceCreated = true;
         if (spaceCommands.length === 1) {
-          otherSpaceWon = true;
-          throw new TypeError("first-Space response unknown");
+          throw new TypeError("Space response unknown");
         }
-        return json({ error: "User already belongs to a Space" }, 409);
+        return json(
+          {
+            space_id: "22222222-2222-4222-8222-222222222222",
+            name: "Attempted Research",
+            slug: "attempted-research",
+            can_manage_members: true,
+            can_enroll_machines: true,
+          },
+          201,
+        );
       }
       if (request.method === "GET" && path.endsWith("/conversation/messages")) {
         return json({ messages: [] });
@@ -305,16 +381,13 @@ test("first-Space unknown replays exactly then routes a concurrent other Space",
   await requestCode(user);
   await user.type(await screen.findByLabelText("Email code"), "123456");
   await user.click(screen.getByRole("button", { name: "Verify" }));
-  await user.type(await screen.findByLabelText("Your name"), "Alex Morgan");
-  await user.type(screen.getByLabelText("Space name"), "Attempted Research");
+  await user.type(
+    await screen.findByLabelText("Space name"),
+    "Attempted Research",
+  );
   await user.click(screen.getByRole("button", { name: "Create Space" }));
 
-  await screen.findByRole("heading", {
-    name: "What should Carry keep moving?",
-  });
-  expect(screen.getByText("Operations")).toBeVisible();
-  expect(screen.queryByText("Attempted Research")).not.toBeInTheDocument();
-  expect(spaceCommands).toHaveLength(2);
+  await waitFor(() => expect(spaceCommands).toHaveLength(2));
   expect(spaceCommands[0]).toEqual(spaceCommands[1]);
 });
 

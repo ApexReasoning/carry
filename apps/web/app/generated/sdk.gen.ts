@@ -40,9 +40,9 @@ import type {
   CompleteGitHubLoginErrors,
   CompleteGoogleLoginData,
   CompleteGoogleLoginErrors,
-  CreateFirstSpaceData,
-  CreateFirstSpaceErrors,
-  CreateFirstSpaceResponses,
+  CreateSpaceData,
+  CreateSpaceErrors,
+  CreateSpaceResponses,
   CreateWorkData,
   CreateWorkErrors,
   CreateWorkResponses,
@@ -168,7 +168,7 @@ import {
   zBeginMachineConnectionResponse,
   zCancelCliLoginResponse,
   zCancelMachineConnectionResponse,
-  zCreateFirstSpaceResponse,
+  zCreateSpaceResponse,
   zCreateWorkResponse,
   zDenyCliLoginResponse,
   zDenyMachineConnectionResponse,
@@ -802,20 +802,16 @@ export const loadCurrentUser = <ThrowOnError extends boolean = false>(
     ...options,
   });
 
-export const createFirstSpace = <ThrowOnError extends boolean = false>(
-  options: Options<CreateFirstSpaceData, ThrowOnError>,
-): RequestResult<
-  CreateFirstSpaceResponses,
-  CreateFirstSpaceErrors,
-  ThrowOnError
-> =>
+export const createSpace = <ThrowOnError extends boolean = false>(
+  options: Options<CreateSpaceData, ThrowOnError>,
+): RequestResult<CreateSpaceResponses, CreateSpaceErrors, ThrowOnError> =>
   (options.client ?? client).post<
-    CreateFirstSpaceResponses,
-    CreateFirstSpaceErrors,
+    CreateSpaceResponses,
+    CreateSpaceErrors,
     ThrowOnError
   >({
     responseValidator: async (data) =>
-      await zCreateFirstSpaceResponse.parseAsync(data),
+      await zCreateSpaceResponse.parseAsync(data),
     security: [
       {
         in: "cookie",
@@ -1427,8 +1423,4 @@ export const acceptSpaceInvitation = <ThrowOnError extends boolean = false>(
     ],
     url: "/v1/invitations/{invitationID}/accept",
     ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...options.headers,
-    },
   });

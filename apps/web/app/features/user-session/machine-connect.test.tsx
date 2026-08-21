@@ -19,12 +19,14 @@ const user = {
     {
       space_id: "22222222-2222-4222-8222-222222222222",
       name: "Research",
+      slug: "research",
       can_manage_members: true,
       can_enroll_machines: true,
     },
     {
       space_id: "33333333-3333-4333-8333-333333333333",
       name: "Read only",
+      slug: "read-only",
       can_manage_members: false,
       can_enroll_machines: false,
     },

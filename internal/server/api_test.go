@@ -280,9 +280,9 @@ func testUserRoutes(t *testing.T, authority *machine.CertificateAuthority) *User
 	if err != nil {
 		t.Fatalf("compose test email login: %v", err)
 	}
-	firstSpace, err := space.NewFirstSpace(unavailableFirstSpaces{})
+	spaceCreator, err := space.NewCreator(unavailableSpaceCreation{})
 	if err != nil {
-		t.Fatalf("compose test first Space: %v", err)
+		t.Fatalf("compose test Space creator: %v", err)
 	}
 	authentication, err := NewUserAuthentication(&recordingCLICredentials{}, sessions, credentials, testExternalOrigin(t))
 	if err != nil {
@@ -302,7 +302,7 @@ func testUserRoutes(t *testing.T, authority *machine.CertificateAuthority) *User
 	if err != nil {
 		t.Fatalf("compose test User identity routes: %v", err)
 	}
-	spaceRoutes, err := NewUserSpaceRoutes(firstSpace)
+	spaceRoutes, err := NewUserSpaceRoutes(spaceCreator)
 	if err != nil {
 		t.Fatalf("compose test User Space routes: %v", err)
 	}
@@ -388,9 +388,9 @@ func testExternalOrigin(t *testing.T) ExternalOrigin {
 	return origin
 }
 
-type unavailableFirstSpaces struct{}
+type unavailableSpaceCreation struct{}
 
-func (unavailableFirstSpaces) CreateFirstSpace(context.Context, space.CreateFirstCommand) (space.CreatedSpace, error) {
+func (unavailableSpaceCreation) CreateSpace(context.Context, space.CreateSpaceCommand) (space.CreatedSpace, error) {
 	return space.CreatedSpace{}, errors.New("not implemented")
 }
 

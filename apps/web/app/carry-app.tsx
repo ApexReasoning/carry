@@ -3,7 +3,7 @@ import { useState } from "react";
 import { ConversationPanel } from "./features/conversation/conversation-panel";
 import { CliCredentialSettings } from "./features/user-session/cli-credential-settings";
 import { CliLoginPage } from "./features/user-session/cli-login";
-import { FirstSpace } from "./features/user-session/first-space";
+import { SpaceEntry } from "./features/spaces/space-entry";
 import { IdentityMethodSettings } from "./features/user-session/identity-methods";
 import { InvitationInboxView } from "./features/user-session/invitation-inbox";
 import { MemberSettings } from "./features/user-session/member-settings";
@@ -21,7 +21,11 @@ export function App() {
     "identity" | "cli" | "machines" | "members" | null
   >(hasIdentityChangeStatus() ? "identity" : null);
   const session = useUserSession();
-  const board = useWorkBoard(session.user);
+  const selectedSlug = spaceSlugFromPath(window.location.pathname);
+  const currentSpace = session.user?.spaces.find(
+    (space) => space.slug === selectedSlug,
+  );
+  const board = useWorkBoard(session.user, currentSpace?.space_id ?? null);
   const busy = session.busy || board.busy;
 
   if (session.phase === "checking") {
@@ -104,16 +108,6 @@ export function App() {
       />
     );
   }
-  if (session.phase === "first-space") {
-    return (
-      <FirstSpace
-        busy={busy}
-        error={session.error}
-        initialName={session.user?.display_name ?? ""}
-        onCreate={session.createSpace}
-      />
-    );
-  }
   if (!session.user) {
     return null;
   }
@@ -125,9 +119,36 @@ export function App() {
     return <MachineConnectPage user={session.user} />;
   }
 
-  const currentSpace = session.user.spaces.find(
-    (space) => space.space_id === board.spaceID,
-  );
+  if (window.location.pathname === "/") {
+    return (
+      <>
+        {settingsPanel === "identity" ? (
+          <IdentityMethodSettings onClose={() => setSettingsPanel(null)} />
+        ) : null}
+        <SpaceEntry
+          user={session.user}
+          notice={session.error}
+          onEnter={(slug) => {
+            window.location.assign(`/s/${encodeURIComponent(slug)}`);
+          }}
+        />
+      </>
+    );
+  }
+  if (!currentSpace) {
+    return (
+      <main className="center-state">
+        <p className="brand-mark">
+          Carry<span className="brand-dot">.</span>
+        </p>
+        <h1>Space unavailable</h1>
+        <p>This Space is unavailable or you are not a current member.</p>
+        <a className="primary-button" href="/">
+          Choose a Space
+        </a>
+      </main>
+    );
+  }
   return (
     <div className="app-shell">
       <header className="app-header">
@@ -139,29 +160,10 @@ export function App() {
         </a>
         <div className="header-actions">
           <span className="member-name">{session.user.display_name}</span>
-          {session.user.spaces.length > 1 ? (
-            <label className="space-picker">
-              <span className="space-picker-label">Space</span>
-              <select
-                value={board.spaceID ?? ""}
-                onChange={(event) => void board.selectSpace(event.target.value)}
-                disabled={busy}
-              >
-                <option value="" disabled>
-                  Choose a Space
-                </option>
-                {session.user.spaces.map((space) => (
-                  <option key={space.space_id} value={space.space_id}>
-                    {space.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : (
-            <span className="space-name">
-              {currentSpace?.name ?? "No Space"}
-            </span>
-          )}
+          <span className="space-name">{currentSpace.name}</span>
+          <a className="ghost-button" href="/">
+            Switch Space
+          </a>
           <button
             className="ghost-button"
             type="button"
@@ -312,14 +314,21 @@ export function App() {
               </div>
             </section>
           </>
-        ) : session.user.spaces.length > 1 ? (
-          <p className="empty-panel">
-            Choose a Space before talking to Carry or opening shared Work.
-          </p>
         ) : null}
       </main>
     </div>
   );
+}
+
+function spaceSlugFromPath(pathname: string): string | null {
+  const match = /^\/s\/([^/]+)$/.exec(pathname);
+  if (!match?.[1]) return null;
+  try {
+    const slug = decodeURIComponent(match[1]);
+    return slug.includes("/") || slug === "" ? null : slug;
+  } catch {
+    return null;
+  }
 }
 
 function hasIdentityChangeStatus(): boolean {

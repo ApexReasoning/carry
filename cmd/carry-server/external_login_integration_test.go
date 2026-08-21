@@ -111,6 +111,31 @@ func TestExternalLoginBrowserJourneyWithConcreteProviders(t *testing.T) {
 	if googleUser == githubUser {
 		t.Fatalf("Google and GitHub unexpectedly selected the same User %q", googleUser)
 	}
+	for _, account := range []struct {
+		provider string
+		userID   string
+	}{
+		{
+			provider: "Google",
+			userID:   googleUser,
+		},
+		{
+			provider: "GitHub",
+			userID:   githubUser,
+		},
+	} {
+		expected, err := identity.FallbackDisplayName(account.userID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var displayName string
+		if err := pool.QueryRow(ctx, `select display_name from carry_users where user_id = $1`, account.userID).Scan(&displayName); err != nil {
+			t.Fatalf("load %s User label: %v", account.provider, err)
+		}
+		if displayName != expected {
+			t.Fatalf("%s User label = %q, want %q", account.provider, displayName, expected)
+		}
+	}
 	if googleFixture.tokenCalls.Load() != 2 {
 		t.Fatalf("Google token calls after first/repeat/replay = %d", googleFixture.tokenCalls.Load())
 	}
@@ -251,7 +276,11 @@ func TestIdentityMethodBrowserJourneyWithConcreteProviders(t *testing.T) {
 
 	userID := "11111111-1111-4111-8111-111111111111"
 	initialSessionID := "22222222-2222-4222-8222-222222222222"
-	if _, err := pool.Exec(ctx, `insert into carry_users (user_id) values ($1)`, userID); err != nil {
+	displayName, err := identity.FallbackDisplayName(userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `insert into carry_users (user_id,display_name) values ($1,$2)`, userID, displayName); err != nil {
 		t.Fatalf("seed Browser User: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `insert into email_identities (canonical_email, user_id) values ('browser-methods@example.com', $1)`, userID); err != nil {
@@ -268,7 +297,7 @@ func TestIdentityMethodBrowserJourneyWithConcreteProviders(t *testing.T) {
 	jar.SetCookies(carryOrigin, []*http.Cookie{{
 		Name: "__Host-carry_session", Value: initialCredential, Path: "/", Secure: true,
 	}})
-	createFirstSpace(t, browser, carry.URL, "Identity User", "Identity Space")
+	createSpace(t, browser, carry.URL, "Identity Space")
 	assertIdentityMethodsHTTP(t, browser, carry.URL, []string{"email"}, "browser-methods@example.com")
 	bearerRequest, err := http.NewRequest(http.MethodGet, carry.URL+"/v1/identity/methods", nil)
 	if err != nil {
@@ -555,7 +584,7 @@ func exerciseProviderBrowserJourney(
 	if memberships != 0 {
 		t.Fatalf("%s first login Memberships = %d", journey.name, memberships)
 	}
-	createFirstSpace(t, browser, carryURL, journey.name+" User", spaceName)
+	createSpace(t, browser, carryURL, spaceName)
 	logoutBrowser(t, browser, carryURL)
 
 	started = startBrowserLogin(t, browser, carryURL, journey)
@@ -633,23 +662,23 @@ func loadCurrentUser(t *testing.T, browser *http.Client, carryURL string) (strin
 	return payload.UserID, len(payload.Spaces)
 }
 
-func createFirstSpace(t *testing.T, browser *http.Client, carryURL string, displayName string, spaceName string) {
+func createSpace(t *testing.T, browser *http.Client, carryURL string, spaceName string) {
 	t.Helper()
-	body := strings.NewReader(fmt.Sprintf(`{"display_name":%q,"name":%q}`, displayName, spaceName))
+	body := strings.NewReader(fmt.Sprintf(`{"name":%q}`, spaceName))
 	request, err := http.NewRequest(http.MethodPost, carryURL+"/v1/spaces", body)
 	if err != nil {
-		t.Fatalf("create first Space request: %v", err)
+		t.Fatalf("create Space request: %v", err)
 	}
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Idempotency-Key", "space-"+strings.ToLower(strings.ReplaceAll(spaceName, " ", "-")))
 	request.Header.Set("Origin", carryURL)
 	response, err := browser.Do(request)
 	if err != nil {
-		t.Fatalf("create first Space: %v", err)
+		t.Fatalf("create Space: %v", err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusCreated {
-		t.Fatalf("create first Space status = %d, body = %s", response.StatusCode, readBody(response))
+		t.Fatalf("create Space status = %d, body = %s", response.StatusCode, readBody(response))
 	}
 }
 
@@ -746,9 +775,9 @@ func composeExternalLoginTestAPI(
 	if err != nil {
 		t.Fatalf("compose Identity methods: %v", err)
 	}
-	firstSpace, err := space.NewFirstSpace(store)
+	spaceCreator, err := space.NewCreator(store)
 	if err != nil {
-		t.Fatalf("compose first Space: %v", err)
+		t.Fatalf("compose Space creator: %v", err)
 	}
 	cliLogin, err := identity.NewCLILogin(store, credentials, origin.String())
 	if err != nil {
@@ -769,7 +798,7 @@ func composeExternalLoginTestAPI(
 	if err != nil {
 		t.Fatalf("compose Space invitations: %v", err)
 	}
-	spaceRoutes, err := carryserver.NewUserSpaceRoutesWithInvitations(firstSpace, spaceInvitations, store, credentials, origin)
+	spaceRoutes, err := carryserver.NewUserSpaceRoutesWithInvitations(spaceCreator, spaceInvitations, store, credentials, origin)
 	if err != nil {
 		t.Fatalf("compose User Space routes: %v", err)
 	}

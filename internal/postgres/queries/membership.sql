@@ -2,6 +2,7 @@
 SELECT
     m.space_id,
     s.name,
+    s.slug,
     m.can_manage_members,
     m.can_enroll_machines
 FROM space_memberships AS m

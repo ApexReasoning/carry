@@ -103,21 +103,21 @@ func (routes *UserIdentityRoutes) mountUser(router chi.Router) {
 	router.Get("/me", routes.user.me)
 }
 
-// UserSpaceRoutes owns the Browser-only first-Space HTTP route.
+// UserSpaceRoutes owns Browser-authenticated Space and Membership routes.
 type UserSpaceRoutes struct {
 	spaces      spaceCreationAPI
 	invitations *spaceInvitationAPI
 }
 
-func NewUserSpaceRoutes(firstSpace FirstSpace) (*UserSpaceRoutes, error) {
-	if firstSpace == nil {
+func NewUserSpaceRoutes(creator SpaceCreator) (*UserSpaceRoutes, error) {
+	if creator == nil {
 		return nil, errors.New("User Space route dependencies are required")
 	}
-	return &UserSpaceRoutes{spaces: spaceCreationAPI{creator: firstSpace}}, nil
+	return &UserSpaceRoutes{spaces: spaceCreationAPI{creator: creator}}, nil
 }
 
-func NewUserSpaceRoutesWithInvitations(firstSpace FirstSpace, invitations SpaceInvitations, members SpaceMembers, credentials identity.Credentials, origin ExternalOrigin) (*UserSpaceRoutes, error) {
-	routes, err := NewUserSpaceRoutes(firstSpace)
+func NewUserSpaceRoutesWithInvitations(creator SpaceCreator, invitations SpaceInvitations, members SpaceMembers, credentials identity.Credentials, origin ExternalOrigin) (*UserSpaceRoutes, error) {
+	routes, err := NewUserSpaceRoutes(creator)
 	if err != nil || invitations == nil || members == nil || origin.value == "" {
 		return nil, errors.New("User Space member route dependencies are required")
 	}
@@ -127,7 +127,7 @@ func NewUserSpaceRoutesWithInvitations(firstSpace FirstSpace, invitations SpaceI
 }
 
 func (routes *UserSpaceRoutes) mount(router chi.Router) {
-	router.Post("/spaces", routes.spaces.createFirst)
+	router.Post("/spaces", routes.spaces.create)
 	if routes.invitations == nil {
 		return
 	}

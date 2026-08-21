@@ -25,7 +25,11 @@ func TestEmailBrowserSessionAuthenticatesAndCanBeRevoked(t *testing.T) {
 	if err != nil {
 		t.Fatalf("authenticate Browser Session: %v", err)
 	}
-	if authenticated.UserID != session.UserID || authenticated.DisplayName != "" {
+	expectedName, err := identity.FallbackDisplayName(session.UserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if authenticated.UserID != session.UserID || authenticated.DisplayName != expectedName {
 		t.Fatalf("authenticated User = %#v", authenticated)
 	}
 	credential, err := credentials.BrowserSessionCredential(session.SessionID)

@@ -196,7 +196,7 @@ ORDER BY i.expires_at, i.invitation_id
 LIMIT 50;
 
 -- name: LockInvitationUser :one
-SELECT display_name
+SELECT user_id
 FROM carry_users
 WHERE user_id = sqlc.arg(user_id)
 FOR UPDATE;
@@ -208,12 +208,6 @@ WHERE canonical_email = sqlc.arg(recipient_email);
 
 -- name: LoadInvitationSpaceName :one
 SELECT name FROM spaces WHERE space_id = sqlc.arg(space_id);
-
--- name: SetInvitationAcceptedUserName :exec
-UPDATE carry_users
-SET display_name = sqlc.arg(display_name)
-WHERE user_id = sqlc.arg(user_id)
-    AND display_name IS NULL;
 
 -- name: LoadMembershipForInvitation :one
 SELECT can_manage_members, can_enroll_machines, revoked_at

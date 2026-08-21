@@ -94,7 +94,10 @@ func TestBrowserSessionAuthenticatesUserWithoutMembership(t *testing.T) {
 	t.Parallel()
 	sessions := &recordingBrowserSessions{
 		authenticatedSessionID: testSessionID,
-		user:                   identity.AuthenticatedUser{UserID: "user-5"},
+		user: identity.AuthenticatedUser{
+			UserID:      "50000000-0000-4000-8000-000000000005",
+			DisplayName: "Member 50000000",
+		},
 	}
 	handler := browserTestAPI(t, sessions)
 	credential, err := testIdentityCredentials(t).BrowserSessionCredential(testSessionID)
@@ -110,8 +113,8 @@ func TestBrowserSessionAuthenticatesUserWithoutMembership(t *testing.T) {
 	if response.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d; body = %s", response.Code, http.StatusOK, response.Body.String())
 	}
-	if !strings.Contains(response.Body.String(), `"user_id":"user-5"`) ||
-		!strings.Contains(response.Body.String(), `"display_name":null`) {
+	if !strings.Contains(response.Body.String(), `"user_id":"50000000-0000-4000-8000-000000000005"`) ||
+		!strings.Contains(response.Body.String(), `"display_name":"Member 50000000"`) {
 		t.Fatalf("response body = %s", response.Body.String())
 	}
 }

@@ -4,7 +4,7 @@ import { expect, test } from "@playwright/test";
 
 import { signInWithEmail } from "./email-login";
 
-test("new User creates a first Space and continues durable Work without browser credential storage", async ({
+test("new User creates a Space and continues durable Work without browser credential storage", async ({
   context,
   page,
 }) => {
@@ -18,7 +18,6 @@ test("new User creates a first Space and continues durable Work without browser 
 
   await page.goto("/");
   await signInWithEmail(page, emailCaptureFile, loginEmail);
-  await page.getByLabel("Your name").fill("Alex Morgan");
   await page.getByLabel("Space name").fill("Research");
   await page.getByRole("button", { name: "Create Space" }).click();
   await expect(

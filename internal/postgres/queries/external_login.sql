@@ -98,7 +98,7 @@ VALUES (sqlc.arg(github_user_id), sqlc.arg(user_id));
 
 -- name: CreateExternalLoginUser :exec
 INSERT INTO carry_users (user_id, display_name)
-VALUES (sqlc.arg(user_id), NULL);
+VALUES (sqlc.arg(user_id), sqlc.arg(display_name));
 
 -- name: CompleteExternalLogin :execrows
 UPDATE external_login_transactions

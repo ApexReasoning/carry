@@ -20,7 +20,7 @@ type BrowserSession struct {
 
 type CarryUser struct {
 	UserID      string
-	DisplayName *string
+	DisplayName string
 	CreatedAt   pgtype.Timestamptz
 }
 
@@ -266,6 +266,7 @@ type Space struct {
 	CreatedByUserID      pgtype.UUID
 	CreateIdempotencyKey *string
 	CreateRequestDigest  []byte
+	Slug                 string
 }
 
 type SpaceInvitation struct {

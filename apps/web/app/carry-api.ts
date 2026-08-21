@@ -5,7 +5,7 @@ import {
   acceptSpaceInvitation as acceptSpaceInvitationRequest,
   approveCliLogin as approveCliLoginRequest,
   approveMachineConnection as approveMachineConnectionRequest,
-  createFirstSpace as createFirstSpaceRequest,
+  createSpace as createSpaceRequest,
   createWork as createWorkRequest,
   denyCliLogin as denyCliLoginRequest,
   denyMachineConnection as denyMachineConnectionRequest,
@@ -51,6 +51,7 @@ import type {
   MachinePage,
   MachineRecord,
   Membership,
+  SpaceCreationConflict,
   SpaceMember,
   User,
   Work,
@@ -59,6 +60,16 @@ import type {
 } from "./generated/types.gen";
 
 export class MutationOutcomeUnknownError extends Error {}
+
+export class SpaceSlugConflictError extends Error {
+  constructor(
+    readonly slug: string,
+    readonly suggestedSlug: string | undefined,
+    readonly suggestedSuffix: number | undefined,
+  ) {
+    super("Space URL is already in use");
+  }
+}
 
 export class APIResponseError extends Error {
   constructor(
@@ -352,21 +363,31 @@ export async function unlinkIdentityMethod(
   );
 }
 
-export async function createFirstSpace(
-  displayName: string,
+export async function createSpace(
   name: string,
+  suffix: number | undefined,
   idempotencyKey: string,
 ): Promise<Membership> {
-  const result = await createFirstSpaceRequest({
+  const result = await createSpaceRequest({
     ...sameOrigin,
-    body: { display_name: displayName, name },
+    body: suffix ? { name, suffix } : { name },
     headers: { "Idempotency-Key": idempotencyKey },
   });
+  if (
+    result.response?.status === 409 &&
+    isSpaceCreationConflict(result.error)
+  ) {
+    throw new SpaceSlugConflictError(
+      result.error.slug ?? "",
+      result.error.suggested_slug,
+      result.error.suggested_suffix,
+    );
+  }
   return requireMutationData(
     result.data,
     result.response,
     result.error,
-    "Create first Space",
+    "Create Space",
   );
 }
 
@@ -492,14 +513,12 @@ export async function invitationInbox(): Promise<InvitationInbox> {
 
 export async function acceptInvitation(
   invitationID: string,
-  displayName: string,
   key: string,
 ): Promise<AcceptedInvitation> {
   const result = await acceptSpaceInvitationRequest({
     ...sameOrigin,
     path: { invitationID },
     headers: { "Idempotency-Key": key },
-    body: { display_name: displayName },
   });
   return requireMutationData(
     result.data,
@@ -720,6 +739,12 @@ function requireSuccess(
     );
   }
   throw new Error(`${action} failed before receiving a response`);
+}
+
+function isSpaceCreationConflict(
+  value: unknown,
+): value is SpaceCreationConflict & { slug: string } {
+  return isAPIError(value) && "slug" in value && typeof value.slug === "string";
 }
 
 function isAPIError(value: unknown): value is { error: string } {

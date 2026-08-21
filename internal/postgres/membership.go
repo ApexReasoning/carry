@@ -23,8 +23,11 @@ func (s *Store) ListMemberships(ctx context.Context, userID string) ([]space.Mem
 	memberships := make([]space.Membership, 0, len(rows))
 	for _, row := range rows {
 		memberships = append(memberships, space.Membership{
-			SpaceID: row.SpaceID, Name: row.Name,
-			CanManageMembers: row.CanManageMembers, CanEnrollMachines: row.CanEnrollMachines,
+			SpaceID:           row.SpaceID,
+			Name:              row.Name,
+			Slug:              row.Slug,
+			CanManageMembers:  row.CanManageMembers,
+			CanEnrollMachines: row.CanEnrollMachines,
 		})
 	}
 	return memberships, nil
@@ -66,12 +69,8 @@ func (s *Store) ListSpaceMembers(ctx context.Context, command space.ListMembersC
 	}
 	page := space.MemberPage{Members: make([]space.SpaceMember, 0, len(rows))}
 	for _, row := range rows {
-		displayName := ""
-		if row.DisplayName != nil {
-			displayName = *row.DisplayName
-		}
 		page.Members = append(page.Members, space.SpaceMember{
-			UserID: row.UserID, DisplayName: displayName,
+			UserID: row.UserID, DisplayName: row.DisplayName,
 			CanManageMembers: row.CanManageMembers, CanEnrollMachines: row.CanEnrollMachines,
 			OpenWorkCount: row.OpenWorkCount, JoinedAt: row.JoinedAt.Time,
 		})

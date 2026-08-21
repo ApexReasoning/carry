@@ -34,8 +34,21 @@ func createMemberForTest(ctx context.Context, store *Store, requested testMember
 	if _, err := tx.Exec(ctx, `insert into carry_users (user_id, display_name) values ($1, $2)`, userID, requested.DisplayName); err != nil {
 		return testMember{}, fmt.Errorf("create test User: %w", err)
 	}
-	if _, err := tx.Exec(ctx, `insert into spaces (space_id, name) values ($1, $2)`, spaceID, requested.SpaceName); err != nil {
-		return testMember{}, fmt.Errorf("create test Space: %w", err)
+	var hasSlug bool
+	if err := tx.QueryRow(ctx, `
+		select exists(
+			select 1 from information_schema.columns
+			where table_schema = 'public' and table_name = 'spaces' and column_name = 'slug'
+		)
+	`).Scan(&hasSlug); err != nil {
+		return testMember{}, fmt.Errorf("inspect test Space schema: %w", err)
+	}
+	if hasSlug {
+		if _, err := tx.Exec(ctx, `insert into spaces (space_id, name, slug) values ($1::uuid, $2, replace(($1::uuid)::text, '-', ''))`, spaceID, requested.SpaceName); err != nil {
+			return testMember{}, fmt.Errorf("create test Space: %w", err)
+		}
+	} else if _, err := tx.Exec(ctx, `insert into spaces (space_id, name) values ($1, $2)`, spaceID, requested.SpaceName); err != nil {
+		return testMember{}, fmt.Errorf("create legacy test Space: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `insert into space_memberships (space_id, user_id, can_enroll_machines, can_manage_members) values ($1, $2, true, true)`, spaceID, userID); err != nil {
 		return testMember{}, fmt.Errorf("create test Membership: %w", err)

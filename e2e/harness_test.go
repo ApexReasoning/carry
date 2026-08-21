@@ -62,7 +62,7 @@ func prepareTestMember(t *testing.T, databaseURL string) string {
 			sharedTestMember.err = err
 			return
 		}
-		if _, err := tx.Exec(ctx, `insert into spaces (space_id, name) values ($1, 'Carry Space')`, spaceID); err != nil {
+		if _, err := tx.Exec(ctx, `insert into spaces (space_id, name, slug) values ($1::uuid, 'Carry Space', replace(($1::uuid)::text, '-', ''))`, spaceID); err != nil {
 			sharedTestMember.err = err
 			return
 		}
@@ -458,15 +458,12 @@ func newResendFixture(t *testing.T, captureFile string) *httptest.Server {
 		}
 		accepted[key] = append([]byte(nil), encoded...)
 		mutex.Unlock()
-		code := codePattern.FindString(body.Text)
-		if code == "" {
-			http.Error(response, "missing code", http.StatusBadRequest)
-			return
-		}
-		temporary := captureFile + ".tmp"
-		if err := os.WriteFile(temporary, []byte(code), 0o600); err != nil || os.Rename(temporary, captureFile) != nil {
-			http.Error(response, "capture failed", http.StatusInternalServerError)
-			return
+		if code := codePattern.FindString(body.Text); code != "" {
+			temporary := captureFile + ".tmp"
+			if err := os.WriteFile(temporary, []byte(code), 0o600); err != nil || os.Rename(temporary, captureFile) != nil {
+				http.Error(response, "capture failed", http.StatusInternalServerError)
+				return
+			}
 		}
 		writeJSONFixture(response, map[string]string{"id": "resend-fixture-" + key})
 	}))

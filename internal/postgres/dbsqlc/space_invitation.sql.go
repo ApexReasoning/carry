@@ -248,7 +248,7 @@ type ListInvitationsForEmailOwnerRow struct {
 	InvitationID       string
 	SpaceID            string
 	SpaceName          string
-	InviterDisplayName *string
+	InviterDisplayName string
 	CanManageMembers   bool
 	CanEnrollMachines  bool
 	CreatedAt          pgtype.Timestamptz
@@ -313,7 +313,7 @@ type ListManagedSpaceInvitationsRow struct {
 	InvitationID           string
 	SpaceID                string
 	RecipientEmail         string
-	InviterDisplayName     *string
+	InviterDisplayName     string
 	CanManageMembers       bool
 	CanEnrollMachines      bool
 	CreatedAt              pgtype.Timestamptz
@@ -780,17 +780,17 @@ func (q *Queries) LockInvitationActorMembership(ctx context.Context, arg LockInv
 }
 
 const lockInvitationUser = `-- name: LockInvitationUser :one
-SELECT display_name
+SELECT user_id
 FROM carry_users
 WHERE user_id = $1
 FOR UPDATE
 `
 
-func (q *Queries) LockInvitationUser(ctx context.Context, userID string) (*string, error) {
+func (q *Queries) LockInvitationUser(ctx context.Context, userID string) (string, error) {
 	row := q.db.QueryRow(ctx, lockInvitationUser, userID)
-	var display_name *string
-	err := row.Scan(&display_name)
-	return display_name, err
+	var user_id string
+	err := row.Scan(&user_id)
+	return user_id, err
 }
 
 const lockSpaceInvitationRecipientKey = `-- name: LockSpaceInvitationRecipientKey :exec
@@ -897,21 +897,4 @@ func (q *Queries) RevokeSpaceInvitation(ctx context.Context, arg RevokeSpaceInvi
 		return 0, err
 	}
 	return result.RowsAffected(), nil
-}
-
-const setInvitationAcceptedUserName = `-- name: SetInvitationAcceptedUserName :exec
-UPDATE carry_users
-SET display_name = $1
-WHERE user_id = $2
-    AND display_name IS NULL
-`
-
-type SetInvitationAcceptedUserNameParams struct {
-	DisplayName *string
-	UserID      string
-}
-
-func (q *Queries) SetInvitationAcceptedUserName(ctx context.Context, arg SetInvitationAcceptedUserNameParams) error {
-	_, err := q.db.Exec(ctx, setInvitationAcceptedUserName, arg.DisplayName, arg.UserID)
-	return err
 }

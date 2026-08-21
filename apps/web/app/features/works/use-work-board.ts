@@ -25,8 +25,7 @@ import {
   pendingRetryIdentity,
 } from "./work-pending";
 
-export function useWorkBoard(user: User | null) {
-  const [spaceID, setSpaceID] = useState<string | null>(null);
+export function useWorkBoard(user: User | null, spaceID: string | null) {
   const [works, setWorks] = useState<Array<WorkSummary>>([]);
   const [hasEarlierWorks, setHasEarlierWorks] = useState(false);
   const [needsYouOnly, setNeedsYouOnly] = useState(false);
@@ -37,14 +36,9 @@ export function useWorkBoard(user: User | null) {
   useEffect(() => {
     let active = true;
     async function loadInitialSpace() {
-      const initialSpaceID =
-        user?.spaces.length === 1 ? (user.spaces[0]?.space_id ?? null) : null;
       try {
-        const page = initialSpaceID
-          ? await listWorks(initialSpaceID)
-          : emptyWorkPage();
+        const page = spaceID ? await listWorks(spaceID) : emptyWorkPage();
         if (!active) return;
-        setSpaceID(initialSpaceID);
         setWorks(page.works);
         setHasEarlierWorks(page.has_earlier_works);
         setNeedsYouOnly(false);
@@ -58,19 +52,7 @@ export function useWorkBoard(user: User | null) {
     return () => {
       active = false;
     };
-  }, [user]);
-
-  async function selectSpace(selectedSpaceID: string) {
-    if (!selectedSpaceID) return;
-    await run(async () => {
-      const page = await listWorks(selectedSpaceID);
-      setSpaceID(selectedSpaceID);
-      setWorks(page.works);
-      setHasEarlierWorks(page.has_earlier_works);
-      setNeedsYouOnly(false);
-      setDetails(null);
-    });
-  }
+  }, [spaceID, user]);
 
   async function showNeedsYou(value: boolean): Promise<void> {
     if (!spaceID || value === needsYouOnly) return;
@@ -283,7 +265,6 @@ export function useWorkBoard(user: User | null) {
     details,
     busy,
     error,
-    selectSpace,
     showNeedsYou,
     loadEarlierWorks,
     selectWork,

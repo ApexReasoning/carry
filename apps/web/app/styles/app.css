@@ -327,6 +327,67 @@ textarea::placeholder {
   line-height: 1.55;
 }
 
+/* Space entry */
+
+.space-entry {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 2rem 1.25rem;
+}
+.space-entry-panel {
+  width: min(38rem, 100%);
+  padding: clamp(2rem, 5vw, 3rem);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-medium);
+  box-shadow: var(--shadow-raised);
+}
+.space-entry-panel h1 {
+  margin: 0.7rem 0 1.25rem;
+  font-family: var(--font-display);
+  font-weight: 500;
+  font-size: clamp(2rem, 5vw, 2.8rem);
+}
+.space-entry-panel form {
+  display: grid;
+  gap: 0.7rem;
+  margin-top: 1.5rem;
+}
+.space-entry-list {
+  display: grid;
+  gap: 0.65rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.space-entry-list a {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-small);
+  background: var(--canvas);
+  color: var(--ink);
+  text-decoration: none;
+}
+.space-entry-list a:hover {
+  border-color: var(--clay);
+}
+.space-entry-list span,
+.space-conflict {
+  color: var(--muted);
+}
+.space-conflict {
+  display: grid;
+  gap: 0.65rem;
+  margin-top: 1rem;
+}
+.space-conflict p {
+  margin: 0;
+}
+
 /* App shell */
 
 .app-header {
@@ -354,21 +415,6 @@ textarea::placeholder {
   padding-right: 1rem;
   border-right: 1px solid var(--line);
 }
-.space-picker {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-}
-.space-picker-label {
-  color: var(--muted);
-  font-size: 0.85rem;
-  font-weight: 700;
-}
-.space-picker select {
-  width: auto;
-  min-width: 9rem;
-}
-
 /* Workspace */
 
 .workspace {
@@ -951,22 +997,6 @@ textarea::placeholder {
   }
   .header-actions {
     gap: 0.6rem;
-  }
-  .space-picker-label {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    margin: -1px;
-    padding: 0;
-    border: 0;
-    clip: rect(0 0 0 0);
-    clip-path: inset(50%);
-    overflow: hidden;
-    white-space: nowrap;
-  }
-  .space-picker select {
-    min-width: 0;
-    max-width: 9rem;
   }
 }
 

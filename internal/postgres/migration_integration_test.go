@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ApexReasoning/carry/internal/conversation"
+	"github.com/ApexReasoning/carry/internal/identity"
 	"github.com/ApexReasoning/carry/internal/machine"
 	"github.com/ApexReasoning/carry/internal/work"
 	"github.com/google/uuid"
@@ -393,12 +394,82 @@ func TestMigrateUpgradesTerminalNode2Runs(t *testing.T) {
 	}
 	if _, err := pool.Exec(ctx, `
 		insert into spaces (
-			space_id, name, created_by_user_id, create_idempotency_key, create_request_digest
+			space_id, name, slug, created_by_user_id, create_idempotency_key, create_request_digest
 		) values (
 			'20000000-0000-0000-0000-000000000099', 'Missing Digest',
+			'20000000000000000000000000000099',
 			'10000000-0000-0000-0000-000000000001', 'missing-digest', null
 		)
 	`); err == nil {
-		t.Fatal("upgraded schema accepted explicit first Space creation without a request digest")
+		t.Fatal("upgraded schema accepted explicit Space creation without a request digest")
+	}
+}
+
+func TestMigration16BackfillsImmutableSpaceSlugAndUserLabel(t *testing.T) {
+	ctx := context.Background()
+	pool := openMigratedTestPool(t, ctx)
+	if _, err := pool.Exec(ctx, `drop schema public cascade; create schema public`); err != nil {
+		t.Fatalf("reset schema for Space upgrade: %v", err)
+	}
+	connection, err := pool.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := connection.Exec(ctx, `
+		create table carry_schema_migrations (
+			version text primary key,
+			applied_at timestamptz not null default transaction_timestamp()
+		)
+	`); err != nil {
+		connection.Release()
+		t.Fatal(err)
+	}
+	entries, err := migrationFiles.ReadDir("migrations")
+	if err != nil {
+		connection.Release()
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if entry.Name() >= "0016_space_choice_slug.sql" {
+			continue
+		}
+		migration, readErr := migrationFiles.ReadFile("migrations/" + entry.Name())
+		if readErr != nil {
+			connection.Release()
+			t.Fatal(readErr)
+		}
+		if err := applyMigration(ctx, connection, entry.Name(), string(migration)); err != nil {
+			connection.Release()
+			t.Fatalf("apply %s: %v", entry.Name(), err)
+		}
+	}
+	connection.Release()
+
+	const userID = "10000000-0000-4000-8000-000000000016"
+	const spaceID = "20000000-0000-4000-8000-000000000016"
+	if _, err := pool.Exec(ctx, `insert into carry_users(user_id,display_name) values($1,null)`, userID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `insert into spaces(space_id,name) values($1,'Legacy Space')`, spaceID); err != nil {
+		t.Fatal(err)
+	}
+	if err := Migrate(ctx, pool); err != nil {
+		t.Fatalf("migrate legacy Space: %v", err)
+	}
+	var slug, displayName string
+	if err := pool.QueryRow(ctx, `
+		select space.slug, carry_user.display_name
+		from spaces as space
+		cross join carry_users as carry_user
+		where space.space_id=$1 and carry_user.user_id=$2
+	`, spaceID, userID).Scan(&slug, &displayName); err != nil {
+		t.Fatal(err)
+	}
+	expectedLabel, err := identity.FallbackDisplayName(userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slug != "20000000000040008000000000000016" || displayName != expectedLabel {
+		t.Fatalf("backfill = slug %q label %q, want %q / %q", slug, displayName, "20000000000040008000000000000016", expectedLabel)
 	}
 }

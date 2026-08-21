@@ -21,7 +21,7 @@ func TestEmailRequestSubmitsExactChallengeAndRecipient(t *testing.T) {
 	t.Parallel()
 	store := &recordingEmailLoginStore{}
 	sender := &recordingEmailSender{}
-	handler := emailTestAPI(t, store, sender, unavailableFirstSpaces{})
+	handler := emailTestAPI(t, store, sender, unavailableSpaceCreation{})
 	request := httptest.NewRequest(
 		http.MethodPost,
 		"/v1/auth/email/challenges",
@@ -54,7 +54,7 @@ func TestEmailRequestSubmitsExactChallengeAndRecipient(t *testing.T) {
 func TestEmailRequestMapsIdempotencyConflictToHTTP409(t *testing.T) {
 	t.Parallel()
 	store := &recordingEmailLoginStore{prepareErr: identity.ErrIdempotencyConflict}
-	handler := emailTestAPI(t, store, &recordingEmailSender{}, unavailableFirstSpaces{})
+	handler := emailTestAPI(t, store, &recordingEmailSender{}, unavailableSpaceCreation{})
 	request := httptest.NewRequest(
 		http.MethodPost,
 		"/v1/auth/email/challenges",
@@ -76,7 +76,7 @@ func TestEmailVerifySetsStableHostOnlyCookie(t *testing.T) {
 	store := &recordingEmailLoginStore{session: identity.BrowserSession{
 		SessionID: testSessionID, UserID: "user-5", ExpiresAt: time.Now().Add(time.Hour),
 	}}
-	handler := emailTestAPI(t, store, &recordingEmailSender{}, unavailableFirstSpaces{})
+	handler := emailTestAPI(t, store, &recordingEmailSender{}, unavailableSpaceCreation{})
 	request := httptest.NewRequest(
 		http.MethodPost,
 		"/v1/auth/email/challenges/"+testChallengeID+"/verify",
@@ -101,22 +101,22 @@ func TestEmailVerifySetsStableHostOnlyCookie(t *testing.T) {
 	}
 }
 
-func TestFirstSpaceUsesAuthenticatedUserAndNarrowAuthority(t *testing.T) {
+func TestSpaceCreationUsesAuthenticatedUserAndNarrowAuthority(t *testing.T) {
 	t.Parallel()
-	spaces := &recordingFirstSpaces{created: space.CreatedSpace{
-		SpaceID: "22222222-2222-4222-8222-222222222222", Name: "Research",
+	spaces := &recordingSpaceCreation{created: space.CreatedSpace{
+		SpaceID: "22222222-2222-4222-8222-222222222222", Name: "Research", Slug: "research",
 		CanManageMembers: true, CanEnrollMachines: true,
 	}}
 	handler := emailTestAPI(t, &recordingEmailLoginStore{}, &recordingEmailSender{}, spaces)
 	request := httptest.NewRequest(http.MethodPost, "/v1/spaces", bytes.NewBufferString(
-		`{"display_name":"Ada","name":"Research"}`,
+		`{"name":"Research"}`,
 	))
 	credential, err := testIdentityCredentials(t).BrowserSessionCredential(testSessionID)
 	if err != nil {
 		t.Fatalf("create Browser Session credential: %v", err)
 	}
 	request.AddCookie(&http.Cookie{Name: browserSessionCookie, Value: credential})
-	request.Header.Set("Idempotency-Key", "create-first-space")
+	request.Header.Set("Idempotency-Key", "create-space")
 	response := httptest.NewRecorder()
 
 	handler.ServeHTTP(response, request)
@@ -124,30 +124,93 @@ func TestFirstSpaceUsesAuthenticatedUserAndNarrowAuthority(t *testing.T) {
 	if response.Code != http.StatusCreated {
 		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
 	}
-	if spaces.command.UserID != "user-5" || spaces.command.DisplayName != "Ada" || spaces.command.SpaceName != "Research" {
-		t.Fatalf("first Space command = %#v", spaces.command)
+	if spaces.command.UserID != "50000000-0000-4000-8000-000000000005" || spaces.command.Name != "Research" || spaces.command.Slug != "research" {
+		t.Fatalf("Space command = %#v", spaces.command)
 	}
-	if !strings.Contains(response.Body.String(), `"can_manage_members":true`) ||
+	if !strings.Contains(response.Body.String(), `"slug":"research"`) ||
+		!strings.Contains(response.Body.String(), `"can_manage_members":true`) ||
 		!strings.Contains(response.Body.String(), `"can_enroll_machines":true`) {
-		t.Fatalf("first Space response = %s", response.Body.String())
+		t.Fatalf("Space response = %s", response.Body.String())
 	}
 }
 
-func TestFirstSpaceRejectsTransitionalBearerBeforeSpaceBehavior(t *testing.T) {
+func TestSpaceCreationRejectsCallerFactsAndMapsRecovery(t *testing.T) {
 	t.Parallel()
-	spaces := &recordingFirstSpaces{}
+	credentials := testIdentityCredentials(t)
+	credential, err := credentials.BrowserSessionCredential(testSessionID)
+	if err != nil {
+		t.Fatalf("create Browser Session credential: %v", err)
+	}
+	serve := func(body string, spaces *recordingSpaceCreation) *httptest.ResponseRecorder {
+		handler := emailTestAPI(t, &recordingEmailLoginStore{}, &recordingEmailSender{}, spaces)
+		request := httptest.NewRequest(
+			http.MethodPost,
+			"/v1/spaces",
+			strings.NewReader(body),
+		)
+		request.AddCookie(&http.Cookie{
+			Name:  browserSessionCookie,
+			Value: credential,
+		})
+		request.Header.Set("Idempotency-Key", "create-space-recovery")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		return response
+	}
+
+	t.Run("caller cannot nominate creator", func(t *testing.T) {
+		spaces := &recordingSpaceCreation{}
+		response := serve(`{"name":"Research","user_id":"attacker"}`, spaces)
+		if response.Code != http.StatusBadRequest || spaces.command.UserID != "" {
+			t.Fatalf("status = %d, command = %#v", response.Code, spaces.command)
+		}
+	})
+
+	t.Run("invalid slug maps one stable reason", func(t *testing.T) {
+		spaces := &recordingSpaceCreation{}
+		response := serve(`{"name":"cаrry"}`, spaces)
+		if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), space.ErrSpaceSlugMixedScripts.Error()) || spaces.command.UserID != "" {
+			t.Fatalf("status = %d, body = %s, command = %#v", response.Code, response.Body.String(), spaces.command)
+		}
+	})
+
+	t.Run("slug conflict carries one unreserved suggestion", func(t *testing.T) {
+		spaces := &recordingSpaceCreation{
+			createError: func(command space.CreateSpaceCommand) error {
+				return space.NewSlugConflictError(command)
+			},
+		}
+		response := serve(`{"name":"Research"}`, spaces)
+		if response.Code != http.StatusConflict {
+			t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+		}
+		if !strings.Contains(response.Body.String(), `"slug":"research"`) {
+			t.Fatalf("conflicting slug body = %s", response.Body.String())
+		}
+		if !strings.Contains(response.Body.String(), `"suggested_slug":"research-2"`) {
+			t.Fatalf("suggested slug body = %s", response.Body.String())
+		}
+		if !strings.Contains(response.Body.String(), `"suggested_suffix":2`) {
+			t.Fatalf("suggested suffix body = %s", response.Body.String())
+		}
+	})
+}
+
+func TestSpaceCreationRejectsTransitionalBearerBeforeSpaceBehavior(t *testing.T) {
+	t.Parallel()
+	spaces := &recordingSpaceCreation{}
 	handler := emailTestAPI(t, &recordingEmailLoginStore{}, &recordingEmailSender{}, spaces)
 	request := httptest.NewRequest(http.MethodPost, "/v1/spaces", bytes.NewBufferString(
-		`{"display_name":"Ada","name":"Research"}`,
+		`{"name":"Research"}`,
 	))
 	request.Header.Set("Authorization", "Bearer "+testCLIBearer(t))
-	request.Header.Set("Idempotency-Key", "bearer-first-space")
+	request.Header.Set("Idempotency-Key", "bearer-space")
 	response := httptest.NewRecorder()
 
 	handler.ServeHTTP(response, request)
 
 	if response.Code != http.StatusUnauthorized || spaces.command.UserID != "" {
-		t.Fatalf("status = %d, first Space command = %#v", response.Code, spaces.command)
+		t.Fatalf("status = %d, Space command = %#v", response.Code, spaces.command)
 	}
 }
 
@@ -155,7 +218,7 @@ func TestMalformedTrustedProxyChainIsRejectedBeforeChallenge(t *testing.T) {
 	t.Parallel()
 	store := &recordingEmailLoginStore{}
 	handler := emailTestAPIWithSources(
-		t, store, &recordingEmailSender{}, unavailableFirstSpaces{},
+		t, store, &recordingEmailSender{}, unavailableSpaceCreation{},
 		NewRequestSource([]netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")}),
 	)
 	request := httptest.NewRequest(http.MethodPost, "/v1/auth/email/challenges", strings.NewReader(
@@ -176,7 +239,7 @@ func TestMalformedTrustedProxyChainIsRejectedBeforeChallenge(t *testing.T) {
 func TestCrossSiteEmailRequestIsRejectedBeforeChallenge(t *testing.T) {
 	t.Parallel()
 	store := &recordingEmailLoginStore{}
-	handler := emailTestAPI(t, store, &recordingEmailSender{}, unavailableFirstSpaces{})
+	handler := emailTestAPI(t, store, &recordingEmailSender{}, unavailableSpaceCreation{})
 	request := httptest.NewRequest(http.MethodPost, "https://carry.example/v1/auth/email/challenges", strings.NewReader(
 		`{"challenge_id":"`+testChallengeID+`","email":"person@example.com"}`,
 	))
@@ -197,7 +260,7 @@ func emailTestAPI(
 	t *testing.T,
 	emailPersistence identity.EmailLoginPersistence,
 	sender identity.EmailCodeSubmitter,
-	spacePersistence space.FirstSpacePersistence,
+	spacePersistence space.SpaceCreationPersistence,
 ) http.Handler {
 	t.Helper()
 	return emailTestAPIWithSources(t, emailPersistence, sender, spacePersistence, NewRequestSource(nil))
@@ -207,7 +270,7 @@ func emailTestAPIWithSources(
 	t *testing.T,
 	emailPersistence identity.EmailLoginPersistence,
 	sender identity.EmailCodeSubmitter,
-	spacePersistence space.FirstSpacePersistence,
+	spacePersistence space.SpaceCreationPersistence,
 	requestSources RequestSource,
 ) http.Handler {
 	t.Helper()
@@ -217,11 +280,14 @@ func emailTestAPIWithSources(
 	if err != nil {
 		t.Fatalf("compose email login: %v", err)
 	}
-	firstSpace, err := space.NewFirstSpace(spacePersistence)
+	spaceCreator, err := space.NewCreator(spacePersistence)
 	if err != nil {
-		t.Fatalf("compose first Space: %v", err)
+		t.Fatalf("compose Space creator: %v", err)
 	}
-	sessions := &recordingBrowserSessions{user: identity.AuthenticatedUser{UserID: "user-5"}}
+	sessions := &recordingBrowserSessions{user: identity.AuthenticatedUser{
+		UserID:      "50000000-0000-4000-8000-000000000005",
+		DisplayName: "Member 50000000",
+	}}
 	member := testUserRoutes(t, authority)
 	authentication, err := NewUserAuthentication(&recordingCLICredentials{}, sessions, credentials, testExternalOrigin(t))
 	if err != nil {
@@ -241,7 +307,7 @@ func emailTestAPIWithSources(
 	if err != nil {
 		t.Fatalf("compose User identity routes: %v", err)
 	}
-	spaceRoutes, err := NewUserSpaceRoutes(firstSpace)
+	spaceRoutes, err := NewUserSpaceRoutes(spaceCreator)
 	if err != nil {
 		t.Fatalf("compose User Space routes: %v", err)
 	}
@@ -321,15 +387,19 @@ func (sender *recordingEmailSender) SubmitEmailCode(
 	return identity.EmailSubmission{State: identity.EmailSubmissionAccepted, ProviderMessageID: "resend-message"}
 }
 
-type recordingFirstSpaces struct {
-	command space.CreateFirstCommand
-	created space.CreatedSpace
+type recordingSpaceCreation struct {
+	command     space.CreateSpaceCommand
+	created     space.CreatedSpace
+	createError func(space.CreateSpaceCommand) error
 }
 
-func (store *recordingFirstSpaces) CreateFirstSpace(
+func (store *recordingSpaceCreation) CreateSpace(
 	_ context.Context,
-	command space.CreateFirstCommand,
+	command space.CreateSpaceCommand,
 ) (space.CreatedSpace, error) {
 	store.command = command
+	if store.createError != nil {
+		return space.CreatedSpace{}, store.createError(command)
+	}
 	return store.created, nil
 }

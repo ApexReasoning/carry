@@ -24,6 +24,7 @@ const user: User = {
     {
       space_id: spaceID,
       name: "Research",
+      slug: "research",
       can_manage_members: true,
       can_enroll_machines: true,
     },
@@ -73,7 +74,7 @@ test("loads bounded earlier Work and message pages without duplicates", async ()
     }),
   );
 
-  const { result } = renderHook(() => useWorkBoard(user));
+  const { result } = renderHook(() => useWorkBoard(user, spaceID));
   await waitFor(() => expect(result.current.works).toHaveLength(1));
   expect(result.current.hasEarlierWorks).toBe(true);
 
@@ -166,7 +167,7 @@ test("reuses the exact acceptance identity when a lost request did not commit", 
     }),
   );
 
-  const { result } = renderHook(() => useWorkBoard(user));
+  const { result } = renderHook(() => useWorkBoard(user, spaceID));
   await waitFor(() => expect(result.current.works).toHaveLength(1));
   await act(() => result.current.selectWork(newestWorkID));
 
@@ -232,7 +233,7 @@ test("accepts the exact Needs You result and reconciles a lost response", async 
     }),
   );
 
-  const { result } = renderHook(() => useWorkBoard(user));
+  const { result } = renderHook(() => useWorkBoard(user, spaceID));
   await waitFor(() => expect(result.current.spaceID).toBe(spaceID));
   expect(result.current.works).toHaveLength(0);
 

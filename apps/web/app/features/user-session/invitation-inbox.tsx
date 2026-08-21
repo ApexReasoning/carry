@@ -29,12 +29,10 @@ export function InvitationInboxView({
     verifyKey: string;
   } | null>(null);
   const [code, setCode] = useState("");
-  const [name, setName] = useState(user.display_name ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pendingAccept, setPendingAccept] = useState<{
     invitationID: string;
-    displayName: string;
     key: string;
   } | null>(null);
 
@@ -92,22 +90,17 @@ export function InvitationInboxView({
 
   async function accept(
     invitationID: string,
-    retry?: { invitationID: string; displayName: string; key: string },
+    retry?: { invitationID: string; key: string },
   ) {
     const command = retry ?? {
       invitationID,
-      displayName: name,
       key: crypto.randomUUID(),
     };
     setPendingAccept(command);
     setBusy(true);
     setError(null);
     try {
-      await acceptInvitation(
-        command.invitationID,
-        command.displayName,
-        command.key,
-      );
+      await acceptInvitation(command.invitationID, command.key);
       window.history.replaceState(null, "", "/");
       setPendingAccept(null);
       onChanged();
@@ -208,15 +201,6 @@ export function InvitationInboxView({
               )}
             </section>
           ) : null}
-          {!user.display_name ? (
-            <label>
-              Display name
-              <input
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-              />
-            </label>
-          ) : null}
           <ul className="identity-method-list">
             {inbox.invitations.map((item) => (
               <li key={item.invitation_id}>
@@ -230,11 +214,7 @@ export function InvitationInboxView({
                 <button
                   className="primary-button"
                   type="button"
-                  disabled={
-                    busy ||
-                    inbox.reauthentication_required ||
-                    (!user.display_name && !name.trim())
-                  }
+                  disabled={busy || inbox.reauthentication_required}
                   onClick={() => void accept(item.invitation_id)}
                 >
                   Accept and join

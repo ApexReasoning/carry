@@ -26,6 +26,7 @@ test("member talks privately to Carry and delegates one shared Work", async ({
 
   await page.goto("/");
   await signInWithEmail(page, emailCaptureFile, "conversation@example.com");
+  await page.getByRole("link", { name: /Carry Space/ }).click();
   await expect(
     page.getByRole("heading", { name: "Talk to Carry" }),
   ).toBeVisible();

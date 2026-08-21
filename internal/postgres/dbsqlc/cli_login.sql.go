@@ -79,7 +79,7 @@ func (q *Queries) ApproveCLILogin(ctx context.Context, arg ApproveCLILoginParams
 }
 
 const authenticateCLICredential = `-- name: AuthenticateCLICredential :one
-SELECT credential.user_id, coalesce(carry_user.display_name, '') AS display_name
+SELECT credential.user_id, carry_user.display_name AS display_name
 FROM cli_credentials AS credential
 INNER JOIN carry_users AS carry_user ON carry_user.user_id = credential.user_id
 WHERE credential.credential_id = $1
@@ -564,7 +564,7 @@ func (q *Queries) LockActiveMembershipForCLILogin(ctx context.Context, arg LockA
 }
 
 const lockBrowserSessionForCLILogin = `-- name: LockBrowserSessionForCLILogin :one
-SELECT session.user_id, coalesce(carry_user.display_name, '') AS display_name
+SELECT session.user_id, carry_user.display_name AS display_name
 FROM browser_sessions AS session
 INNER JOIN carry_users AS carry_user ON carry_user.user_id = session.user_id
 WHERE session.session_id = $1

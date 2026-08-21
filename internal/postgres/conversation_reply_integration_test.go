@@ -67,7 +67,7 @@ func TestConversationReplyConcurrentClaimHasOneWinner(t *testing.T) {
 	if _, err := pool.Exec(ctx, `insert into carry_users (user_id, display_name) values ($1, 'Cross Space Member')`, crossUserID); err != nil {
 		t.Fatalf("create cross-Space user: %v", err)
 	}
-	if _, err := pool.Exec(ctx, `insert into spaces (space_id, name) values ($1, 'Other Private Space')`, crossSpaceID); err != nil {
+	if _, err := pool.Exec(ctx, `insert into spaces (space_id, name, slug) values ($1::uuid, 'Other Private Space', replace(($1::uuid)::text, '-', ''))`, crossSpaceID); err != nil {
 		t.Fatalf("create cross Space: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `insert into space_memberships (space_id, user_id, can_enroll_machines) values ($1, $2, true)`, crossSpaceID, crossUserID); err != nil {

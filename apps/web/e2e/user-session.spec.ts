@@ -2,7 +2,13 @@
 
 import { rm } from "node:fs/promises";
 
-import { expect, test, type Page, type Route } from "@playwright/test";
+import {
+  expect,
+  test,
+  type Browser,
+  type Page,
+  type Route,
+} from "@playwright/test";
 
 import { readLatestEmailCode, signInWithEmail } from "./email-login";
 
@@ -106,7 +112,7 @@ test("email response loss replays exact commands and logout remains fail closed"
   await page.getByLabel("Email code").fill(code);
   await page.getByRole("button", { name: "Verify" }).click();
   await expect(
-    page.getByRole("heading", { name: "Create your Space" }),
+    page.getByRole("heading", { name: "Choose a Space" }),
   ).toBeVisible();
   expect(verificationRequests).toHaveLength(2);
   expect(verificationRequests[1]).toEqual(verificationRequests[0]);
@@ -127,12 +133,12 @@ test("email response loss replays exact commands and logout remains fail closed"
     }
     await route.continue();
   });
-  await page.getByLabel("Your name").fill("Alex Morgan");
   await page.getByLabel("Space name").fill("Research response loss");
   await page.getByRole("button", { name: "Create Space" }).click();
   await expect(
     page.getByRole("heading", { name: "What should Carry keep moving?" }),
   ).toBeVisible();
+  expect(new URL(page.url()).pathname).toBe("/s/research-response-loss");
   expect(spaceRequests).toHaveLength(2);
   expect(spaceRequests[1]).toEqual(spaceRequests[0]);
 
@@ -189,12 +195,12 @@ test("explicit resend makes the older code obsolete and the newest code succeeds
   await page.getByLabel("Email code").fill(newestCode);
   await page.getByRole("button", { name: "Verify" }).click();
   await expect(
-    page.getByRole("heading", { name: "Create your Space" }),
+    page.getByRole("heading", { name: "Choose a Space" }),
   ).toBeVisible();
   await expectNoBrowserSecrets(page, email, [oldCode, newestCode]);
 });
 
-test("a concurrent other first Space routes only from actual User state", async ({
+test("a concurrent Space slug collision requires an explicit new request", async ({
   context,
   page,
 }) => {
@@ -202,57 +208,200 @@ test("a concurrent other first Space routes only from actual User state", async 
   await page.goto("/");
   await signInWithEmail(page, emailCaptureFile, email);
   await expect(
-    page.getByRole("heading", { name: "Create your Space" }),
+    page.getByRole("heading", { name: "Choose a Space" }),
   ).toBeVisible();
 
   const otherTab = await context.newPage();
   await otherTab.goto("/");
   await expect(
-    otherTab.getByRole("heading", { name: "Create your Space" }),
+    otherTab.getByRole("heading", { name: "Choose a Space" }),
   ).toBeVisible();
+  const status = await otherTab.evaluate(async () => {
+    const response = await fetch("/v1/spaces", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": "application/json",
+        "Idempotency-Key": crypto.randomUUID(),
+      },
+      body: JSON.stringify({ name: "Concurrent Space" }),
+    });
+    return response.status;
+  });
+  expect(status).toBe(201);
 
   const attemptedCommands: Array<RecordedMutation> = [];
-  let attempt = 0;
   await page.route("**/v1/spaces", async (route) => {
-    if (route.request().method() !== "POST") {
-      await route.continue();
-      return;
-    }
-    attemptedCommands.push(recordMutation(route));
-    attempt += 1;
-    if (attempt === 1) {
-      const status = await otherTab.evaluate(async () => {
-        const response = await fetch("/v1/spaces", {
-          method: "POST",
-          credentials: "same-origin",
-          headers: {
-            "Content-Type": "application/json",
-            "Idempotency-Key": crypto.randomUUID(),
-          },
-          body: JSON.stringify({
-            display_name: "Alex Morgan",
-            name: "Operations won elsewhere",
-          }),
-        });
-        return response.status;
-      });
-      expect(status).toBe(201);
-      await route.abort("failed");
-      return;
+    if (route.request().method() === "POST") {
+      attemptedCommands.push(recordMutation(route));
     }
     await route.continue();
   });
 
-  await page.getByLabel("Your name").fill("Alex Morgan");
-  await page.getByLabel("Space name").fill("Attempted Research");
+  await page.getByLabel("Space name").fill("Concurrent Space");
+  await page.getByRole("button", { name: "Create Space" }).click();
+  await expect(
+    page.getByText("/s/concurrent-space is already in use.", { exact: false }),
+  ).toBeVisible();
+  const createElsewhere = (suffix: number) =>
+    otherTab.evaluate(async (nextSuffix) => {
+      const response = await fetch("/v1/spaces", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": crypto.randomUUID(),
+        },
+        body: JSON.stringify({ name: "Concurrent Space", suffix: nextSuffix }),
+      });
+      return response.status;
+    }, suffix);
+
+  expect(await createElsewhere(2)).toBe(201);
+  await page.getByRole("button", { name: "Try /s/concurrent-space-2" }).click();
+  await expect(
+    page.getByRole("button", { name: "Try /s/concurrent-space-3" }),
+  ).toBeVisible();
+  expect(await createElsewhere(3)).toBe(201);
+  await page.getByRole("button", { name: "Try /s/concurrent-space-3" }).click();
+  await expect(
+    page.getByRole("button", { name: "Try /s/concurrent-space-4" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Try /s/concurrent-space-4" }).click();
+  await expect(
+    page.getByRole("heading", { name: "What should Carry keep moving?" }),
+  ).toBeVisible();
+  expect(new URL(page.url()).pathname).toBe("/s/concurrent-space-4");
+  expect(attemptedCommands.map((command) => command.body)).toEqual([
+    JSON.stringify({ name: "Concurrent Space" }),
+    JSON.stringify({ name: "Concurrent Space", suffix: 2 }),
+    JSON.stringify({ name: "Concurrent Space", suffix: 3 }),
+    JSON.stringify({ name: "Concurrent Space", suffix: 4 }),
+  ]);
+  expect(
+    new Set(attemptedCommands.map((command) => command.idempotencyKey)).size,
+  ).toBe(4);
+  await page.goto("/");
+  await expect(
+    page.getByRole("heading", { name: "Choose a Space" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: /\/s\/concurrent-space$/ }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: /\/s\/concurrent-space-4$/ }),
+  ).toBeVisible();
+});
+
+test("Unicode Space URLs remain explicit and invitation entry bypasses the chooser", async ({
+  browser,
+  page,
+}: {
+  browser: Browser;
+  page: Page;
+}) => {
+  test.setTimeout(120_000);
+  const ownerEmail = derivedEmail(loginEmail, "unicode-owner");
+  await page.goto("/");
+  const origin = new URL(page.url()).origin;
+  await signInWithEmail(page, emailCaptureFile, ownerEmail);
+
+  const overlongName = "研".repeat(33);
+  await page.getByLabel("Space name").fill(overlongName);
+  await page.getByRole("button", { name: "Create Space" }).click();
+  await expect(page.getByRole("alert")).toContainText(
+    "Space URL must be at most 32 characters",
+  );
+  expect(new URL(page.url()).pathname).toBe("/");
+
+  const maximumName = "研".repeat(32);
+  await page.getByLabel("Space name").fill(maximumName);
   await page.getByRole("button", { name: "Create Space" }).click();
   await expect(
     page.getByRole("heading", { name: "What should Carry keep moving?" }),
   ).toBeVisible();
-  await expect(page.getByText("Operations won elsewhere")).toBeVisible();
-  await expect(page.getByText("Attempted Research")).toHaveCount(0);
-  expect(attemptedCommands).toHaveLength(2);
-  expect(attemptedCommands[1]).toEqual(attemptedCommands[0]);
+  expect(decodeURIComponent(new URL(page.url()).pathname)).toBe(
+    `/s/${maximumName}`,
+  );
+  await page.reload();
+  await expect(
+    page.getByRole("heading", { name: "What should Carry keep moving?" }),
+  ).toBeVisible();
+
+  await page.goto("/");
+  await expect(
+    page.getByRole("heading", { name: "Choose a Space" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: new RegExp(maximumName) }),
+  ).toBeVisible();
+
+  const otherContext = await browser.newContext({ ignoreHTTPSErrors: true });
+  const otherPage = await otherContext.newPage();
+  await otherPage.goto(`${origin}/`);
+  await signInWithEmail(
+    otherPage,
+    emailCaptureFile,
+    derivedEmail(loginEmail, "other-space-owner"),
+  );
+  await otherPage.getByLabel("Space name").fill("Other Private Space");
+  await otherPage.getByRole("button", { name: "Create Space" }).click();
+  await expect(
+    otherPage.getByRole("heading", { name: "What should Carry keep moving?" }),
+  ).toBeVisible();
+  await otherContext.close();
+
+  await page.goto("/s/no-such-space");
+  await expect(
+    page.getByRole("heading", { name: "Space unavailable" }),
+  ).toBeVisible();
+  const unknownCopy = await page.locator("main.center-state").innerText();
+  await page.goto("/s/other-private-space");
+  await expect(
+    page.getByRole("heading", { name: "Space unavailable" }),
+  ).toBeVisible();
+  expect(await page.locator("main.center-state").innerText()).toBe(unknownCopy);
+
+  const recipientEmail = derivedEmail(loginEmail, "invited-member");
+  const invitationStatus = await page.evaluate(async (recipient) => {
+    const current = (await fetch("/v1/me").then((response) =>
+      response.json(),
+    )) as { spaces: Array<{ space_id: string }> };
+    const response = await fetch(
+      `/v1/spaces/${current.spaces[0].space_id}/invitations`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": crypto.randomUUID(),
+        },
+        body: JSON.stringify({
+          email: recipient,
+          can_manage_members: false,
+          can_enroll_machines: false,
+        }),
+      },
+    );
+    return { status: response.status, body: await response.text() };
+  }, recipientEmail);
+  expect(invitationStatus).toEqual({ status: 201, body: expect.any(String) });
+
+  const invitedContext = await browser.newContext({ ignoreHTTPSErrors: true });
+  const invitedPage = await invitedContext.newPage();
+  await invitedPage.goto(`${origin}/`);
+  await signInWithEmail(invitedPage, emailCaptureFile, recipientEmail);
+  await expect(
+    invitedPage.getByRole("heading", { name: "Space invitations" }),
+  ).toBeVisible();
+  await expect(invitedPage.getByLabel("Your name")).toHaveCount(0);
+  await invitedPage.getByRole("button", { name: "Accept and join" }).click();
+  await expect(
+    invitedPage.getByRole("heading", { name: "Choose a Space" }),
+  ).toBeVisible();
+  await expect(
+    invitedPage.getByRole("link", { name: new RegExp(maximumName) }),
+  ).toBeVisible();
+  await invitedContext.close();
 });
 
 test("Settings presents only fixed sign-in method labels and protects the final method", async ({
@@ -261,7 +410,6 @@ test("Settings presents only fixed sign-in method labels and protects the final 
   const email = derivedEmail(loginEmail, "identity-settings");
   await page.goto("/");
   await signInWithEmail(page, emailCaptureFile, email);
-  await page.getByLabel("Your name").fill("Identity User");
   await page.getByLabel("Space name").fill("Identity Settings");
   await page.getByRole("button", { name: "Create Space" }).click();
   await page.getByRole("button", { name: "Settings" }).click();

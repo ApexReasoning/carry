@@ -59,7 +59,12 @@ func TestSpaceInvitationPublicBrowserJourney(t *testing.T) {
 		args  []any
 	}{
 		{`insert into carry_users (user_id, display_name) values ($1, 'Invitation Manager')`, []any{managerID}},
-		{`insert into spaces (space_id, name) values ($1, 'Research Space')`, []any{spaceID}},
+		{
+			query: `insert into spaces (space_id, name, slug) values ($1::uuid, 'Research Space', replace(($1::uuid)::text, '-', ''))`,
+			args: []any{
+				spaceID,
+			},
+		},
 		{`insert into space_memberships (space_id, user_id, can_manage_members, can_enroll_machines) values ($1, $2, true, true)`, []any{spaceID, managerID}},
 		{`insert into browser_sessions (session_id, user_id, expires_at, identity_proof_method) values ($1, $2, transaction_timestamp() + interval '1 hour', 'email')`, []any{managerSession, managerID}},
 	} {
@@ -100,7 +105,7 @@ func TestSpaceInvitationPublicBrowserJourney(t *testing.T) {
 	if before != 0 {
 		t.Fatalf("authentication auto-accepted Membership")
 	}
-	accepted := browserJSON(t, carry.Client(), http.MethodPost, carry.URL+"/v1/invitations/"+invitationID+"/accept", carry.URL, inviteeCredential, "accept-public", map[string]any{"display_name": "Invited Member"})
+	accepted := browserJSON(t, carry.Client(), http.MethodPost, carry.URL+"/v1/invitations/"+invitationID+"/accept", carry.URL, inviteeCredential, "accept-public", nil)
 	if accepted.status != http.StatusOK || accepted.body["can_manage_members"] != true || accepted.body["can_enroll_machines"] != false {
 		t.Fatalf("accept = %d %#v", accepted.status, accepted.body)
 	}
@@ -131,7 +136,7 @@ func TestSpaceInvitationPublicBrowserJourney(t *testing.T) {
 			t.Fatalf("%s inbox = %d %#v", method, providerInbox.status, providerInbox.body)
 		}
 		providerInvitationID := issuedProvider.body["invitation_id"].(string)
-		blocked := browserJSON(t, carry.Client(), http.MethodPost, carry.URL+"/v1/invitations/"+providerInvitationID+"/accept", carry.URL, providerCredential, "accept-before-email-"+method, map[string]any{"display_name": ""})
+		blocked := browserJSON(t, carry.Client(), http.MethodPost, carry.URL+"/v1/invitations/"+providerInvitationID+"/accept", carry.URL, providerCredential, "accept-before-email-"+method, nil)
 		if blocked.status != http.StatusPreconditionRequired {
 			t.Fatalf("%s pre-Email accept = %d %#v", method, blocked.status, blocked.body)
 		}
@@ -147,7 +152,7 @@ func TestSpaceInvitationPublicBrowserJourney(t *testing.T) {
 		if verifiedReauth.status != http.StatusNoContent || verifiedReauth.sessionCredential == "" || verifiedReauth.sessionCredential == providerCredential {
 			t.Fatalf("verify %s Email reauth = %d %#v", method, verifiedReauth.status, verifiedReauth.body)
 		}
-		confirmed := browserJSON(t, carry.Client(), http.MethodPost, carry.URL+"/v1/invitations/"+providerInvitationID+"/accept", carry.URL, verifiedReauth.sessionCredential, "accept-after-email-"+method, map[string]any{"display_name": ""})
+		confirmed := browserJSON(t, carry.Client(), http.MethodPost, carry.URL+"/v1/invitations/"+providerInvitationID+"/accept", carry.URL, verifiedReauth.sessionCredential, "accept-after-email-"+method, nil)
 		if confirmed.status != http.StatusOK {
 			t.Fatalf("%s confirmed accept = %d %#v", method, confirmed.status, confirmed.body)
 		}

@@ -329,7 +329,14 @@ func completeEmailLogin(
 	userID, err := queries.LoadEmailIdentity(ctx, challenge.CanonicalEmail)
 	if errors.Is(err, pgx.ErrNoRows) {
 		userID = uuid.NewString()
-		if err := queries.CreateEmailUser(ctx, userID); err != nil {
+		displayName, err := identity.FallbackDisplayName(userID)
+		if err != nil {
+			return dbsqlc.BrowserSession{}, fmt.Errorf("derive email User label: %w", err)
+		}
+		if err := queries.CreateEmailUser(ctx, dbsqlc.CreateEmailUserParams{
+			UserID:      userID,
+			DisplayName: displayName,
+		}); err != nil {
 			return dbsqlc.BrowserSession{}, fmt.Errorf("create email User: %w", err)
 		}
 		if err := queries.CreateEmailIdentity(ctx, dbsqlc.CreateEmailIdentityParams{

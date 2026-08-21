@@ -329,7 +329,7 @@ func (q *Queries) FindLiveMachineConnectionByCode(ctx context.Context, userCodeD
 const listSpaceMachines = `-- name: ListSpaceMachines :many
 SELECT machine.machine_id, machine.space_id, space.name AS space_name,
     machine.display_name, machine.public_key_der, machine.enrolled_by_user_id,
-    coalesce(enroller.display_name, '') AS enrolled_by_name, machine.enrolled_at,
+    enroller.display_name AS enrolled_by_name, machine.enrolled_at,
     machine.revoked_at, coalesce(machine.revocation_actor_kind, '') AS revocation_actor_kind,
     machine.revoked_by_user_id, coalesce(revoker.display_name, '') AS revoked_by_name
 FROM machines AS machine
@@ -484,7 +484,7 @@ func (q *Queries) LoadMachineListMembership(ctx context.Context, arg LoadMachine
 }
 
 const lockBrowserSessionForMachineConnection = `-- name: LockBrowserSessionForMachineConnection :one
-SELECT session.user_id, coalesce(carry_user.display_name, '') AS display_name
+SELECT session.user_id, carry_user.display_name AS display_name
 FROM browser_sessions AS session
 INNER JOIN carry_users AS carry_user ON carry_user.user_id = session.user_id
 WHERE session.session_id = $1

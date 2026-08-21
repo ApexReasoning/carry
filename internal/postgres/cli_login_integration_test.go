@@ -553,7 +553,12 @@ func seedCLILoginMember(t *testing.T, ctx context.Context, pool *pgxpool.Pool) (
 		args []any
 	}{
 		{`insert into carry_users (user_id, display_name) values ($1, 'CLI Member')`, []any{userID}},
-		{`insert into spaces (space_id, name) values ($1, 'CLI Space')`, []any{spaceID}},
+		{
+			sql: `insert into spaces (space_id, name, slug) values ($1::uuid, 'CLI Space', replace(($1::uuid)::text, '-', ''))`,
+			args: []any{
+				spaceID,
+			},
+		},
 		{`insert into space_memberships (space_id, user_id, can_enroll_machines, can_manage_members) values ($1, $2, true, true)`, []any{spaceID, userID}},
 		{`insert into browser_sessions (session_id, user_id, identity_proof_method, expires_at) values ($1, $2, 'email', transaction_timestamp() + interval '30 days')`, []any{sessionID, userID}},
 	}
