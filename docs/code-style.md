@@ -168,7 +168,7 @@ func (m *WorkManager) Update(ctx context.Context, in UpdateInput) error {
 }
 ```
 
-删掉，直接调用准确 capability。Interface 放在消费方，只包含它真正使用的最小方法集，不为"将来可能有第二个实现"创建。流程中的一个角色仍然是角色；一次临时计算仍然是局部值；一个数据库投影不自动成为 owner。
+删掉，直接调用准确 capability。Interface 放在消费方，只包含它真正使用的最小方法集，不为“将来可能有第二个实现”创建。像 Server 的 `WorkQueries` 这样由真实 handler 直接消费、只使用 owner command/result 且不暴露 PostgreSQL 类型的接口是消费方 capability，不是待删除的 DB 接口；owner 内持有一个 capability 后只转发一次的 stateful service 才是仪式。流程中的一个角色仍然是角色；一次临时计算仍然是局部值；一个数据库投影不自动成为 owner。
 
 下一次判断 owner / PostgreSQL / service 形状时依次问：词汇、恢复错误和纯规则是否留在 owner；依赖数据库事实的权威是否仍由 PostgreSQL 事务执行；interface 是否位于实际消费方且最小；这个 stateful owner behavior 是否真的组合多个 capability 或外部后果；删掉它是否只会少一次转发。最后一题答"是"就删；但若方法派生 owner-owned canonical command、digest 或恢复，它不是纯转发，不能把这条规则下推到 adapter。
 
@@ -196,7 +196,9 @@ package 只为三类责任之一存在：一个事实 owner（`identity`、`spac
 - 用操作名包装：`fmt.Errorf("claim run: %w", err)`，保持 `errors.Is` / `errors.As` 可用；
 - 只有当调用方要据此做真实决定时才引入 sentinel 或类型化错误；
 - 恢复方式不同时，永不把过期、重放、未授权、迟到、目标不可用和缺失合并成一个错误；
-- 错误里永不出现 token、代码、私人内容或 provider 原始响应体。
+- 错误里永不出现 token、代码、私人内容或 provider 原始响应体；
+- owner error 拥有稳定语义与诊断 cause，不拥有 UI copy；User 与 Machine transport 按 actor、audience 和真实恢复分别翻译，同一恢复才共享公开错误；
+- 意外 User 错误把准确 operation/cause 留在内部日志，公开响应只说当前可执行恢复；已知拒绝不得翻译成 Unknown，读失败也不得伪装成写入结果未知。
 
 ## 8. Go
 
@@ -216,7 +218,7 @@ package 只为三类责任之一存在：一个事实 owner（`identity`、`spac
 
 ## 10. HTTP 与协议
 
-Handler 只做认证、解码、线格式校验、调用一个 owner 操作、编码。它不含事务，也不编排 provider。公开协议只包含当前消费者；Host API 不为对称而发布。当 omitted、`null`、空值和零值含义不同时要区分。边界上时间戳用 RFC 3339 UTC。有后果的命令按 §3 的推导规则决定幂等键归属。生成客户端只重新生成，不打补丁。
+Handler 只做认证、解码、线格式校验、派生一个 owner command、调用一个消费方 capability、编码。它不含事务，也不编排 provider。公开协议只包含当前消费者；Host API 不为对称而发布。当 omitted、`null`、空值和零值含义不同时要区分。边界上时间戳用 RFC 3339 UTC。有后果的命令按 §3 的推导规则决定幂等键归属。生成客户端只重新生成，不打补丁。
 
 ## 11. 面向 Agent 的接口与 Host
 

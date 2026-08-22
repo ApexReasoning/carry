@@ -230,7 +230,7 @@ export function IdentityMethodSettings({ onClose }: { onClose: () => void }) {
             {removalToConfirm
               ? `Confirm a method other than ${methodLabels[removalToConfirm]} before removing it.`
               : "Recently confirm any linked method before changing access."}{" "}
-            This does not claim MFA or that a provider asked for a password
+            This does not mean MFA or that a provider asked for a password
             again.
           </p>
           <div className="identity-method-actions">
@@ -308,7 +308,7 @@ export function IdentityMethodSettings({ onClose }: { onClose: () => void }) {
               void requestEmailProof(null, emailProof.purpose, emailProof)
             }
           >
-            Retry sending this code
+            Try sending again
           </button>
         </form>
       ) : null}
@@ -381,7 +381,7 @@ export function IdentityMethodSettings({ onClose }: { onClose: () => void }) {
           disabled={busy}
           onClick={() => void unlink(pendingUnlink.method, pendingUnlink)}
         >
-          Retry exact removal
+          Try removing again
         </button>
       ) : null}
       <p className="identity-recovery-note">

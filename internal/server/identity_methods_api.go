@@ -33,7 +33,7 @@ func (api identityMethodsAPI) list(response http.ResponseWriter, request *http.R
 	}
 	methods, err := api.methods.List(request.Context(), user.UserID, sessionID)
 	if err != nil {
-		writeIdentityMethodError(response, err)
+		writeIdentityMethodError(response, err, userReadFailure, "list sign-in methods")
 		return
 	}
 	labels := make([]string, len(methods.Methods))
@@ -68,12 +68,12 @@ func (api identityMethodsAPI) unlink(response http.ResponseWriter, request *http
 		SessionID: sessionID, Method: method, IdempotencyKey: idempotencyKey,
 	})
 	if err != nil {
-		writeIdentityMethodError(response, err)
+		writeIdentityMethodError(response, err, userMutationFailure, "remove sign-in method")
 		return
 	}
 	credential, err := api.credentials.BrowserSessionCredential(session.SessionID)
 	if err != nil {
-		writeAPIError(response, http.StatusInternalServerError, "create Browser Session credential")
+		writeUserInternalError(response, userMutationFailure, "create Browser Session credential", err)
 		return
 	}
 	setBrowserSessionCookie(response, credential, session.ExpiresAt)
@@ -94,19 +94,20 @@ func (api identityMethodsAPI) browserSessionID(response http.ResponseWriter, req
 	return sessionID, true
 }
 
-func writeIdentityMethodError(response http.ResponseWriter, err error) {
+func writeIdentityMethodError(response http.ResponseWriter, err error, recovery userFailureRecovery, operation string) {
 	switch {
 	case errors.Is(err, identity.ErrUnauthenticated):
 		writeAPIError(response, http.StatusUnauthorized, "Browser Session authentication is invalid")
 	case errors.Is(err, identity.ErrRecentIdentityProofRequired):
 		writeAPIError(response, http.StatusPreconditionRequired, err.Error())
+	case errors.Is(err, identity.ErrIdempotencyConflict):
+		writeAPIError(response, http.StatusConflict, "This action no longer matches the saved request. Reload before trying again.")
 	case errors.Is(err, identity.ErrIdentityMethodOccupied),
 		errors.Is(err, identity.ErrIdentityMethodAlreadyLinked),
 		errors.Is(err, identity.ErrIdentityMethodNotLinked),
-		errors.Is(err, identity.ErrLastIdentityMethod),
-		errors.Is(err, identity.ErrIdempotencyConflict):
+		errors.Is(err, identity.ErrLastIdentityMethod):
 		writeAPIError(response, http.StatusConflict, err.Error())
 	default:
-		writeAPIError(response, http.StatusInternalServerError, "change sign-in method")
+		writeUserInternalError(response, recovery, operation, err)
 	}
 }

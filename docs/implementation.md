@@ -4,7 +4,7 @@
 
 节点 0–12 是旧合同下的技术证据。旧的节点 13–19 作废，不得实施。本文件是节点 12 之后唯一的活动路线，拥有节点路线、研究程序、评审协议和证据标准。
 
-Roadmap reset 已由 Issue #1、commit `f2a10bc` 与 CI `32504005646` 关闭；节点 13 已由 Issue #2、commit `663123b` 与 CI `32525708982` 关闭；节点 14 corrective 与 pre-Node15 全项目检查已由 Issues #3/#5、commits `9a283bd`、`4a0dcfc` 与 CI `32554850043`、`32556811802` 关闭。Issue #6 是 Node 15 前最后一个 coherence corrective：它只冻结可复用的 owner/事务/service、幂等/digest、UI 远端状态、review 与路线决定，不改变旅程、schema、migration 或公开协议。Issue #6 提交、push 与 CI 关闭后，节点 15 才从简单旅程重新冻结并恢复有界研究。
+Roadmap reset 已由 Issue #1、commit `f2a10bc` 与 CI `32504005646` 关闭；节点 13 已由 Issue #2、commit `663123b` 与 CI `32525708982` 关闭；节点 14 corrective 与 pre-Node15 全项目检查已由 Issues #3/#5、commits `9a283bd`、`4a0dcfc` 与 CI `32554850043`、`32556811802` 关闭；Issue #6 已由 commits `5a7e1c4`、`0d6b0da` 与 CI `32559725075` 关闭。用户随后批准 Issue #7 作为最后一个 pre-Node15 corrective；它增加延期邀请的可见返回入口，因此不是非 Node coherence 例外，必须走普通十字段、研究、设计、实施、三轮关闭评审和 supervisor gates。Issue #7 提交、push、CI 与关闭后，节点 15 才从简单旅程重新冻结并恢复有界研究。
 
 ## 1. 路线规则
 

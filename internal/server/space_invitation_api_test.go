@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"crypto/x509"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -134,7 +135,7 @@ func TestInvitationTerminalErrorsHaveExactRecoveryMappings(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			response := httptest.NewRecorder()
-			writeInvitationError(response, test.err)
+			writeInvitationError(response, test.err, userReadFailure, "load invitation")
 			if response.Code != test.status {
 				t.Fatalf("status = %d, want %d", response.Code, test.status)
 			}
@@ -213,6 +214,34 @@ func TestRemoveMemberRouteRequiresOriginAndMapsRemovalOutcomes(t *testing.T) {
 	}
 }
 
+func TestInvitationHandlersDistinguishUnexpectedReadAndMutationRecovery(t *testing.T) {
+	t.Parallel()
+	behavior := &invitationBehaviorStub{
+		issueError:       errors.New("issue database unavailable"),
+		listManagedError: errors.New("list database unavailable"),
+	}
+	api := spaceInvitationAPI{
+		invitations:       behavior,
+		invitationQueries: behavior,
+		origin:            testExternalOrigin(t),
+	}
+	user := identity.AuthenticatedUser{UserID: "10000000-0000-4000-8000-000000000001"}
+
+	readRequest := httptest.NewRequest(http.MethodGet, "/v1/spaces/20000000-0000-4000-8000-000000000001/invitations", nil)
+	readRequest = readRequest.WithContext(context.WithValue(readRequest.Context(), userContextKey{}, user))
+	readResponse := httptest.NewRecorder()
+	api.listManaged(readResponse, readRequest)
+	assertUserFacingResponse(t, readResponse, http.StatusInternalServerError, "Carry could not load this right now. Reload to try again.")
+
+	mutationRequest := httptest.NewRequest(http.MethodPost, "https://carry.example/v1/spaces/20000000-0000-4000-8000-000000000001/invitations", strings.NewReader(`{"email":"person@example.com"}`))
+	mutationRequest.Header.Set("Origin", "https://carry.example")
+	mutationRequest.Header.Set("Idempotency-Key", "issue-invitation")
+	mutationRequest = mutationRequest.WithContext(context.WithValue(mutationRequest.Context(), userContextKey{}, user))
+	mutationResponse := httptest.NewRecorder()
+	api.issue(mutationResponse, mutationRequest)
+	assertUserFacingResponse(t, mutationResponse, http.StatusInternalServerError, "Carry could not confirm whether this change finished. Check the current page before trying again.")
+}
+
 type invitationBrowserSessions struct{}
 
 func (invitationBrowserSessions) AuthenticateBrowserSession(context.Context, string) (identity.AuthenticatedUser, error) {
@@ -222,23 +251,25 @@ func (invitationBrowserSessions) RevokeBrowserSession(context.Context, string) e
 
 type spaceCreationStub struct{}
 
-func (spaceCreationStub) Create(context.Context, space.CreateSpaceRequest) (space.CreatedSpace, error) {
+func (spaceCreationStub) CreateSpace(context.Context, space.CreateSpaceCommand) (space.CreatedSpace, error) {
 	return space.CreatedSpace{}, nil
 }
 
 type invitationBehaviorStub struct {
-	issues         int
-	removals       int
-	removalCommand space.RemoveMemberCommand
-	removalError   error
-	loaded         space.RecipientInvitation
-	loadError      error
-	loads          int
+	issues           int
+	issueError       error
+	listManagedError error
+	removals         int
+	removalCommand   space.RemoveMemberCommand
+	removalError     error
+	loaded           space.RecipientInvitation
+	loadError        error
+	loads            int
 }
 
 func (stub *invitationBehaviorStub) Issue(context.Context, space.IssueInvitationRequest) (space.IssuedInvitation, error) {
 	stub.issues++
-	return space.IssuedInvitation{}, nil
+	return space.IssuedInvitation{}, stub.issueError
 }
 func (*invitationBehaviorStub) Resend(context.Context, space.ResendInvitationRequest) (space.IssuedInvitation, error) {
 	return space.IssuedInvitation{}, nil
@@ -251,8 +282,8 @@ func (stub *invitationBehaviorStub) RemoveSpaceMember(_ context.Context, command
 	stub.removalCommand = command
 	return stub.removalError
 }
-func (*invitationBehaviorStub) ListSpaceInvitations(context.Context, string, string) ([]space.ManagedInvitation, error) {
-	return nil, nil
+func (stub *invitationBehaviorStub) ListSpaceInvitations(context.Context, string, string) ([]space.ManagedInvitation, error) {
+	return nil, stub.listManagedError
 }
 func (*invitationBehaviorStub) ListUserInvitations(context.Context, string, string) (space.InvitationInbox, error) {
 	return space.InvitationInbox{}, nil

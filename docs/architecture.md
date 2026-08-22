@@ -140,9 +140,10 @@ Agent 与外部内容只能在当前 Work 合同允许的范围内提议改变�
 
 1. owner package 拥有产品词汇、恢复错误、纯归一化与 digest 规则、command 和 result；
 2. PostgreSQL adapter 实现所有依赖数据库事实的锁、数据库时间、重放、当前权限、winner 与状态转移；事实 ownership 不要求把物理事务搬进 owner package；
-3. interface 放在实际消费方，只列这个消费方当前调用的最小方法集；
+3. interface 放在实际消费方，只列这个消费方当前调用的最小方法集；它描述消费方需要的 capability，不是由其具体 PostgreSQL 实现决定的“数据库接口”；
 4. 只有一个行为需要组合多个 capability 或一次外部后果时，才建立 stateful owner behavior；
-5. 不为了让 owner 看起来拥有行为而保留纯转发方法。删除转发不得把 owner 规则推入 server 或 PostgreSQL；纯规则仍由 owner 的函数、构造或非转发行为拥有。
+5. 不为了让 owner 看起来拥有行为而保留纯转发方法。删除转发不得把 owner 规则推入 server 或 PostgreSQL；纯规则仍由 owner 的函数、构造或非转发行为拥有；Space 创建因此由 Space 构造 canonical command、Server 消费一个最小创建 capability、PostgreSQL 裁决重放、slug winner 与原子初始 Membership，不保留只持有该 capability 的 `space.Creator`；
+6. 一个 owner 只有在当前规则需要时，才直接消费另一个 owner 原样导出的准确 fact、type、error 或纯规则；不得包一层改名、复制事实、取得对方权限或形成 import cycle。Go acyclicity 与 review 约束这种边，不维护 owner-pair 中央 allowlist；脚本只表达当前真实且稳定的 adapter 禁止方向。
 
 ```text
 cmd/carry-server → internal/server → owner packages → internal/postgres

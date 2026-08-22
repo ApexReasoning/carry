@@ -63,7 +63,7 @@ func (api conversationAPI) sendMessage(response http.ResponseWriter, request *ht
 		Text: body.Text, IdempotencyKey: idempotencyKey,
 	})
 	if err != nil {
-		writeStoreError(response, err)
+		writeUserStoreError(response, err, userMutationFailure, "send private Conversation message")
 		return
 	}
 	writeJSON(response, http.StatusOK, conversationMessageToWire(message))
@@ -87,14 +87,14 @@ func (api conversationAPI) listMessages(response http.ResponseWriter, request *h
 		return
 	}
 	if err := conversation.ValidateCursors(before, after); err != nil {
-		writeStoreError(response, err)
+		writeUserStoreError(response, err, userReadFailure, "validate private Conversation page")
 		return
 	}
 	messages, err := api.queries.ListConversationMessages(request.Context(), conversation.ListCommand{
 		SpaceID: spaceID, MemberUserID: member.UserID, Before: before, After: after,
 	})
 	if err != nil {
-		writeStoreError(response, err)
+		writeUserStoreError(response, err, userReadFailure, "list private Conversation messages")
 		return
 	}
 	wired := make([]conversationMessageWire, 0, len(messages))

@@ -703,18 +703,28 @@ export async function appendWorkMessage(
   );
 }
 
+function mutationOutcomeUnknown(response: Response | undefined): boolean {
+  return (
+    !response ||
+    response.status === 500 ||
+    response.status === 502 ||
+    response.status === 504
+  );
+}
+
+function unknownMutation(action: string): MutationOutcomeUnknownError {
+  return new MutationOutcomeUnknownError(
+    `${action} may have finished, but Carry could not confirm it. Check the current page before trying again.`,
+  );
+}
+
 function requireMutationData<T>(
   data: T | undefined,
   response: Response | undefined,
   error: unknown,
   action: string,
 ): T {
-  if (!response && error) {
-    const detail = error instanceof Error ? `: ${error.message}` : "";
-    throw new MutationOutcomeUnknownError(
-      `${action} outcome is unknown; retry the same command to reconcile${detail}`,
-    );
-  }
+  if (mutationOutcomeUnknown(response)) throw unknownMutation(action);
   return requireData(data, response, error, action);
 }
 
@@ -723,12 +733,7 @@ function requireMutationSuccess(
   error: unknown,
   action: string,
 ): void {
-  if (!response) {
-    const detail = error instanceof Error ? `: ${error.message}` : "";
-    throw new MutationOutcomeUnknownError(
-      `${action} outcome is unknown${detail}`,
-    );
-  }
+  if (mutationOutcomeUnknown(response)) throw unknownMutation(action);
   requireSuccess(response, error, action);
 }
 
@@ -740,7 +745,9 @@ function requireData<T>(
 ): T {
   requireSuccess(response, error, action);
   if (data === undefined) {
-    throw new Error(`${action} returned no data`);
+    throw new Error(
+      `Carry received an incomplete response for ${action}. Try again.`,
+    );
   }
   return data;
 }
@@ -756,16 +763,13 @@ function requireSuccess(
   if (isAPIError(error) && response) {
     throw new APIResponseError(error.error, response.status);
   }
-  if (error instanceof Error) {
-    throw new Error(`${action} failed: ${error.message}`);
-  }
   if (response) {
     throw new APIResponseError(
-      `${action} failed (${response.status})`,
+      `Carry could not complete ${action}. Try again.`,
       response.status,
     );
   }
-  throw new Error(`${action} failed before receiving a response`);
+  throw new Error(`Carry could not complete ${action}. Try again.`);
 }
 
 function isSpaceCreationConflict(

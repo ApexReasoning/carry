@@ -120,7 +120,7 @@ func (api machineAPI) claimRun(response http.ResponseWriter, request *http.Reque
 		return
 	}
 	if err != nil {
-		writeStoreError(response, err)
+		writeMachineStoreError(response, err)
 		return
 	}
 	messages := make([]runMessageWire, 0, len(claim.Messages))
@@ -154,7 +154,7 @@ func (api machineAPI) renewRun(response http.ResponseWriter, request *http.Reque
 		request.Context(), machineID, runID, attemptID, body.Fence,
 	)
 	if err != nil {
-		writeStoreError(response, err)
+		writeMachineStoreError(response, err)
 		return
 	}
 	writeJSON(response, http.StatusOK, struct {
@@ -182,7 +182,7 @@ func (api machineAPI) commitUnderstanding(response http.ResponseWriter, request 
 		InputEndSeq:              body.InputEndSeq, Understanding: body.Understanding,
 		NextStep: body.NextStep, ReviewRequired: body.ReviewRequired,
 	}); err != nil {
-		writeStoreError(response, err)
+		writeMachineStoreError(response, err)
 		return
 	}
 	response.WriteHeader(http.StatusNoContent)
@@ -205,7 +205,7 @@ func (api machineAPI) finishAttempt(response http.ResponseWriter, request *http.
 		MachineID: machineID, RunID: runID,
 		AttemptID: attemptID, Fence: body.Fence, Outcome: body.Outcome,
 	}); err != nil {
-		writeStoreError(response, err)
+		writeMachineStoreError(response, err)
 		return
 	}
 	response.WriteHeader(http.StatusNoContent)

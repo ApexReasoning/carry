@@ -55,7 +55,7 @@ func (api machineConversationAPI) claim(response http.ResponseWriter, request *h
 		return
 	}
 	if err != nil {
-		writeStoreError(response, err)
+		writeMachineStoreError(response, err)
 		return
 	}
 	messages := make([]conversationContextMessageWire, 0, len(claim.Messages))
@@ -87,7 +87,7 @@ func (api machineConversationAPI) renew(response http.ResponseWriter, request *h
 		MachineID: machineID, SourceMessageID: sourceMessageID, Fence: body.Fence,
 	})
 	if err != nil {
-		writeStoreError(response, err)
+		writeMachineStoreError(response, err)
 		return
 	}
 	writeJSON(response, http.StatusOK, struct {
@@ -126,7 +126,7 @@ func (api machineConversationAPI) commit(response http.ResponseWriter, request *
 		Candidate: candidate,
 	})
 	if err != nil {
-		writeStoreError(response, err)
+		writeMachineStoreError(response, err)
 		return
 	}
 	writeJSON(response, http.StatusOK, struct {

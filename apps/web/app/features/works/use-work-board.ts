@@ -239,7 +239,7 @@ export function useWorkBoard(user: User | null, spaceID: string | null) {
       clearPendingIdentity(identity);
       if (reloaded.work.needs_retry) {
         throw new Error(
-          "The previous retry was reconciled, but this Work needs a new choice. Choose Try again once more.",
+          "Carry confirmed the previous retry. This Work needs another decision. Choose Try again to ask it to continue.",
         );
       }
     });

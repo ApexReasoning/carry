@@ -15,7 +15,7 @@ Carry 是用户可以长期托付责任的 AI 同事：用户在 carry.ai Web �
 - **Host**：一台已接入 Space 的机器，用户在设置里增删。
 - **Inbox**：所有需要人处理的 Work 事项。
 
-以下永不出现在人看到的界面、文案和邮件里：Run、attempt、lease、fence、version、digest、credential、socket、session handle。它们是内部机制，不是产品词汇。面向 Agent 的机器接口可以暴露研究证明必需的最少内部事实。
+以下永不出现在人看到的界面、文案和邮件里：Run、attempt、claim、lease、fence、version、digest、credential、socket、session handle、Idempotency-Key。它们是内部机制，不是产品词汇。面向 Agent 的机器接口可以暴露研究证明必需的最少内部事实。面向人的失败说明只说 Carry 知道什么和用户现在能做什么；owner 的诊断错误、重放键和操作名不直接成为公开文案。
 
 新增一个用户可见名词必须同时满足四条，否则用现有 owner 的字段或一个局部值表达：当前旅程没有它会具体失败；它有独立身份和生命周期；它保护相邻事实无法表达的权限或并发边界；用户能感知它的价值。流程中的一步、一个角色、一个视图、一次临时计算都不是新概念。
 
@@ -38,7 +38,7 @@ Carry 是用户可以长期托付责任的 AI 同事：用户在 carry.ai Web �
 
 Membership 只保留两项彼此独立的窄权限：管理成员、连接 Host。它们不是角色层级或通用权限系统。创建 Space 的成员初始拥有两项；当前持有人可以把自己拥有的某一项授予同 Space 的 Active 成员，邀请人也只能授予自己已有的权限。除非结束整个 Space，每项始终至少有一名 Active 持有人。
 
-具有成员管理权限的成员从设置里生成邀请链接。链接包含现有邀请 ID 的准确路径；该 ID 只用于在登录后恢复导航意图，持有它不披露邀请内容，也不授权接受。认证前只显示通用登录方式，不预览 Space、邀请人、权限、收件人、有效期或状态。准确受邀 Email 的当前 owner 登录后能看到 Space、邀请人、两项权限，并在接受前用页面内 Email 验证完成近期证明；Google/GitHub profile email 不授予邀请权限。链接一次性、有有效期、可撤销；准确 owner 能看到 revoked、expired、accepted 的真实终态，其他 User、未知 ID 和由别人接受的邀请都得到同一个无元数据的 unavailable 结果。已失效的链接给出明确原因，不静默失败。认证后的 User 可以选择 `Not now`，只在当前浏览器 session 内暂缓自动邀请优先级并进入 Space 选择；显式打开邀请 inbox 或准确链接始终重新显示邀请。这个 browser presentation 状态不改变邀请终态、可见性或接受权限。成员移除也要求这项权限；连接或撤销 Host 要求连接 Host 权限。
+具有成员管理权限的成员从设置里生成邀请链接。链接包含现有邀请 ID 的准确路径；该 ID 只用于在登录后恢复导航意图，持有它不披露邀请内容，也不授权接受。认证前只显示通用登录方式，不预览 Space、邀请人、权限、收件人、有效期或状态。准确受邀 Email 的当前 owner 登录后能看到 Space、邀请人、两项权限，并在接受前用页面内 Email 验证完成近期证明；Google/GitHub profile email 不授予邀请权限。链接一次性、有有效期、可撤销；准确 owner 能看到 revoked、expired、accepted 的真实终态，其他 User、未知 ID 和由别人接受的邀请都得到同一个无元数据的 unavailable 结果。已失效的链接给出明确原因，不静默失败。认证后的 User 可以选择 `Not now`，只在当前浏览器 session 内暂缓自动邀请优先级并进入 Space 选择；Space 选择页和当前 Space 顶栏始终提供 `Invitations` 入口，显式打开它或准确链接都会重新读取并显示当前 User 可见的邀请。这个入口只恢复导航并读取权威事实，不改变邀请终态、可见性或接受权限。成员移除也要求这项权限；连接或撤销 Host 要求连接 Host 权限。
 
 ### 2.3 Host 与 Agent
 

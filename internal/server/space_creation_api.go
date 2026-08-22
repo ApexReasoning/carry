@@ -8,13 +8,13 @@ import (
 	"github.com/ApexReasoning/carry/internal/space"
 )
 
-// SpaceCreator is the Space creation behavior consumed by HTTP.
-type SpaceCreator interface {
-	Create(context.Context, space.CreateSpaceRequest) (space.CreatedSpace, error)
+// SpaceCreation commits a Space-owned creation command.
+type SpaceCreation interface {
+	CreateSpace(context.Context, space.CreateSpaceCommand) (space.CreatedSpace, error)
 }
 
 type spaceCreationAPI struct {
-	creator SpaceCreator
+	creation SpaceCreation
 }
 
 func (api spaceCreationAPI) create(response http.ResponseWriter, request *http.Request) {
@@ -33,12 +33,16 @@ func (api spaceCreationAPI) create(response http.ResponseWriter, request *http.R
 	if !decodeJSON(response, request, &body) {
 		return
 	}
-	created, err := api.creator.Create(request.Context(), space.CreateSpaceRequest{
+	command, err := space.NewCreateSpaceCommand(space.CreateSpaceRequest{
 		UserID:         user.UserID,
 		Name:           body.Name,
 		Suffix:         body.Suffix,
 		IdempotencyKey: idempotencyKey,
 	})
+	var created space.CreatedSpace
+	if err == nil {
+		created, err = api.creation.CreateSpace(request.Context(), command)
+	}
 	switch {
 	case errors.Is(err, space.ErrSpaceNameRequired),
 		errors.Is(err, space.ErrSpaceNameTooLong),
@@ -67,15 +71,15 @@ func (api spaceCreationAPI) create(response http.ResponseWriter, request *http.R
 		return
 	}
 	if errors.Is(err, space.ErrIdempotencyConflict) {
-		writeAPIError(response, http.StatusConflict, err.Error())
+		writeAPIError(response, http.StatusConflict, "This action no longer matches the saved request. Reload before trying again.")
 		return
 	}
 	if errors.Is(err, space.ErrForbidden) {
-		writeAPIError(response, http.StatusForbidden, err.Error())
+		writeAPIError(response, http.StatusForbidden, "You do not have access to this Space.")
 		return
 	}
 	if err != nil {
-		writeAPIError(response, http.StatusInternalServerError, "create Space")
+		writeUserInternalError(response, userMutationFailure, "create Space", err)
 		return
 	}
 	membership := membershipWire{

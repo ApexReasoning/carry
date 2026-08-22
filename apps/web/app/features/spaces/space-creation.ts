@@ -79,7 +79,7 @@ export function discardCorruptPendingSpaceCreation(): void {
   window.sessionStorage.removeItem(storageKey);
   if (window.sessionStorage.getItem(storageKey) !== null) {
     throw new Error(
-      "Damaged pending Space creation identities could not be cleared",
+      "Carry could not clear the saved Space creation from this browser.",
     );
   }
 }
@@ -99,13 +99,13 @@ function loadPending(): PendingIdentities {
     value = JSON.parse(encoded);
   } catch (caught) {
     throw new CorruptPendingSpaceCreationError(
-      "Pending Space creation identities are damaged",
+      "Carry cannot read the saved Space creation on this browser.",
       { cause: caught },
     );
   }
   if (!isPendingIdentities(value)) {
     throw new CorruptPendingSpaceCreationError(
-      "Pending Space creation identities are damaged",
+      "Carry cannot read the saved Space creation on this browser.",
     );
   }
   return value;
@@ -127,13 +127,17 @@ function savePending(pending: PendingIdentities): void {
   if (Object.keys(pending).length === 0) {
     window.sessionStorage.removeItem(storageKey);
     if (window.sessionStorage.getItem(storageKey) !== null) {
-      throw new Error("Pending Space creation identity could not be cleared");
+      throw new Error(
+        "Carry could not clear the saved Space creation from this browser.",
+      );
     }
     return;
   }
   const encoded = JSON.stringify(pending);
   window.sessionStorage.setItem(storageKey, encoded);
   if (window.sessionStorage.getItem(storageKey) !== encoded) {
-    throw new Error("Pending Space creation identity could not be saved");
+    throw new Error(
+      "Carry could not save this Space creation on this browser.",
+    );
   }
 }

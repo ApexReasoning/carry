@@ -190,6 +190,9 @@ export function App() {
           <a className="ghost-button" href="/">
             Switch Space
           </a>
+          <a className="ghost-button" href="/invitations">
+            Invitations
+          </a>
           <button
             className="ghost-button"
             type="button"

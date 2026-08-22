@@ -176,7 +176,7 @@ export function UserEntry({
                   onClick={() => void onRetryCodeRequest()}
                   disabled={busy}
                 >
-                  Retry this request
+                  Try sending again
                 </button>
               ) : null}
               <button

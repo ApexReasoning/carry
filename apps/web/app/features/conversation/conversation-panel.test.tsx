@@ -142,7 +142,7 @@ test("retains and reuses the exact random request key after response loss", asyn
   const composer = await screen.findByLabelText("Message Carry privately");
   await user.type(composer, privateText);
   await user.click(screen.getByRole("button", { name: "Send privately" }));
-  await screen.findByText(/outcome is unknown/);
+  await screen.findByText(/may have finished, but Carry could not confirm it/);
 
   const digest = Array.from(
     new Uint8Array(
@@ -190,7 +190,7 @@ test("reuses a pending key after remount without persisting the private draft", 
   const firstComposer = await screen.findByLabelText("Message Carry privately");
   await user.type(firstComposer, privateText);
   await user.click(screen.getByRole("button", { name: "Send privately" }));
-  await screen.findByText(/outcome is unknown/);
+  await screen.findByText(/may have finished, but Carry could not confirm it/);
   expect(storageContents(window.sessionStorage)).not.toContain(privateText);
   first.unmount();
 

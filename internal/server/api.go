@@ -23,17 +23,49 @@ func decodeJSON(response http.ResponseWriter, request *http.Request, destination
 	decoder := json.NewDecoder(request.Body)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(destination); err != nil {
-		writeAPIError(response, http.StatusBadRequest, "invalid JSON command")
+		writeAPIError(response, http.StatusBadRequest, "Carry could not read this request.")
 		return false
 	}
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		writeAPIError(response, http.StatusBadRequest, "command must contain one JSON value")
+		writeAPIError(response, http.StatusBadRequest, "Carry could not read this request.")
 		return false
 	}
 	return true
 }
 
-func writeStoreError(response http.ResponseWriter, err error) {
+type userFailureRecovery uint8
+
+const (
+	userReadFailure userFailureRecovery = iota
+	userMutationFailure
+)
+
+func writeUserStoreError(response http.ResponseWriter, err error, recovery userFailureRecovery, operation string) {
+	switch {
+	case errors.Is(err, space.ErrForbidden):
+		writeAPIError(response, http.StatusForbidden, "You do not have access to this Space.")
+	case errors.Is(err, work.ErrNotFound):
+		writeAPIError(response, http.StatusNotFound, "This Work is unavailable.")
+	case errors.Is(err, work.ErrIdempotencyConflict), errors.Is(err, conversation.ErrIdempotencyConflict):
+		writeAPIError(response, http.StatusConflict, "This action no longer matches the saved request. Reload before trying again.")
+	case errors.Is(err, conversation.ErrReplyPending):
+		writeAPIError(response, http.StatusConflict, "Wait for Carry's reply before sending another message.")
+	case errors.Is(err, conversation.ErrReplyConflict):
+		writeAPIError(response, http.StatusConflict, "Reload the Conversation before trying again.")
+	case errors.Is(err, work.ErrNotOpen), errors.Is(err, work.ErrRetryNotNeeded), errors.Is(err, work.ErrReviewNotCurrent):
+		writeAPIError(response, http.StatusConflict, "Reload this Work before choosing again.")
+	case errors.Is(err, work.ErrInvalidGoal), errors.Is(err, work.ErrInvalidMessage), errors.Is(err, conversation.ErrInvalidText):
+		writeAPIError(response, http.StatusBadRequest, "Check the entered value and try again.")
+	case errors.Is(err, work.ErrInvalidIdempotency), errors.Is(err, work.ErrInvalidCursor),
+		errors.Is(err, conversation.ErrInvalidIdempotency), errors.Is(err, conversation.ErrInvalidCursor),
+		errors.Is(err, conversation.ErrInvalidContext):
+		writeAPIError(response, http.StatusBadRequest, "Reload before trying again.")
+	default:
+		writeUserInternalError(response, recovery, operation, err)
+	}
+}
+
+func writeMachineStoreError(response http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, space.ErrForbidden), errors.Is(err, machine.ErrMachineRevoked):
 		writeAPIError(response, http.StatusForbidden, err.Error())
@@ -44,8 +76,7 @@ func writeStoreError(response http.ResponseWriter, err error) {
 	case errors.Is(err, conversation.ErrStaleReplyClaim):
 		writeAPIError(response, http.StatusConflict, "private Conversation reply claim is stale or expired")
 	case errors.Is(err, work.ErrIdempotencyConflict), errors.Is(err, conversation.ErrIdempotencyConflict), errors.Is(err, conversation.ErrReplyPending),
-		errors.Is(err, conversation.ErrReplyConflict),
-		errors.Is(err, work.ErrNotOpen), errors.Is(err, work.ErrRetryNotNeeded),
+		errors.Is(err, conversation.ErrReplyConflict), errors.Is(err, work.ErrNotOpen), errors.Is(err, work.ErrRetryNotNeeded),
 		errors.Is(err, work.ErrReviewNotCurrent):
 		writeAPIError(response, http.StatusConflict, err.Error())
 	case errors.Is(err, run.ErrInvalidUpdate), errors.Is(err, run.ErrInvalidOutcome), errors.Is(err, work.ErrInvalidGoal),
@@ -56,6 +87,15 @@ func writeStoreError(response http.ResponseWriter, err error) {
 	default:
 		writeAPIError(response, http.StatusInternalServerError, "request failed")
 	}
+}
+
+func writeUserInternalError(response http.ResponseWriter, recovery userFailureRecovery, operation string, err error) {
+	slog.Error("user request failed", "operation", operation, "error", err)
+	if recovery == userMutationFailure {
+		writeAPIError(response, http.StatusInternalServerError, "Carry could not confirm whether this change finished. Check the current page before trying again.")
+		return
+	}
+	writeAPIError(response, http.StatusInternalServerError, "Carry could not load this right now. Reload to try again.")
 }
 
 func writeAPIError(response http.ResponseWriter, status int, message string) {

@@ -31,7 +31,7 @@ func (api userAPI) me(response http.ResponseWriter, request *http.Request) {
 	}
 	memberships, err := api.memberships.ListMemberships(request.Context(), user.UserID)
 	if err != nil {
-		writeAPIError(response, http.StatusInternalServerError, "load memberships")
+		writeUserInternalError(response, userReadFailure, "load Memberships", err)
 		return
 	}
 	spaces := make([]membershipWire, 0, len(memberships))

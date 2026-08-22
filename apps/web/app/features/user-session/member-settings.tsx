@@ -327,9 +327,9 @@ export function MemberSettings({
           <p>
             Future access to {spaceName} ends immediately. Authored history
             stays, and private Conversation rows remain private and retained.
-            User credentials and Space Machines are not automatically revoked.
-            Pending invitations remain. Data already copied outside Carry is not
-            deleted.
+            Other sign-in access and Space Machines are not automatically
+            revoked. Pending invitations remain. Data already copied outside
+            Carry is not deleted.
           </p>
           {removalTarget.open_work_count > 0 ? (
             <label>
@@ -427,7 +427,7 @@ export function MemberSettings({
                 else void remove(pendingMutation.target, pendingMutation);
               }}
             >
-              Retry exact change
+              Try this change again
             </button>
           ) : null}
           <h3>Pending invitations</h3>
@@ -504,13 +504,13 @@ function grants(manage: boolean, enroll: boolean) {
 function submissionCopy(state: ManagedInvitation["submission"]["state"]) {
   switch (state) {
     case "accepted":
-      return "The email provider accepted this submission. Delivery or reading is not confirmed.";
+      return "Carry handed the invitation email to the email service. Delivery is not confirmed.";
     case "rejected":
-      return "The invitation exists, but the provider rejected this submission.";
+      return "The invitation exists, but the email service did not accept this delivery request.";
     case "unknown":
-      return "Carry cannot confirm whether the provider accepted this submission. Resend is a new explicit attempt.";
+      return "Carry cannot confirm whether the email service accepted the invitation. Sending again is a new action.";
     default:
-      return "Carry recorded the submission intent but has not confirmed an external outcome.";
+      return "Carry recorded the request to send the invitation but has not confirmed what happened outside Carry.";
   }
 }
 function message(value: unknown) {

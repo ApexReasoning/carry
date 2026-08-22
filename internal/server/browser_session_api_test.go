@@ -44,9 +44,7 @@ func TestBrowserSessionRevocationKeepsCookieWhenDurableRevokeFails(t *testing.T)
 
 	handler.ServeHTTP(response, request)
 
-	if response.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want %d", response.Code, http.StatusInternalServerError)
-	}
+	assertUserFacingResponse(t, response, http.StatusInternalServerError, "Carry could not confirm whether this change finished. Check the current page before trying again.")
 	if cookies := response.Result().Cookies(); len(cookies) != 0 {
 		t.Fatalf("cookies after failed revoke = %#v", cookies)
 	}

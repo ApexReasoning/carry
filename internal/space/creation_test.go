@@ -1,28 +1,21 @@
 package space
 
 import (
-	"context"
 	"errors"
 	"testing"
 )
 
-func TestCreatorOwnsCanonicalSpaceFactsAndRequestDigest(t *testing.T) {
+func TestNewCreateSpaceCommandOwnsCanonicalFactsAndRequestDigest(t *testing.T) {
 	t.Parallel()
 
-	persistence := &recordingSpaceCreationPersistence{}
-	creator, err := NewCreator(persistence)
-	if err != nil {
-		t.Fatal(err)
-	}
-	created, err := creator.Create(context.Background(), CreateSpaceRequest{
+	command, err := NewCreateSpaceCommand(CreateSpaceRequest{
 		UserID:         "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
 		Name:           "  Research Team  ",
 		IdempotencyKey: "  create-research  ",
 	})
 	if err != nil {
-		t.Fatalf("create Space: %v", err)
+		t.Fatalf("derive Space command: %v", err)
 	}
-	command := persistence.command
 	if command.SpaceID == "" || command.UserID != "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" {
 		t.Fatalf("identity = %#v", command)
 	}
@@ -32,52 +25,44 @@ func TestCreatorOwnsCanonicalSpaceFactsAndRequestDigest(t *testing.T) {
 	if command.IdempotencyKey != "create-research" || command.RequestDigest == ([32]byte{}) {
 		t.Fatalf("request identity = %#v", command)
 	}
-	if created.SpaceID != command.SpaceID || created.Name != command.Name || created.Slug != command.Slug {
-		t.Fatalf("created = %#v", created)
-	}
 }
 
-func TestCreatorBindsSuffixIntoRequestDigest(t *testing.T) {
+func TestNewCreateSpaceCommandBindsSuffixIntoRequestDigest(t *testing.T) {
 	t.Parallel()
 
-	persistence := &recordingSpaceCreationPersistence{}
-	creator, err := NewCreator(persistence)
-	if err != nil {
-		t.Fatal(err)
-	}
 	request := CreateSpaceRequest{
 		UserID:         "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
 		Name:           "Research",
 		Suffix:         2,
 		IdempotencyKey: "create-research-2",
 	}
-	if _, err := creator.Create(context.Background(), request); err != nil {
-		t.Fatal(err)
-	}
-	first := persistence.command.RequestDigest
-	request.Suffix = 3
-	if _, err := creator.Create(context.Background(), request); err != nil {
-		t.Fatal(err)
-	}
-	if persistence.command.RequestDigest == first {
-		t.Fatal("suffix did not change request digest")
-	}
-}
-
-func TestCreatorRejectsInvalidAuthorityOrRequestIdentity(t *testing.T) {
-	t.Parallel()
-
-	creator, err := NewCreator(&recordingSpaceCreationPersistence{})
+	first, err := NewCreateSpaceCommand(request)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := creator.Create(context.Background(), CreateSpaceRequest{
+	request.Suffix = 3
+	second, err := NewCreateSpaceCommand(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.RequestDigest == first.RequestDigest {
+		t.Fatal("suffix did not change request digest")
+	}
+	if second.SpaceID == first.SpaceID {
+		t.Fatal("proposed Space IDs must be distinct before PostgreSQL chooses a winner")
+	}
+}
+
+func TestNewCreateSpaceCommandRejectsInvalidAuthorityOrRequestIdentity(t *testing.T) {
+	t.Parallel()
+
+	if _, err := NewCreateSpaceCommand(CreateSpaceRequest{
 		Name:           "Research",
 		IdempotencyKey: "key",
 	}); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("missing User error = %v", err)
 	}
-	if _, err := creator.Create(context.Background(), CreateSpaceRequest{
+	if _, err := NewCreateSpaceCommand(CreateSpaceRequest{
 		UserID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
 		Name:   "Research",
 	}); !errors.Is(err, ErrIdempotencyConflict) {
@@ -111,19 +96,4 @@ func TestSlugConflictAdvancesWithoutPromisingAvailability(t *testing.T) {
 	if conflict.SuggestedSlug != "" || conflict.SuggestedSuffix != 0 {
 		t.Fatalf("exhausted conflict = %#v", conflict)
 	}
-}
-
-type recordingSpaceCreationPersistence struct {
-	command CreateSpaceCommand
-}
-
-func (persistence *recordingSpaceCreationPersistence) CreateSpace(_ context.Context, command CreateSpaceCommand) (CreatedSpace, error) {
-	persistence.command = command
-	return CreatedSpace{
-		SpaceID:           command.SpaceID,
-		Name:              command.Name,
-		Slug:              command.Slug,
-		CanManageMembers:  true,
-		CanEnrollMachines: true,
-	}, nil
 }

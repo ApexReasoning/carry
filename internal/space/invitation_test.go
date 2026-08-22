@@ -125,8 +125,11 @@ func TestInvitationRejectsUnsafeDestinationAndInvalidRequest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new invitations: %v", err)
 	}
-	if _, err := invitations.Issue(context.Background(), IssueInvitationRequest{RecipientEmail: "not an email"}); !errors.Is(err, ErrInvalidInvitation) {
-		t.Fatalf("issue error = %v", err)
+	if _, err := invitations.Issue(context.Background(), IssueInvitationRequest{RecipientEmail: "not an email"}); !errors.Is(err, ErrInvalidInvitationRecipient) {
+		t.Fatalf("recipient error = %v", err)
+	}
+	if _, err := invitations.Issue(context.Background(), IssueInvitationRequest{RecipientEmail: "person@example.com"}); !errors.Is(err, ErrInvalidInvitation) {
+		t.Fatalf("command error = %v", err)
 	}
 }
 

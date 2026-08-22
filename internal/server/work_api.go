@@ -111,7 +111,7 @@ func (api workAPI) create(response http.ResponseWriter, request *http.Request) {
 		Goal: body.Goal, IdempotencyKey: idempotencyKey,
 	})
 	if err != nil {
-		writeStoreError(response, err)
+		writeUserStoreError(response, err, userMutationFailure, "create Work")
 		return
 	}
 	writeJSON(response, http.StatusOK, workToWire(created))
@@ -138,7 +138,7 @@ func (api workAPI) list(response http.ResponseWriter, request *http.Request) {
 		UserID: user.UserID, SpaceID: spaceID, Before: before, NeedsYou: needsYou,
 	})
 	if err != nil {
-		writeStoreError(response, err)
+		writeUserStoreError(response, err, userReadFailure, "list Work")
 		return
 	}
 	works := make([]workSummaryWire, 0, len(page.Works))
@@ -172,7 +172,7 @@ func (api workAPI) load(response http.ResponseWriter, request *http.Request) {
 		UserID: user.UserID, SpaceID: spaceID, WorkID: workID, BeforeMessage: before,
 	})
 	if err != nil {
-		writeStoreError(response, err)
+		writeUserStoreError(response, err, userReadFailure, "load Work")
 		return
 	}
 	messages := make([]workMessageWire, 0, len(details.Messages))
@@ -212,7 +212,7 @@ func (api workAPI) appendMessage(response http.ResponseWriter, request *http.Req
 		Text: body.Text, IdempotencyKey: idempotencyKey,
 	})
 	if err != nil {
-		writeStoreError(response, err)
+		writeUserStoreError(response, err, userMutationFailure, "append Work message")
 		return
 	}
 	writeJSON(response, http.StatusOK, messageToWire(message))
@@ -243,7 +243,7 @@ func (api workAPI) acceptReview(response http.ResponseWriter, request *http.Requ
 		WorkID: workID, SpaceID: spaceID, ReviewID: reviewID,
 		AcceptedBy: user.UserID, IdempotencyKey: idempotencyKey,
 	}); err != nil {
-		writeStoreError(response, err)
+		writeUserStoreError(response, err, userMutationFailure, "accept Work review")
 		return
 	}
 	response.WriteHeader(http.StatusNoContent)
@@ -269,7 +269,7 @@ func (api workAPI) retry(response http.ResponseWriter, request *http.Request) {
 	if err := api.commands.RequestWorkRetry(request.Context(), work.RetryCommand{
 		WorkID: workID, SpaceID: spaceID, RequestedBy: user.UserID, IdempotencyKey: idempotencyKey,
 	}); err != nil {
-		writeStoreError(response, err)
+		writeUserStoreError(response, err, userMutationFailure, "retry Work")
 		return
 	}
 	response.WriteHeader(http.StatusNoContent)
@@ -299,7 +299,7 @@ func queryBoolean(response http.ResponseWriter, request *http.Request, name stri
 func requireIdempotencyKey(response http.ResponseWriter, request *http.Request) (string, bool) {
 	key := strings.TrimSpace(request.Header.Get("Idempotency-Key"))
 	if key == "" {
-		writeAPIError(response, http.StatusBadRequest, "Idempotency-Key is required")
+		writeAPIError(response, http.StatusBadRequest, "This action needs saved retry information. Reload before trying again.")
 		return "", false
 	}
 	return key, true

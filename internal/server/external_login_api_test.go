@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -26,6 +27,38 @@ func TestParseExternalOriginRequiresCanonicalHTTPSAuthority(t *testing.T) {
 			t.Errorf("invalid external origin %q was accepted", invalid)
 		}
 	}
+}
+
+func TestExternalLoginStartUnexpectedSessionReadUsesReadRecovery(t *testing.T) {
+	t.Parallel()
+	credentials := testIdentityCredentials(t)
+	credential, err := credentials.BrowserSessionCredential("10000000-0000-4000-8000-000000000001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	api := externalLoginAPI{
+		login:       unavailableExternalLogin{},
+		sessions:    failingExternalBrowserSessions{},
+		credentials: credentials,
+		origin:      testExternalOrigin(t),
+	}
+	request := httptest.NewRequest(http.MethodPost, "https://carry.example/v1/auth/google/start", nil)
+	request.AddCookie(&http.Cookie{Name: browserSessionCookie, Value: credential})
+	response := httptest.NewRecorder()
+
+	api.startGoogle(response, request)
+
+	assertUserFacingResponse(t, response, http.StatusInternalServerError, "Carry could not load this right now. Reload to try again.")
+}
+
+type failingExternalBrowserSessions struct{}
+
+func (failingExternalBrowserSessions) AuthenticateBrowserSession(context.Context, string) (identity.AuthenticatedUser, error) {
+	return identity.AuthenticatedUser{}, errors.New("database unavailable")
+}
+
+func (failingExternalBrowserSessions) RevokeBrowserSession(context.Context, string) error {
+	return nil
 }
 
 func TestExternalLoginStartUsesCanonicalHostAndLaxBrowserBinding(t *testing.T) {

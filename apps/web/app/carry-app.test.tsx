@@ -90,6 +90,10 @@ test("self-removal closes Settings and refreshes current User routing", async ()
   await screen.findByRole("heading", {
     name: "What should Carry keep moving?",
   });
+  expect(screen.getByRole("link", { name: "Invitations" })).toHaveAttribute(
+    "href",
+    "/invitations",
+  );
   await user.click(screen.getByRole("button", { name: "Settings" }));
   await user.click(screen.getByRole("button", { name: "Members" }));
   const memberSettings = (
@@ -200,13 +204,13 @@ test("retries the exact email request after its response is lost", async () => {
 
   await screen.findByLabelText("Email code");
   expect(
-    screen.getByText(/Carry may have sent the code\. Retry this exact request/),
+    screen.getByText(/Carry may have sent the code\. Check your inbox/),
   ).toBeVisible();
-  await user.click(screen.getByRole("button", { name: "Retry this request" }));
+  await user.click(screen.getByRole("button", { name: "Try sending again" }));
   await waitFor(() => expect(requests).toHaveLength(2));
   expect(requests[0]).toEqual(requests[1]);
   expect(
-    screen.queryByRole("button", { name: "Retry this request" }),
+    screen.queryByRole("button", { name: "Try sending again" }),
   ).not.toBeInTheDocument();
   expect(window.localStorage.length).toBe(0);
   expect(window.sessionStorage.length).toBe(0);
@@ -617,7 +621,7 @@ test("reuses the same Work identity after a create response is lost", async () =
   await user.type(goal, "Review customer renewals");
   await user.click(screen.getByRole("button", { name: "Create Work" }));
   expect(await screen.findByRole("alert")).toHaveTextContent(
-    "Create Work outcome is unknown; retry the same command to reconcile",
+    "Create Work may have finished, but Carry could not confirm it. Check the current page before trying again.",
   );
   expect(goal).toHaveValue("Review customer renewals");
 
@@ -1087,7 +1091,7 @@ test("reconciles an old retry identity before authorizing a later terminal Run",
     await screen.findByRole("button", { name: /Review customer renewals/ }),
   );
   await user.click(await screen.findByRole("button", { name: "Try again" }));
-  await screen.findByText(/reconciliation lost/);
+  await screen.findByText(/Carry could not complete Load Work/);
   first.unmount();
 
   render(<App />);
@@ -1095,7 +1099,7 @@ test("reconciles an old retry identity before authorizing a later terminal Run",
     await screen.findByRole("button", { name: /Review customer renewals/ }),
   );
   await user.click(await screen.findByRole("button", { name: "Try again" }));
-  await screen.findByText(/needs a new choice/);
+  await screen.findByText(/needs another decision/);
   expect(screen.getByRole("button", { name: "Try again" })).toBeVisible();
 
   await user.click(screen.getByRole("button", { name: "Try again" }));

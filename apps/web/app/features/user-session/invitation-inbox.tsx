@@ -191,7 +191,7 @@ export function InvitationInboxView({
                     disabled={busy || proof.busy}
                     onClick={() => void proof.retry()}
                   >
-                    Retry exact code request
+                    Try sending again
                   </button>
                   <button
                     className="ghost-button"
@@ -235,7 +235,7 @@ export function InvitationInboxView({
                 void accept(pendingAccept.invitationID, pendingAccept)
               }
             >
-              Retry exact acceptance
+              Try accepting again
             </button>
           ) : null}
           <button className="ghost-button" type="button" onClick={onSkip}>
@@ -277,7 +277,7 @@ export function TargetedInvitationView({
     } catch (caught) {
       if (caught instanceof MutationOutcomeUnknownError) {
         setError(
-          "Carry cannot confirm whether acceptance completed. Reload to reconcile the invitation before choosing again.",
+          "Carry cannot confirm whether you joined the Space. Reload the invitation to check before choosing again.",
         );
       } else {
         setAcceptKey(null);
@@ -420,7 +420,7 @@ export function TargetedInvitationView({
                       disabled={busy || proof.busy}
                       onClick={() => void proof.retry()}
                     >
-                      Retry exact code request
+                      Try sending again
                     </button>
                     <button
                       className="ghost-button"
@@ -440,7 +440,7 @@ export function TargetedInvitationView({
                 disabled={busy}
                 onClick={() => void accept()}
               >
-                Accept and join
+                {acceptKey ? "Try accepting again" : "Accept and join"}
               </button>
             )
           ) : null}

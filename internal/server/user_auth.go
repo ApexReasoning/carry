@@ -108,7 +108,7 @@ func (a userAuthenticator) authenticate(
 func currentUser(response http.ResponseWriter, request *http.Request) (identity.AuthenticatedUser, bool) {
 	user, ok := request.Context().Value(userContextKey{}).(identity.AuthenticatedUser)
 	if !ok || user.UserID == "" {
-		writeAPIError(response, http.StatusInternalServerError, "User authentication context is missing")
+		writeUserInternalError(response, userReadFailure, "load authenticated User", errors.New("authenticated User is missing from request context"))
 		return identity.AuthenticatedUser{}, false
 	}
 	return user, true
@@ -124,7 +124,7 @@ func authenticatedUserResult(
 		return identity.AuthenticatedUser{}, false
 	}
 	if err != nil {
-		writeAPIError(response, http.StatusInternalServerError, "authenticate User")
+		writeUserInternalError(response, userReadFailure, "authenticate User", err)
 		return identity.AuthenticatedUser{}, false
 	}
 	return user, true

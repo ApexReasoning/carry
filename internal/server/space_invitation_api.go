@@ -50,7 +50,7 @@ func (api spaceInvitationAPI) listMembers(response http.ResponseWriter, request 
 		ActorUserID: user.UserID, SpaceID: chi.URLParam(request, "space_id"), AfterUserID: request.URL.Query().Get("after"),
 	})
 	if err != nil {
-		writeMemberError(response, err)
+		writeMemberError(response, err, userReadFailure, "list Space members")
 		return
 	}
 	wire := make([]spaceMemberWire, len(page.Members))
@@ -95,7 +95,7 @@ func (api spaceInvitationAPI) removeMember(response http.ResponseWriter, request
 		err = api.members.RemoveSpaceMember(request.Context(), command)
 	}
 	if err != nil {
-		writeMemberError(response, err)
+		writeMemberError(response, err, userMutationFailure, "remove Space member")
 		return
 	}
 	response.WriteHeader(http.StatusNoContent)
@@ -108,7 +108,7 @@ func (api spaceInvitationAPI) listManaged(response http.ResponseWriter, request 
 	}
 	items, err := api.invitationQueries.ListSpaceInvitations(request.Context(), user.UserID, chi.URLParam(request, "space_id"))
 	if err != nil {
-		writeInvitationError(response, err)
+		writeInvitationError(response, err, userReadFailure, "list managed Space invitations")
 		return
 	}
 	wire := make([]managedInvitationWire, len(items))
@@ -146,7 +146,7 @@ func (api spaceInvitationAPI) issue(response http.ResponseWriter, request *http.
 		CanManageMembers: body.CanManageMembers, CanEnrollMachines: body.CanEnrollMachines, IdempotencyKey: key,
 	})
 	if err != nil {
-		writeInvitationError(response, err)
+		writeInvitationError(response, err, userMutationFailure, "issue Space invitation")
 		return
 	}
 	writeJSON(response, http.StatusCreated, managedInvitation(issued))
@@ -170,7 +170,7 @@ func (api spaceInvitationAPI) resend(response http.ResponseWriter, request *http
 		ActorUserID: user.UserID, IdempotencyKey: key,
 	})
 	if err != nil {
-		writeInvitationError(response, err)
+		writeInvitationError(response, err, userMutationFailure, "resend Space invitation")
 		return
 	}
 	writeJSON(response, http.StatusOK, managedInvitation(issued))
@@ -194,7 +194,7 @@ func (api spaceInvitationAPI) revoke(response http.ResponseWriter, request *http
 		ActorUserID: user.UserID, IdempotencyKey: key,
 	})
 	if err != nil {
-		writeInvitationError(response, err)
+		writeInvitationError(response, err, userMutationFailure, "revoke Space invitation")
 		return
 	}
 	response.WriteHeader(http.StatusNoContent)
@@ -211,7 +211,7 @@ func (api spaceInvitationAPI) inbox(response http.ResponseWriter, request *http.
 	}
 	inbox, err := api.invitationQueries.ListUserInvitations(request.Context(), user.UserID, sessionID)
 	if err != nil {
-		writeInvitationError(response, err)
+		writeInvitationError(response, err, userReadFailure, "list User invitations")
 		return
 	}
 	items := make([]recipientInvitationWire, len(inbox.Invitations))
@@ -237,7 +237,7 @@ func (api spaceInvitationAPI) targeted(response http.ResponseWriter, request *ht
 		request.Context(), chi.URLParam(request, "invitation_id"), user.UserID, sessionID,
 	)
 	if err != nil {
-		writeInvitationError(response, err)
+		writeInvitationError(response, err, userReadFailure, "load User invitation")
 		return
 	}
 	writeJSON(response, http.StatusOK, targetedInvitationWire{
@@ -278,7 +278,7 @@ func (api spaceInvitationAPI) accept(response http.ResponseWriter, request *http
 		IdempotencyKey: key,
 	})
 	if err != nil {
-		writeInvitationError(response, err)
+		writeInvitationError(response, err, userMutationFailure, "accept Space invitation")
 		return
 	}
 	writeJSON(response, http.StatusOK, acceptedInvitationWire{InvitationID: accepted.InvitationID, SpaceID: accepted.SpaceID, SpaceName: accepted.SpaceName, CanManageMembers: accepted.CanManageMembers, CanEnrollMachines: accepted.CanEnrollMachines, AlreadyMember: accepted.AlreadyMember})
@@ -360,33 +360,36 @@ func managedInvitation(item space.IssuedInvitation) managedInvitationWire {
 	return managedInvitationWire{InvitationID: item.InvitationID, SpaceID: item.SpaceID, RecipientEmail: item.RecipientEmail, CanManageMembers: item.CanManageMembers, CanEnrollMachines: item.CanEnrollMachines, CreatedAt: item.CreatedAt, ExpiresAt: item.ExpiresAt, Submission: invitationSubmissionWire{State: string(item.Submission.State)}}
 }
 
-func writeMemberError(response http.ResponseWriter, err error) {
+func writeMemberError(response http.ResponseWriter, err error, recovery userFailureRecovery, operation string) {
 	switch {
 	case errors.Is(err, space.ErrForbidden):
-		writeAPIError(response, http.StatusForbidden, "member lacks permission")
+		writeAPIError(response, http.StatusForbidden, "You do not have access to this Space.")
 	case errors.Is(err, space.ErrInvalidMemberRemoval):
 		writeAPIError(response, http.StatusBadRequest, "member removal is invalid")
 	case errors.Is(err, space.ErrInvalidMemberCursor):
-		writeAPIError(response, http.StatusBadRequest, "member cursor is invalid")
+		writeAPIError(response, http.StatusBadRequest, "Reload before trying again.")
 	case errors.Is(err, space.ErrMemberUnavailable):
 		writeAPIError(response, http.StatusNotFound, "member is unavailable")
+	case errors.Is(err, space.ErrIdempotencyConflict):
+		writeAPIError(response, http.StatusConflict, "This action no longer matches the saved request. Reload before trying again.")
 	case errors.Is(err, space.ErrRemovalSuccessorRequired), errors.Is(err, space.ErrRemovalSuccessorUnexpected),
-		errors.Is(err, space.ErrRemovalSuccessorInvalid), errors.Is(err, space.ErrLastMemberManager),
-		errors.Is(err, space.ErrLastMachineEnroller), errors.Is(err, space.ErrIdempotencyConflict):
+		errors.Is(err, space.ErrRemovalSuccessorInvalid), errors.Is(err, space.ErrLastMemberManager), errors.Is(err, space.ErrLastMachineEnroller):
 		writeAPIError(response, http.StatusConflict, err.Error())
 	default:
-		writeAPIError(response, http.StatusInternalServerError, "manage Space member")
+		writeUserInternalError(response, recovery, operation, err)
 	}
 }
 
-func writeInvitationError(response http.ResponseWriter, err error) {
+func writeInvitationError(response http.ResponseWriter, err error, recovery userFailureRecovery, operation string) {
 	switch {
 	case errors.Is(err, identity.ErrUnauthenticated):
 		writeAPIError(response, http.StatusUnauthorized, "Browser Session authentication is invalid")
 	case errors.Is(err, space.ErrForbidden):
-		writeAPIError(response, http.StatusForbidden, "member lacks permission")
+		writeAPIError(response, http.StatusForbidden, "You do not have access to this Space.")
+	case errors.Is(err, space.ErrInvalidInvitationRecipient):
+		writeAPIError(response, http.StatusBadRequest, "Check the Email address and try again.")
 	case errors.Is(err, space.ErrInvalidInvitation):
-		writeAPIError(response, http.StatusBadRequest, "invitation request is invalid")
+		writeAPIError(response, http.StatusBadRequest, "Reload before trying again.")
 	case errors.Is(err, space.ErrInvitationProofRequired):
 		writeAPIError(response, http.StatusPreconditionRequired, err.Error())
 	case errors.Is(err, space.ErrInvitationResendCooldown):
@@ -399,9 +402,11 @@ func writeInvitationError(response http.ResponseWriter, err error) {
 		writeAPIError(response, http.StatusGone, "Space invitation was revoked")
 	case errors.Is(err, space.ErrInvitationAccepted):
 		writeAPIError(response, http.StatusConflict, "Space invitation was already accepted")
-	case errors.Is(err, space.ErrInvitationConflict), errors.Is(err, space.ErrInvitationAlreadyMember), errors.Is(err, space.ErrIdempotencyConflict), errors.Is(err, space.ErrInvitationSubmissionConflict):
+	case errors.Is(err, space.ErrIdempotencyConflict):
+		writeAPIError(response, http.StatusConflict, "This action no longer matches the saved request. Reload before trying again.")
+	case errors.Is(err, space.ErrInvitationConflict), errors.Is(err, space.ErrInvitationAlreadyMember), errors.Is(err, space.ErrInvitationSubmissionConflict):
 		writeAPIError(response, http.StatusConflict, "invitation cannot be changed")
 	default:
-		writeAPIError(response, http.StatusInternalServerError, "manage Space invitation")
+		writeUserInternalError(response, recovery, operation, err)
 	}
 }

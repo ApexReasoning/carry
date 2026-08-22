@@ -20,20 +20,24 @@ func TestSpaceCreationReplaysExactlyAndCreatesInitialMembership(t *testing.T) {
 	pool := openMigratedTestPool(t, ctx)
 	store := NewStore(pool)
 	userID := insertSpaceCreator(t, ctx, pool)
-	creator, err := space.NewCreator(store)
-	if err != nil {
-		t.Fatal(err)
-	}
 	request := space.CreateSpaceRequest{
 		UserID:         userID,
 		Name:           "Research Team",
 		IdempotencyKey: "create-research",
 	}
-	created, err := creator.Create(ctx, request)
+	command, err := space.NewCreateSpaceCommand(request)
+	if err != nil {
+		t.Fatalf("derive Space command: %v", err)
+	}
+	created, err := store.CreateSpace(ctx, command)
 	if err != nil {
 		t.Fatalf("create Space: %v", err)
 	}
-	replayed, err := creator.Create(ctx, request)
+	replayCommand, err := space.NewCreateSpaceCommand(request)
+	if err != nil {
+		t.Fatalf("derive replay command: %v", err)
+	}
+	replayed, err := store.CreateSpace(ctx, replayCommand)
 	if err != nil {
 		t.Fatalf("replay Space: %v", err)
 	}
@@ -41,7 +45,11 @@ func TestSpaceCreationReplaysExactlyAndCreatesInitialMembership(t *testing.T) {
 		t.Fatalf("replayed = %#v, want %#v", replayed, created)
 	}
 	request.Suffix = 2
-	if _, err := creator.Create(ctx, request); !errors.Is(err, space.ErrIdempotencyConflict) {
+	changedCommand, err := space.NewCreateSpaceCommand(request)
+	if err != nil {
+		t.Fatalf("derive changed command: %v", err)
+	}
+	if _, err := store.CreateSpace(ctx, changedCommand); !errors.Is(err, space.ErrIdempotencyConflict) {
 		t.Fatalf("changed replay error = %v", err)
 	}
 	var spaces, memberships int
@@ -60,10 +68,6 @@ func TestConcurrentSpaceSlugHasOneWinnerAndExplicitSuffixProgression(t *testing.
 	ctx := context.Background()
 	pool := openMigratedTestPool(t, ctx)
 	store := NewStore(pool)
-	creator, err := space.NewCreator(store)
-	if err != nil {
-		t.Fatal(err)
-	}
 	users := []string{
 		insertSpaceCreator(t, ctx, pool),
 		insertSpaceCreator(t, ctx, pool),
@@ -80,11 +84,15 @@ func TestConcurrentSpaceSlugHasOneWinnerAndExplicitSuffixProgression(t *testing.
 		go func(index int, userID string) {
 			defer wait.Done()
 			<-start
-			created, createErr := creator.Create(ctx, space.CreateSpaceRequest{
+			command, createErr := space.NewCreateSpaceCommand(space.CreateSpaceRequest{
 				UserID:         userID,
 				Name:           "Acme",
 				IdempotencyKey: "create-acme-" + string(rune('a'+index)),
 			})
+			var created space.CreatedSpace
+			if createErr == nil {
+				created, createErr = store.CreateSpace(ctx, command)
+			}
 			results <- struct {
 				user    string
 				created space.CreatedSpace
@@ -117,40 +125,56 @@ func TestConcurrentSpaceSlugHasOneWinnerAndExplicitSuffixProgression(t *testing.
 	if winner == "" || loser == "" || winner == loser {
 		t.Fatalf("winner/loser = %q/%q", winner, loser)
 	}
-	if _, err := creator.Create(ctx, space.CreateSpaceRequest{
+	suffixTwo, err := space.NewCreateSpaceCommand(space.CreateSpaceRequest{
 		UserID:         loser,
 		Name:           "Acme",
 		Suffix:         2,
 		IdempotencyKey: "create-acme-2",
-	}); err != nil {
+	})
+	if err != nil {
+		t.Fatalf("derive suffix 2 command: %v", err)
+	}
+	if _, err := store.CreateSpace(ctx, suffixTwo); err != nil {
 		t.Fatalf("accept suffix 2: %v", err)
 	}
 	third := insertSpaceCreator(t, ctx, pool)
-	_, err = creator.Create(ctx, space.CreateSpaceRequest{
+	secondConflict, err := space.NewCreateSpaceCommand(space.CreateSpaceRequest{
 		UserID:         third,
 		Name:           "Acme",
 		Suffix:         2,
 		IdempotencyKey: "conflict-acme-2",
 	})
+	if err != nil {
+		t.Fatalf("derive second conflict command: %v", err)
+	}
+	_, err = store.CreateSpace(ctx, secondConflict)
 	var conflict *space.SlugConflictError
 	if !errors.As(err, &conflict) || conflict.SuggestedSlug != "acme-3" || conflict.SuggestedSuffix != 3 {
 		t.Fatalf("second conflict = %#v, %v", conflict, err)
 	}
-	if _, err := creator.Create(ctx, space.CreateSpaceRequest{
+	suffixThree, err := space.NewCreateSpaceCommand(space.CreateSpaceRequest{
 		UserID:         third,
 		Name:           "Acme",
 		Suffix:         3,
 		IdempotencyKey: "create-acme-3",
-	}); err != nil {
+	})
+	if err != nil {
+		t.Fatalf("derive suffix 3 command: %v", err)
+	}
+	if _, err := store.CreateSpace(ctx, suffixThree); err != nil {
 		t.Fatalf("accept suffix 3: %v", err)
 	}
 	fourth := insertSpaceCreator(t, ctx, pool)
-	_, err = creator.Create(ctx, space.CreateSpaceRequest{
+	thirdConflict, err := space.NewCreateSpaceCommand(space.CreateSpaceRequest{
 		UserID:         fourth,
 		Name:           "Acme",
 		Suffix:         3,
 		IdempotencyKey: "conflict-acme-3",
 	})
+	if err != nil {
+		t.Fatalf("derive third conflict command: %v", err)
+	}
+	_, err = store.CreateSpace(ctx, thirdConflict)
 	conflict = nil
 	if !errors.As(err, &conflict) || conflict.SuggestedSlug != "acme-4" || conflict.SuggestedSuffix != 4 {
 		t.Fatalf("third conflict = %#v, %v", conflict, err)

@@ -82,9 +82,9 @@ test("email response loss replays exact commands and logout remains fail closed"
   await page.getByLabel("Email").fill(email);
   await page.getByRole("button", { name: "Send code" }).click();
   await expect(
-    page.getByText(/Carry may have sent the code\. Retry this exact request/),
+    page.getByText(/Carry may have sent the code\. Check your inbox/),
   ).toBeVisible();
-  await page.getByRole("button", { name: "Retry this request" }).click();
+  await page.getByRole("button", { name: "Try sending again" }).click();
   await expect(page.getByLabel("Email code")).toBeVisible();
   expect(challengeRequests).toHaveLength(2);
   expect(challengeRequests[1]).toEqual(challengeRequests[0]);
@@ -405,6 +405,15 @@ test("Unicode Space URLs remain explicit and invitation entry bypasses the choos
   await expect(
     invitedPage.getByRole("heading", { name: "Choose a Space" }),
   ).toBeVisible();
+  await invitedPage.getByRole("link", { name: "Invitations" }).click();
+  await expect(
+    invitedPage.getByRole("heading", { name: "Space invitations" }),
+  ).toBeVisible();
+  await expect(invitedPage.getByText(maximumName)).toBeVisible();
+  await invitedPage.getByRole("button", { name: "Not now" }).click();
+  await expect(
+    invitedPage.getByRole("heading", { name: "Choose a Space" }),
+  ).toBeVisible();
   await invitedPage.getByLabel("Space name").fill("Recipient Existing Space");
   await invitedPage.getByRole("button", { name: "Create Space" }).click();
   await expect(
@@ -412,6 +421,11 @@ test("Unicode Space URLs remain explicit and invitation entry bypasses the choos
       name: "What should Carry keep moving?",
     }),
   ).toBeVisible();
+  await invitedPage.getByRole("link", { name: "Invitations" }).click();
+  await expect(
+    invitedPage.getByRole("heading", { name: "Space invitations" }),
+  ).toBeVisible();
+  await expect(invitedPage.getByText(maximumName)).toBeVisible();
   await invitedPage.goto(`${origin}${exactPath}`);
   await expect(
     invitedPage.getByRole("heading", { name: "Space invitation" }),
@@ -427,7 +441,10 @@ test("Unicode Space URLs remain explicit and invitation entry bypasses the choos
   );
   await invitedPage.getByRole("button", { name: "Accept and join" }).click();
   await expect(
-    invitedPage.getByText(/cannot confirm whether acceptance completed/),
+    invitedPage.getByText(/cannot confirm whether you joined the Space/),
+  ).toBeVisible();
+  await expect(
+    invitedPage.getByRole("button", { name: "Try accepting again" }),
   ).toBeVisible();
   await invitedPage
     .getByRole("button", { name: "Reload invitation status" })

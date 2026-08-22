@@ -113,22 +113,22 @@ type UserSpaceRoutes struct {
 	invitations *spaceInvitationAPI
 }
 
-func NewUserSpaceRoutes(creator SpaceCreator) (*UserSpaceRoutes, error) {
-	if creator == nil {
+func NewUserSpaceRoutes(creation SpaceCreation) (*UserSpaceRoutes, error) {
+	if creation == nil {
 		return nil, errors.New("User Space route dependencies are required")
 	}
-	return &UserSpaceRoutes{spaces: spaceCreationAPI{creator: creator}}, nil
+	return &UserSpaceRoutes{spaces: spaceCreationAPI{creation: creation}}, nil
 }
 
 func NewUserSpaceRoutesWithInvitations(
-	creator SpaceCreator,
+	creation SpaceCreation,
 	invitations SpaceInvitationCommands,
 	invitationQueries SpaceInvitationQueries,
 	members SpaceMembers,
 	credentials identity.Credentials,
 	origin ExternalOrigin,
 ) (*UserSpaceRoutes, error) {
-	routes, err := NewUserSpaceRoutes(creator)
+	routes, err := NewUserSpaceRoutes(creation)
 	if err != nil || invitations == nil || invitationQueries == nil || members == nil || origin.value == "" {
 		return nil, errors.New("User Space member route dependencies are required")
 	}

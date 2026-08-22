@@ -210,10 +210,6 @@ func run(ctx context.Context, arguments []string, _ io.Writer, stderr io.Writer)
 	if err != nil {
 		return fmt.Errorf("compose CLI login: %w", err)
 	}
-	spaceCreator, err := space.NewCreator(store)
-	if err != nil {
-		return fmt.Errorf("compose Space creator: %w", err)
-	}
 	spaceInvitations, err := space.NewInvitations(store, resendSubmitter, parsed.externalOrigin.String())
 	if err != nil {
 		return fmt.Errorf("compose Space invitations: %w", err)
@@ -242,7 +238,7 @@ func run(ctx context.Context, arguments []string, _ io.Writer, stderr io.Writer)
 		return fmt.Errorf("compose User identity routes: %w", err)
 	}
 	userSpaceRoutes, err := carryserver.NewUserSpaceRoutesWithInvitations(
-		spaceCreator,
+		store,
 		spaceInvitations,
 		store,
 		store,

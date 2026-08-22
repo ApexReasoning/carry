@@ -88,7 +88,7 @@ test("confirms exact removal consequences and requires one active Work successor
   expect(
     screen.getByText(/Future access to Research ends immediately/),
   ).toHaveTextContent(
-    "User credentials and Space Machines are not automatically revoked",
+    "Other sign-in access and Space Machines are not automatically revoked",
   );
   expect(
     screen.getByText(/Future access to Research ends immediately/),
@@ -132,7 +132,7 @@ test("Unknown removal retry preserves the exact target successor and command key
   );
   await user.click(screen.getByRole("button", { name: "Remove Alex" }));
   await user.click(
-    await screen.findByRole("button", { name: "Retry exact change" }),
+    await screen.findByRole("button", { name: "Try this change again" }),
   );
 
   await waitFor(() => expect(api.removeMember).toHaveBeenCalledTimes(2));

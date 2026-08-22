@@ -142,7 +142,7 @@ func (api externalLoginAPI) start(
 	}
 	authenticated, err := api.hasAuthenticatedPrincipal(request)
 	if err != nil {
-		writeAPIError(response, http.StatusInternalServerError, "check current browser session")
+		writeUserInternalError(response, userReadFailure, "check current Browser Session", err)
 		return
 	}
 	if authenticated {
@@ -235,7 +235,7 @@ func (api externalLoginAPI) startMethod(
 	}
 	result, err := start(request.Context(), user.UserID, sessionID)
 	if err != nil {
-		writeIdentityMethodError(response, err)
+		writeIdentityMethodError(response, err, userMutationFailure, "complete external sign-in method change")
 		return
 	}
 	setExternalLoginCookie(response, result.BrowserCredential, result.ExpiresAt)

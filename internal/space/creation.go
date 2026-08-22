@@ -1,7 +1,6 @@
 package space
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -12,24 +11,6 @@ import (
 
 var ErrIdempotencyConflict = errors.New("Space idempotency key was reused for a different request")
 
-// SpaceCreationPersistence owns the atomic Space and creator Membership mutation.
-type SpaceCreationPersistence interface {
-	CreateSpace(context.Context, CreateSpaceCommand) (CreatedSpace, error)
-}
-
-// Creator derives one exact Space creation command from authenticated User input.
-type Creator struct {
-	persistence SpaceCreationPersistence
-}
-
-// NewCreator constructs the Space creation behavior.
-func NewCreator(persistence SpaceCreationPersistence) (*Creator, error) {
-	if persistence == nil {
-		return nil, errors.New("Space creation persistence is required")
-	}
-	return &Creator{persistence: persistence}, nil
-}
-
 // CreateSpaceRequest contains only the authenticated User's creation intent.
 type CreateSpaceRequest struct {
 	UserID         string
@@ -38,24 +19,25 @@ type CreateSpaceRequest struct {
 	IdempotencyKey string
 }
 
-// Create creates or exactly replays one Space.
-func (creator *Creator) Create(ctx context.Context, request CreateSpaceRequest) (CreatedSpace, error) {
+// NewCreateSpaceCommand derives one exact Space creation command from authenticated User input.
+// Its proposed Space ID is not authoritative; PostgreSQL decides replay and the slug winner.
+func NewCreateSpaceCommand(request CreateSpaceRequest) (CreateSpaceCommand, error) {
 	if uuid.Validate(request.UserID) != nil {
-		return CreatedSpace{}, ErrForbidden
+		return CreateSpaceCommand{}, ErrForbidden
 	}
 	key, validKey := normalizeCommandKey(request.IdempotencyKey)
 	if !validKey {
-		return CreatedSpace{}, ErrIdempotencyConflict
+		return CreateSpaceCommand{}, ErrIdempotencyConflict
 	}
 	name, slug, err := NormalizeSpaceName(request.Name, request.Suffix)
 	if err != nil {
-		return CreatedSpace{}, err
+		return CreateSpaceCommand{}, err
 	}
 	digest, err := spaceCreationDigest(name, request.Suffix)
 	if err != nil {
-		return CreatedSpace{}, err
+		return CreateSpaceCommand{}, err
 	}
-	return creator.persistence.CreateSpace(ctx, CreateSpaceCommand{
+	return CreateSpaceCommand{
 		SpaceID:        uuid.NewString(),
 		UserID:         request.UserID,
 		Name:           name,
@@ -63,7 +45,7 @@ func (creator *Creator) Create(ctx context.Context, request CreateSpaceRequest) 
 		Suffix:         request.Suffix,
 		IdempotencyKey: key,
 		RequestDigest:  digest,
-	})
+	}, nil
 }
 
 // CreateSpaceCommand carries Space-owned canonical facts to persistence.

@@ -834,10 +834,6 @@ func composeExternalLoginTestAPI(
 	if err != nil {
 		t.Fatalf("compose Identity methods: %v", err)
 	}
-	spaceCreator, err := space.NewCreator(store)
-	if err != nil {
-		t.Fatalf("compose Space creator: %v", err)
-	}
 	cliLogin, err := identity.NewCLILogin(store, credentials, origin.String())
 	if err != nil {
 		t.Fatalf("compose CLI login: %v", err)
@@ -858,7 +854,7 @@ func composeExternalLoginTestAPI(
 		t.Fatalf("compose Space invitations: %v", err)
 	}
 	spaceRoutes, err := carryserver.NewUserSpaceRoutesWithInvitations(
-		spaceCreator,
+		store,
 		spaceInvitations,
 		store,
 		store,

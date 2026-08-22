@@ -92,9 +92,7 @@ test("shows only fixed method labels and replays an unknown email request exactl
 
   await user.click(screen.getByRole("button", { name: "Confirm with Email" }));
   expect(await screen.findByRole("alert")).toHaveTextContent("unknown");
-  await user.click(
-    screen.getByRole("button", { name: "Retry sending this code" }),
-  );
+  await user.click(screen.getByRole("button", { name: "Try sending again" }));
   await waitFor(() =>
     expect(api.requestIdentityEmailCode).toHaveBeenCalledTimes(2),
   );
@@ -173,7 +171,7 @@ test("replays email verification and unlink with stable command identities", asy
 
   await user.click(screen.getAllByRole("button", { name: "Remove" })[0]!);
   expect(await screen.findByRole("alert")).toHaveTextContent("unlink unknown");
-  await user.click(screen.getByRole("button", { name: "Retry exact removal" }));
+  await user.click(screen.getByRole("button", { name: "Try removing again" }));
   await waitFor(() =>
     expect(api.unlinkIdentityMethod).toHaveBeenCalledTimes(2),
   );

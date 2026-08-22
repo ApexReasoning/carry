@@ -23,6 +23,7 @@ const (
 
 var (
 	ErrInvalidInvitation            = errors.New("Space invitation is invalid")
+	ErrInvalidInvitationRecipient   = errors.New("Space invitation recipient Email is invalid")
 	ErrInvitationConflict           = errors.New("a current invitation already exists")
 	ErrInvitationUnavailable        = errors.New("Space invitation is unavailable")
 	ErrInvitationAlreadyMember      = errors.New("User already belongs to the Space")
@@ -130,11 +131,11 @@ type IssueInvitationRequest struct {
 
 func (invitations *Invitations) Issue(ctx context.Context, request IssueInvitationRequest) (IssuedInvitation, error) {
 	recipient, err := identity.CanonicalEmail(request.RecipientEmail)
+	if err != nil {
+		return IssuedInvitation{}, ErrInvalidInvitationRecipient
+	}
 	idempotencyKey, validKey := normalizeCommandKey(request.IdempotencyKey)
-	if err != nil ||
-		uuid.Validate(request.SpaceID) != nil ||
-		uuid.Validate(request.ActorUserID) != nil ||
-		!validKey {
+	if uuid.Validate(request.SpaceID) != nil || uuid.Validate(request.ActorUserID) != nil || !validKey {
 		return IssuedInvitation{}, ErrInvalidInvitation
 	}
 	requestDigest, err := invitationIssueDigest(recipient, request.CanManageMembers, request.CanEnrollMachines)

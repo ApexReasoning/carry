@@ -215,8 +215,8 @@ export function useUserSession() {
         setPhase("code");
         setError(
           isExactRetry
-            ? "Carry still cannot confirm whether this exact code request was submitted."
-            : "Carry may have sent the code. Retry this exact request, enter it if it arrives, or send a new code.",
+            ? "Carry still cannot confirm whether the code was sent. Check your inbox or ask for a new code."
+            : "Carry may have sent the code. Check your inbox. You can try sending again or ask for a new code.",
         );
       } else {
         setRequestRetryPending(false);
@@ -367,7 +367,7 @@ function takeExternalSignInStatus(): string | null {
     case "unavailable":
       return "Carry could not confirm sign-in. Start a fresh sign-in.";
     case "invalid":
-      return "This sign-in attempt could not be confirmed. Start a fresh sign-in; if you opened an invitation, reopen its link.";
+      return "This sign-in could not be confirmed. Start a fresh sign-in; if you opened an invitation, reopen its link.";
     default:
       return "Carry could not confirm sign-in. Start again.";
   }

@@ -71,7 +71,9 @@ test("manager invitation defaults grants off and keeps Unknown truthful", async 
     },
   ]);
   expect(
-    await screen.findByText(/cannot confirm whether the provider accepted/),
+    await screen.findByText(
+      /cannot confirm whether the email service accepted/,
+    ),
   ).toBeVisible();
   const exactURL = new URL(
     "/invitations/10000000-0000-4000-8000-000000000001",
@@ -133,6 +135,69 @@ test("recipient accepts exact grants without a name prompt", async () => {
   expect(acceptedBody).toBe("");
 });
 
+test.each([
+  [
+    "accepted",
+    "Carry handed the invitation email to the email service. Delivery is not confirmed.",
+  ],
+  [
+    "rejected",
+    "The invitation exists, but the email service did not accept this delivery request.",
+  ],
+  [
+    "unknown",
+    "Carry cannot confirm whether the email service accepted the invitation. Sending again is a new action.",
+  ],
+  [
+    "prepared",
+    "Carry recorded the request to send the invitation but has not confirmed what happened outside Carry.",
+  ],
+] as const)(
+  "invitation submission %s keeps its exact external truth",
+  async (state, copy) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request =
+          input instanceof Request ? input : new Request(input, init);
+        const path = new URL(request.url).pathname;
+        if (request.method === "GET" && path.endsWith("/members"))
+          return json({ members: [], next_cursor: null });
+        if (request.method === "GET" && path.endsWith("/invitations"))
+          return json({
+            invitations: [
+              {
+                invitation_id: "10000000-0000-4000-8000-000000000001",
+                space_id: "20000000-0000-4000-8000-000000000001",
+                recipient_email: "person@example.com",
+                can_manage_members: false,
+                can_enroll_machines: false,
+                created_at: "2026-08-21T00:00:00Z",
+                expires_at: "2026-08-28T00:00:00Z",
+                submission: { state },
+              },
+            ],
+          });
+        throw new Error(`unexpected ${request.method} ${path}`);
+      }),
+    );
+
+    render(
+      <MemberSettings
+        spaceID="20000000-0000-4000-8000-000000000001"
+        spaceName="Research"
+        currentUserID="30000000-0000-4000-8000-000000000001"
+        canManage
+        canEnroll
+        onClose={() => undefined}
+        onRemoved={() => undefined}
+      />,
+    );
+
+    expect(await screen.findByText(copy)).toBeVisible();
+  },
+);
+
 test("generic Email proof also offers exact retry and a fresh code request", async () => {
   const requests: Array<{ challengeID: string; key: string }> = [];
   vi.stubGlobal(
@@ -175,9 +240,7 @@ test("generic Email proof also offers exact retry and a fresh code request", asy
 
   await user.click(screen.getByRole("button", { name: "Confirm with Email" }));
   await waitFor(() => expect(requests).toHaveLength(1));
-  await user.click(
-    screen.getByRole("button", { name: "Retry exact code request" }),
-  );
+  await user.click(screen.getByRole("button", { name: "Try sending again" }));
   await waitFor(() => expect(requests).toHaveLength(2));
   expect(requests[1]).toEqual(requests[0]);
   await user.click(screen.getByRole("button", { name: "Send a new code" }));
@@ -232,10 +295,10 @@ test("targeted Email proof recovers with an exact retry or a fresh code request"
   );
 
   await user.click(screen.getByRole("button", { name: "Confirm with Email" }));
-  expect(await screen.findByRole("alert")).toHaveTextContent("lost response");
-  await user.click(
-    screen.getByRole("button", { name: "Retry exact code request" }),
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Confirm email may have finished, but Carry could not confirm it",
   );
+  await user.click(screen.getByRole("button", { name: "Try sending again" }));
   await waitFor(() => expect(requests).toHaveLength(2));
   expect(requests[1]).toEqual(requests[0]);
 
@@ -349,7 +412,10 @@ test("targeted invitation renders uniform recovery, proof gate, terminal truth, 
   );
   await user.click(screen.getByRole("button", { name: "Accept and join" }));
   expect(
-    await screen.findByText(/cannot confirm whether acceptance completed/),
+    await screen.findByText(/cannot confirm whether you joined the Space/),
+  ).toBeVisible();
+  expect(
+    screen.getByRole("button", { name: "Try accepting again" }),
   ).toBeVisible();
   await user.click(
     screen.getByRole("button", { name: "Reload invitation status" }),

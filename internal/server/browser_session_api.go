@@ -31,7 +31,7 @@ func (api browserSessionAPI) revokeCurrent(response http.ResponseWriter, request
 		return
 	}
 	if err := api.sessions.RevokeBrowserSession(request.Context(), sessionID); err != nil {
-		writeAPIError(response, http.StatusInternalServerError, "revoke browser session")
+		writeUserInternalError(response, userMutationFailure, "revoke Browser Session", err)
 		return
 	}
 	expireBrowserSessionCookie(response)

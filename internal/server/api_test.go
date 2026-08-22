@@ -12,6 +12,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -22,6 +23,282 @@ import (
 	"github.com/ApexReasoning/carry/internal/space"
 	"github.com/ApexReasoning/carry/internal/work"
 )
+
+func TestUserErrorBoundaryKeepsRecoveryPublicAndMechanismsPrivate(t *testing.T) {
+	t.Parallel()
+
+	for name, test := range map[string]struct {
+		err     error
+		status  int
+		message string
+	}{
+		"forbidden":                       {space.ErrForbidden, http.StatusForbidden, "You do not have access to this Space."},
+		"missing Work":                    {work.ErrNotFound, http.StatusNotFound, "This Work is unavailable."},
+		"Work saved request changed":      {work.ErrIdempotencyConflict, http.StatusConflict, "This action no longer matches the saved request. Reload before trying again."},
+		"Conversation request changed":    {conversation.ErrIdempotencyConflict, http.StatusConflict, "This action no longer matches the saved request. Reload before trying again."},
+		"reply pending":                   {conversation.ErrReplyPending, http.StatusConflict, "Wait for Carry's reply before sending another message."},
+		"reply conflict":                  {conversation.ErrReplyConflict, http.StatusConflict, "Reload the Conversation before trying again."},
+		"Work not open":                   {work.ErrNotOpen, http.StatusConflict, "Reload this Work before choosing again."},
+		"Work retry not needed":           {work.ErrRetryNotNeeded, http.StatusConflict, "Reload this Work before choosing again."},
+		"Work review not current":         {work.ErrReviewNotCurrent, http.StatusConflict, "Reload this Work before choosing again."},
+		"invalid Work goal":               {work.ErrInvalidGoal, http.StatusBadRequest, "Check the entered value and try again."},
+		"invalid Work message":            {work.ErrInvalidMessage, http.StatusBadRequest, "Check the entered value and try again."},
+		"invalid Conversation text":       {conversation.ErrInvalidText, http.StatusBadRequest, "Check the entered value and try again."},
+		"invalid Work retry information":  {work.ErrInvalidIdempotency, http.StatusBadRequest, "Reload before trying again."},
+		"invalid Work cursor":             {work.ErrInvalidCursor, http.StatusBadRequest, "Reload before trying again."},
+		"invalid Conversation retry fact": {conversation.ErrInvalidIdempotency, http.StatusBadRequest, "Reload before trying again."},
+		"invalid Conversation cursor":     {conversation.ErrInvalidCursor, http.StatusBadRequest, "Reload before trying again."},
+		"invalid Conversation context":    {conversation.ErrInvalidContext, http.StatusBadRequest, "Reload before trying again."},
+	} {
+		t.Run(name, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			writeUserStoreError(response, test.err, userReadFailure, "test User request")
+			assertUserFacingResponse(t, response, test.status, test.message)
+		})
+	}
+
+	for name, recovery := range map[string]userFailureRecovery{
+		"read":     userReadFailure,
+		"mutation": userMutationFailure,
+	} {
+		t.Run("internal "+name, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			writeUserInternalError(response, recovery, "private operation", errors.New("database cause"))
+			message := "Carry could not load this right now. Reload to try again."
+			if recovery == userMutationFailure {
+				message = "Carry could not confirm whether this change finished. Check the current page before trying again."
+			}
+			assertUserFacingResponse(t, response, http.StatusInternalServerError, message)
+			if strings.Contains(response.Body.String(), "private operation") || strings.Contains(response.Body.String(), "database cause") {
+				t.Fatalf("private diagnostics entered User response: %s", response.Body.String())
+			}
+		})
+	}
+}
+
+func TestMachineErrorBoundaryRetainsAuthorityRecovery(t *testing.T) {
+	t.Parallel()
+
+	for name, test := range map[string]struct {
+		err     error
+		status  int
+		message string
+	}{
+		"Space forbidden":                 {space.ErrForbidden, http.StatusForbidden, space.ErrForbidden.Error()},
+		"Machine revoked":                 {machine.ErrMachineRevoked, http.StatusForbidden, machine.ErrMachineRevoked.Error()},
+		"Machine missing":                 {machine.ErrMachineNotFound, http.StatusNotFound, machine.ErrMachineNotFound.Error()},
+		"Work missing":                    {work.ErrNotFound, http.StatusNotFound, work.ErrNotFound.Error()},
+		"stale Attempt":                   {run.ErrStaleAttempt, http.StatusConflict, "Run Attempt is stale or expired"},
+		"stale claim":                     {conversation.ErrStaleReplyClaim, http.StatusConflict, "private Conversation reply claim is stale or expired"},
+		"Work request conflict":           {work.ErrIdempotencyConflict, http.StatusConflict, work.ErrIdempotencyConflict.Error()},
+		"Conversation request conflict":   {conversation.ErrIdempotencyConflict, http.StatusConflict, conversation.ErrIdempotencyConflict.Error()},
+		"reply pending":                   {conversation.ErrReplyPending, http.StatusConflict, conversation.ErrReplyPending.Error()},
+		"reply conflict":                  {conversation.ErrReplyConflict, http.StatusConflict, conversation.ErrReplyConflict.Error()},
+		"Work not open":                   {work.ErrNotOpen, http.StatusConflict, work.ErrNotOpen.Error()},
+		"Work retry not needed":           {work.ErrRetryNotNeeded, http.StatusConflict, work.ErrRetryNotNeeded.Error()},
+		"Work review not current":         {work.ErrReviewNotCurrent, http.StatusConflict, work.ErrReviewNotCurrent.Error()},
+		"invalid Run update":              {run.ErrInvalidUpdate, http.StatusBadRequest, run.ErrInvalidUpdate.Error()},
+		"invalid Run outcome":             {run.ErrInvalidOutcome, http.StatusBadRequest, run.ErrInvalidOutcome.Error()},
+		"invalid Work goal":               {work.ErrInvalidGoal, http.StatusBadRequest, work.ErrInvalidGoal.Error()},
+		"invalid Work message":            {work.ErrInvalidMessage, http.StatusBadRequest, work.ErrInvalidMessage.Error()},
+		"invalid Work retry information":  {work.ErrInvalidIdempotency, http.StatusBadRequest, work.ErrInvalidIdempotency.Error()},
+		"invalid Work cursor":             {work.ErrInvalidCursor, http.StatusBadRequest, work.ErrInvalidCursor.Error()},
+		"invalid Conversation text":       {conversation.ErrInvalidText, http.StatusBadRequest, conversation.ErrInvalidText.Error()},
+		"invalid Conversation retry fact": {conversation.ErrInvalidIdempotency, http.StatusBadRequest, conversation.ErrInvalidIdempotency.Error()},
+		"invalid Conversation cursor":     {conversation.ErrInvalidCursor, http.StatusBadRequest, conversation.ErrInvalidCursor.Error()},
+		"invalid Conversation context":    {conversation.ErrInvalidContext, http.StatusBadRequest, conversation.ErrInvalidContext.Error()},
+		"unexpected":                      {errors.New("database unavailable"), http.StatusInternalServerError, "request failed"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			writeMachineStoreError(response, test.err)
+			if response.Code != test.status || !strings.Contains(response.Body.String(), test.message) {
+				t.Fatalf("Machine response = %d %s", response.Code, response.Body.String())
+			}
+		})
+	}
+}
+
+func TestUserWireAndSpecializedErrorsUsePublicLanguage(t *testing.T) {
+	t.Parallel()
+
+	invalidJSON := httptest.NewRecorder()
+	if decodeJSON(invalidJSON, httptest.NewRequest(http.MethodPost, "/", strings.NewReader("{")), &struct{}{}) {
+		t.Fatal("invalid JSON decoded")
+	}
+	assertUserFacingResponse(t, invalidJSON, http.StatusBadRequest, "Carry could not read this request.")
+
+	trailingJSON := httptest.NewRecorder()
+	var trailingDestination struct {
+		Value string `json:"value"`
+	}
+	if decodeJSON(trailingJSON, httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"value":"first"} {"value":"second"}`)), &trailingDestination) {
+		t.Fatal("trailing JSON decoded")
+	}
+	assertUserFacingResponse(t, trailingJSON, http.StatusBadRequest, "Carry could not read this request.")
+
+	missingRetry := httptest.NewRecorder()
+	if _, ok := requireIdempotencyKey(missingRetry, httptest.NewRequest(http.MethodPost, "/", nil)); ok {
+		t.Fatal("missing retry information accepted")
+	}
+	assertUserFacingResponse(t, missingRetry, http.StatusBadRequest, "This action needs saved retry information. Reload before trying again.")
+
+	writers := map[string]struct {
+		write   func(http.ResponseWriter)
+		status  int
+		message string
+	}{
+		"email conflict": {
+			func(response http.ResponseWriter) {
+				writeEmailRequestError(response, identity.ErrIdempotencyConflict, "request email code")
+			},
+			http.StatusConflict, "This action no longer matches the saved request.",
+		},
+		"email unexpected": {
+			func(response http.ResponseWriter) {
+				writeEmailRequestError(response, errors.New("database unavailable"), "request email code")
+			},
+			http.StatusInternalServerError, "Carry could not confirm whether this change finished.",
+		},
+		"identity read": {
+			func(response http.ResponseWriter) {
+				writeIdentityMethodError(response, errors.New("database unavailable"), userReadFailure, "list sign-in methods")
+			},
+			http.StatusInternalServerError, "Carry could not load this right now.",
+		},
+		"identity conflict": {
+			func(response http.ResponseWriter) {
+				writeIdentityMethodError(response, identity.ErrIdempotencyConflict, userMutationFailure, "remove sign-in method")
+			},
+			http.StatusConflict, "This action no longer matches the saved request.",
+		},
+		"identity mutation": {
+			func(response http.ResponseWriter) {
+				writeIdentityMethodError(response, errors.New("database unavailable"), userMutationFailure, "remove sign-in method")
+			},
+			http.StatusInternalServerError, "Carry could not confirm whether this change finished.",
+		},
+		"member forbidden": {
+			func(response http.ResponseWriter) {
+				writeMemberError(response, space.ErrForbidden, userReadFailure, "list members")
+			},
+			http.StatusForbidden, "You do not have access to this Space.",
+		},
+		"member cursor": {
+			func(response http.ResponseWriter) {
+				writeMemberError(response, space.ErrInvalidMemberCursor, userReadFailure, "list members")
+			},
+			http.StatusBadRequest, "Reload before trying again.",
+		},
+		"member read": {
+			func(response http.ResponseWriter) {
+				writeMemberError(response, errors.New("database unavailable"), userReadFailure, "list members")
+			},
+			http.StatusInternalServerError, "Carry could not load this right now.",
+		},
+		"member conflict": {
+			func(response http.ResponseWriter) {
+				writeMemberError(response, space.ErrIdempotencyConflict, userMutationFailure, "remove member")
+			},
+			http.StatusConflict, "This action no longer matches the saved request.",
+		},
+		"member mutation": {
+			func(response http.ResponseWriter) {
+				writeMemberError(response, errors.New("database unavailable"), userMutationFailure, "remove member")
+			},
+			http.StatusInternalServerError, "Carry could not confirm whether this change finished.",
+		},
+		"invitation forbidden": {
+			func(response http.ResponseWriter) {
+				writeInvitationError(response, space.ErrForbidden, userReadFailure, "load invitation")
+			},
+			http.StatusForbidden, "You do not have access to this Space.",
+		},
+		"invitation recipient": {
+			func(response http.ResponseWriter) {
+				writeInvitationError(response, space.ErrInvalidInvitationRecipient, userMutationFailure, "issue invitation")
+			},
+			http.StatusBadRequest, "Check the Email address and try again.",
+		},
+		"invitation command": {
+			func(response http.ResponseWriter) {
+				writeInvitationError(response, space.ErrInvalidInvitation, userMutationFailure, "issue invitation")
+			},
+			http.StatusBadRequest, "Reload before trying again.",
+		},
+		"invitation conflict": {
+			func(response http.ResponseWriter) {
+				writeInvitationError(response, space.ErrIdempotencyConflict, userMutationFailure, "accept invitation")
+			},
+			http.StatusConflict, "This action no longer matches the saved request.",
+		},
+		"invitation read": {
+			func(response http.ResponseWriter) {
+				writeInvitationError(response, errors.New("database unavailable"), userReadFailure, "load invitation")
+			},
+			http.StatusInternalServerError, "Carry could not load this right now.",
+		},
+		"invitation mutation": {
+			func(response http.ResponseWriter) {
+				writeInvitationError(response, errors.New("database unavailable"), userMutationFailure, "accept invitation")
+			},
+			http.StatusInternalServerError, "Carry could not confirm whether this change finished.",
+		},
+	}
+	for name, test := range writers {
+		t.Run(name, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			test.write(response)
+			assertUserFacingResponse(t, response, test.status, test.message)
+		})
+	}
+}
+
+func assertUserFacingResponse(t *testing.T, response *httptest.ResponseRecorder, status int, message string) {
+	t.Helper()
+	if response.Code != status {
+		t.Fatalf("status = %d, want %d; body = %s", response.Code, status, response.Body.String())
+	}
+	if message != "" && !strings.Contains(response.Body.String(), message) {
+		t.Fatalf("body = %s, want %q", response.Body.String(), message)
+	}
+	lower := strings.ToLower(response.Body.String())
+	for _, forbidden := range []string{"run", "attempt", "claim", "lease", "fence", "version", "digest", "credential", "socket", "session handle", "idempotency key", "idempotency-key"} {
+		if strings.Contains(lower, forbidden) {
+			t.Fatalf("User response contains forbidden term %q: %s", forbidden, response.Body.String())
+		}
+	}
+}
+
+func TestUserReadHandlersUseReadRecovery(t *testing.T) {
+	t.Parallel()
+
+	missingContext := httptest.NewRecorder()
+	if _, ok := currentUser(missingContext, httptest.NewRequest(http.MethodGet, "/v1/me", nil)); ok {
+		t.Fatal("missing User context accepted")
+	}
+	assertUserFacingResponse(t, missingContext, http.StatusInternalServerError, "Carry could not load this right now. Reload to try again.")
+
+	authentication := httptest.NewRecorder()
+	if _, ok := authenticatedUserResult(authentication, identity.AuthenticatedUser{}, errors.New("database unavailable")); ok {
+		t.Fatal("failed authentication accepted")
+	}
+	assertUserFacingResponse(t, authentication, http.StatusInternalServerError, "Carry could not load this right now. Reload to try again.")
+
+	membershipRequest := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
+	membershipRequest = membershipRequest.WithContext(context.WithValue(membershipRequest.Context(), userContextKey{}, identity.AuthenticatedUser{
+		UserID: "10000000-0000-4000-8000-000000000001",
+	}))
+	membershipResponse := httptest.NewRecorder()
+	(userAPI{memberships: failingMemberships{}}).me(membershipResponse, membershipRequest)
+	assertUserFacingResponse(t, membershipResponse, http.StatusInternalServerError, "Carry could not load this right now. Reload to try again.")
+}
+
+type failingMemberships struct{}
+
+func (failingMemberships) ListMemberships(context.Context, string) ([]space.Membership, error) {
+	return nil, errors.New("database unavailable")
+}
 
 func TestMachineClaimReturnsCompleteWorkContextWithoutSecondCredential(t *testing.T) {
 	t.Parallel()
@@ -280,10 +557,6 @@ func testUserRoutes(t *testing.T, authority *machine.CertificateAuthority) *User
 	if err != nil {
 		t.Fatalf("compose test email login: %v", err)
 	}
-	spaceCreator, err := space.NewCreator(unavailableSpaceCreation{})
-	if err != nil {
-		t.Fatalf("compose test Space creator: %v", err)
-	}
 	authentication, err := NewUserAuthentication(&recordingCLICredentials{}, sessions, credentials, testExternalOrigin(t))
 	if err != nil {
 		t.Fatalf("compose test User authentication: %v", err)
@@ -302,7 +575,7 @@ func testUserRoutes(t *testing.T, authority *machine.CertificateAuthority) *User
 	if err != nil {
 		t.Fatalf("compose test User identity routes: %v", err)
 	}
-	spaceRoutes, err := NewUserSpaceRoutes(spaceCreator)
+	spaceRoutes, err := NewUserSpaceRoutes(unavailableSpaceCreation{})
 	if err != nil {
 		t.Fatalf("compose test User Space routes: %v", err)
 	}

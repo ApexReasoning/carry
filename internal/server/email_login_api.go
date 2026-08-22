@@ -185,13 +185,13 @@ func (api emailLoginAPI) verify(response http.ResponseWriter, request *http.Requ
 		if purpose == identity.LoginPurpose {
 			writeEmailRequestError(response, err, "verify email code")
 		} else {
-			writeIdentityMethodError(response, err)
+			writeIdentityMethodError(response, err, userMutationFailure, "verify sign-in method code")
 		}
 		return
 	}
 	credential, err := api.credentials.BrowserSessionCredential(session.SessionID)
 	if err != nil {
-		writeAPIError(response, http.StatusInternalServerError, "create Browser Session credential")
+		writeUserInternalError(response, userMutationFailure, "create Browser Session credential", err)
 		return
 	}
 	setBrowserSessionCookie(response, credential, session.ExpiresAt)
@@ -205,7 +205,7 @@ func writeEmailChallenge(response http.ResponseWriter, challenge identity.EmailC
 	}{ChallengeID: challenge.ChallengeID, ExpiresAt: challenge.ExpiresAt})
 }
 
-func writeEmailRequestError(response http.ResponseWriter, err error, fallback string) {
+func writeEmailRequestError(response http.ResponseWriter, err error, operation string) {
 	switch {
 	case errors.Is(err, identity.ErrInvalidEmail):
 		writeAPIError(response, http.StatusBadRequest, err.Error())
@@ -222,14 +222,14 @@ func writeEmailRequestError(response http.ResponseWriter, err error, fallback st
 		slog.Warn("email challenge admission limited", "scope", scope)
 		writeAPIError(response, http.StatusTooManyRequests, identity.ErrEmailRateLimited.Error())
 	case errors.Is(err, identity.ErrIdempotencyConflict):
-		writeAPIError(response, http.StatusConflict, err.Error())
+		writeAPIError(response, http.StatusConflict, "This action no longer matches the saved request. Reload before trying again.")
 	case errors.Is(err, identity.ErrEmailSubmissionRejected):
 		writeAPIError(response, http.StatusServiceUnavailable, err.Error())
 	case errors.Is(err, identity.ErrUnauthenticated),
 		errors.Is(err, identity.ErrRecentIdentityProofRequired),
 		errors.Is(err, identity.ErrIdentityMethodNotLinked):
-		writeIdentityMethodError(response, err)
+		writeIdentityMethodError(response, err, userMutationFailure, operation)
 	default:
-		writeAPIError(response, http.StatusInternalServerError, fallback)
+		writeUserInternalError(response, userMutationFailure, operation, err)
 	}
 }

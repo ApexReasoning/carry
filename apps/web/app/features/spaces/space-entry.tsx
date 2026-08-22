@@ -14,7 +14,7 @@ type CreationState =
   | { kind: "idle" }
   | { kind: "creating"; suffix: number | undefined }
   | { kind: "error"; message: string }
-  | { kind: "damaged"; message: string }
+  | { kind: "damaged"; clearError?: string }
   | { kind: "unknown"; message: string; suffix: number | undefined }
   | { kind: "conflict"; value: SpaceSlugConflictError };
 
@@ -34,9 +34,7 @@ export function SpaceEntry({
   const busy = creation.kind === "creating";
   const conflict = creation.kind === "conflict" ? creation.value : null;
   const error =
-    creation.kind === "error" ||
-    creation.kind === "damaged" ||
-    creation.kind === "unknown"
+    creation.kind === "error" || creation.kind === "unknown"
       ? creation.message
       : conflict?.message;
 
@@ -51,7 +49,7 @@ export function SpaceEntry({
       if (caught instanceof SpaceSlugConflictError) {
         setCreation({ kind: "conflict", value: caught });
       } else if (caught instanceof CorruptPendingSpaceCreationError) {
-        setCreation({ kind: "damaged", message: caught.message });
+        setCreation({ kind: "damaged" });
       } else if (caught instanceof MutationOutcomeUnknownError) {
         setCreation({ kind: "unknown", message: caught.message, suffix });
       } else {
@@ -72,6 +70,9 @@ export function SpaceEntry({
           </p>
           <div>
             <span className="member-name">{user.display_name}</span>
+            <a className="ghost-button" href="/invitations">
+              Invitations
+            </a>
             <button className="ghost-button" type="button" onClick={onSignOut}>
               Sign out
             </button>
@@ -120,17 +121,16 @@ export function SpaceEntry({
             {busy
               ? "Creating…"
               : creation.kind === "unknown"
-                ? "Retry exact request"
+                ? "Try creating again"
                 : "Create Space"}
           </button>
         </form>
         {creation.kind === "damaged" ? (
           <section className="identity-confirmation">
             <p>
-              Review the authoritative Space list above before discarding the
-              damaged local request identities. Discarding them allows a new
-              creation but cannot prove whether an earlier unknown creation
-              completed.
+              Carry cannot read the saved Space creation on this browser. Check
+              the Space list above. If it is not there, clear the saved entry
+              before creating again.
             </p>
             <button
               className="secondary-button"
@@ -140,12 +140,17 @@ export function SpaceEntry({
                   discardCorruptPendingSpaceCreation();
                   setCreation({ kind: "idle" });
                 } catch (caught) {
-                  setCreation({ kind: "damaged", message: message(caught) });
+                  setCreation({ kind: "damaged", clearError: message(caught) });
                 }
               }}
             >
-              Discard damaged Space identities
+              Clear saved Space creation
             </button>
+            {creation.clearError ? (
+              <p className="alert" role="alert">
+                {creation.clearError}
+              </p>
+            ) : null}
           </section>
         ) : null}
         {conflict?.suggestedSlug && conflict.suggestedSuffix ? (

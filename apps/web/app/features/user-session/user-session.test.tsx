@@ -519,6 +519,35 @@ test("invitation deferral is cleared before a different User signs in", async ()
   await waitFor(() => expect(result.current.phase).toBe("invitations"));
 });
 
+test("an email submission 503 remains a known rejection", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request =
+        input instanceof Request ? input : new Request(input, init);
+      const path = new URL(request.url).pathname;
+      if (request.method === "GET" && path === "/v1/me")
+        return unauthenticated();
+      if (request.method === "POST" && path === "/v1/auth/email/challenges")
+        return json({ error: "email code could not be submitted" }, 503);
+      throw new Error(`unexpected request: ${request.method} ${path}`);
+    }),
+  );
+
+  const user = userEvent.setup();
+  render(<App />);
+  await user.type(await screen.findByLabelText("Email"), "alex@example.com");
+  await user.click(screen.getByRole("button", { name: "Send code" }));
+
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "email code could not be submitted",
+  );
+  expect(screen.getByLabelText("Email")).toHaveValue("alex@example.com");
+  expect(
+    screen.queryByRole("button", { name: "Try sending again" }),
+  ).not.toBeInTheDocument();
+});
+
 test("shows a wrong email code and lets the User retry", async () => {
   mockUnauthenticatedEmail(async (request, path) => {
     if (request.method === "POST" && path.endsWith("/verify")) {
@@ -566,7 +595,7 @@ test("replays an unknown verification exactly before loading the User", async ()
         });
         sessionEstablished = true;
         if (events.filter((event) => event.action === "verify").length === 1) {
-          throw new TypeError("verification response lost");
+          return json({ error: "private verification operation" }, 500);
         }
         return new Response(null, { status: 204 });
       }

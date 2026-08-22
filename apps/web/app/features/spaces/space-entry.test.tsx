@@ -47,6 +47,10 @@ test("one Space still renders the explicit chooser and URL link", () => {
   render(<SpaceEntry user={user} onEnter={vi.fn()} onSignOut={vi.fn()} />);
 
   expect(screen.getByRole("heading", { name: "Choose a Space" })).toBeVisible();
+  expect(screen.getByRole("link", { name: "Invitations" })).toHaveAttribute(
+    "href",
+    "/invitations",
+  );
   expect(screen.getByRole("link", { name: /Research/ })).toHaveAttribute(
     "href",
     "/s/%E7%A0%94%E7%A9%B6-team",
@@ -84,11 +88,35 @@ test("requires explicit recovery before discarding damaged creation identities",
   expect(screen.getByRole("button", { name: "Create Space" })).toBeDisabled();
   await actor.click(
     screen.getByRole("button", {
-      name: "Discard damaged Space identities",
+      name: "Clear saved Space creation",
     }),
   );
   expect(creation.discardCorruptPendingSpaceCreation).toHaveBeenCalledOnce();
   expect(screen.getByRole("button", { name: "Create Space" })).toBeEnabled();
+});
+
+test("keeps creation blocked when saved browser state cannot be cleared", async () => {
+  creation.createExactSpace.mockRejectedValue(
+    new CorruptPendingSpaceCreationError("unreadable"),
+  );
+  creation.discardCorruptPendingSpaceCreation.mockImplementation(() => {
+    throw new Error(
+      "Carry could not clear the saved Space creation from this browser.",
+    );
+  });
+  render(<SpaceEntry user={user} onEnter={vi.fn()} onSignOut={vi.fn()} />);
+  const actor = userEvent.setup();
+
+  await actor.type(screen.getByLabelText("Space name"), "Operations");
+  await actor.click(screen.getByRole("button", { name: "Create Space" }));
+  await actor.click(
+    screen.getByRole("button", { name: "Clear saved Space creation" }),
+  );
+
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Carry could not clear the saved Space creation from this browser.",
+  );
+  expect(screen.getByRole("button", { name: "Create Space" })).toBeDisabled();
 });
 
 test("creates with one visible name and enters the committed slug", async () => {
@@ -139,9 +167,7 @@ test("an unknown suggested suffix retries the exact accepted request", async () 
   await actor.type(screen.getByLabelText("Space name"), "Acme");
   await actor.click(screen.getByRole("button", { name: "Create Space" }));
   await actor.click(screen.getByRole("button", { name: "Try /s/acme-2" }));
-  await actor.click(
-    screen.getByRole("button", { name: "Retry exact request" }),
-  );
+  await actor.click(screen.getByRole("button", { name: "Try creating again" }));
 
   expect(creation.createExactSpace).toHaveBeenNthCalledWith(
     3,

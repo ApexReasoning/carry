@@ -499,27 +499,39 @@ func TestEmailUserHasFallbackLabelAndCanCreateMultipleSpaces(t *testing.T) {
 	if user.DisplayName != fallback {
 		t.Fatalf("authenticated User label = %q, want %q", user.DisplayName, fallback)
 	}
-	creator, err := space.NewCreator(store)
-	if err != nil {
-		t.Fatalf("compose Space creator: %v", err)
-	}
 	request := space.CreateSpaceRequest{
 		UserID: session.UserID, Name: "Research", IdempotencyKey: "create-research",
 	}
-	first, err := creator.Create(ctx, request)
+	command, err := space.NewCreateSpaceCommand(request)
+	if err != nil {
+		t.Fatalf("derive Space command: %v", err)
+	}
+	first, err := store.CreateSpace(ctx, command)
 	if err != nil {
 		t.Fatalf("create Space: %v", err)
 	}
-	replayed, err := creator.Create(ctx, request)
+	replayCommand, err := space.NewCreateSpaceCommand(request)
+	if err != nil {
+		t.Fatalf("derive replay command: %v", err)
+	}
+	replayed, err := store.CreateSpace(ctx, replayCommand)
 	if err != nil || replayed != first {
 		t.Fatalf("replayed Space = %#v, first = %#v, error = %v", replayed, first, err)
 	}
 	request.Name = "Operations"
-	if _, err := creator.Create(ctx, request); !errors.Is(err, space.ErrIdempotencyConflict) {
+	changedCommand, err := space.NewCreateSpaceCommand(request)
+	if err != nil {
+		t.Fatalf("derive changed command: %v", err)
+	}
+	if _, err := store.CreateSpace(ctx, changedCommand); !errors.Is(err, space.ErrIdempotencyConflict) {
 		t.Fatalf("changed replay error = %v", err)
 	}
 	request.IdempotencyKey = "create-operations"
-	second, err := creator.Create(ctx, request)
+	additionalCommand, err := space.NewCreateSpaceCommand(request)
+	if err != nil {
+		t.Fatalf("derive additional command: %v", err)
+	}
+	second, err := store.CreateSpace(ctx, additionalCommand)
 	if err != nil {
 		t.Fatalf("create additional Space: %v", err)
 	}

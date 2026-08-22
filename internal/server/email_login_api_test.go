@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -66,9 +67,27 @@ func TestEmailRequestMapsIdempotencyConflictToHTTP409(t *testing.T) {
 
 	handler.ServeHTTP(response, request)
 
-	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), identity.ErrIdempotencyConflict.Error()) {
+	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "This action no longer matches the saved request") {
 		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
 	}
+}
+
+func TestEmailRequestUnexpectedFailureUsesMutationRecovery(t *testing.T) {
+	t.Parallel()
+	store := &recordingEmailLoginStore{prepareErr: errors.New("database unavailable")}
+	handler := emailTestAPI(t, store, &recordingEmailSender{}, unavailableSpaceCreation{})
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/auth/email/challenges",
+		strings.NewReader(`{"challenge_id":"`+testChallengeID+`","email":"person@example.com"}`),
+	)
+	request.RemoteAddr = "203.0.113.18:49152"
+	request.Header.Set("Idempotency-Key", "request-code-500")
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	assertUserFacingResponse(t, response, http.StatusInternalServerError, "Carry could not confirm whether this change finished. Check the current page before trying again.")
 }
 
 func TestEmailRequestKeepsAdmissionCauseOutOfTheUserResponse(t *testing.T) {
@@ -282,17 +301,17 @@ func emailTestAPI(
 	t *testing.T,
 	emailPersistence identity.EmailLoginPersistence,
 	sender identity.EmailCodeSubmitter,
-	spacePersistence space.SpaceCreationPersistence,
+	spaceCreation SpaceCreation,
 ) http.Handler {
 	t.Helper()
-	return emailTestAPIWithSources(t, emailPersistence, sender, spacePersistence, NewRequestSource(nil))
+	return emailTestAPIWithSources(t, emailPersistence, sender, spaceCreation, NewRequestSource(nil))
 }
 
 func emailTestAPIWithSources(
 	t *testing.T,
 	emailPersistence identity.EmailLoginPersistence,
 	sender identity.EmailCodeSubmitter,
-	spacePersistence space.SpaceCreationPersistence,
+	spaceCreation SpaceCreation,
 	requestSources RequestSource,
 ) http.Handler {
 	t.Helper()
@@ -301,10 +320,6 @@ func emailTestAPIWithSources(
 	emailLogin, err := identity.NewEmailLogin(emailPersistence, sender, credentials)
 	if err != nil {
 		t.Fatalf("compose email login: %v", err)
-	}
-	spaceCreator, err := space.NewCreator(spacePersistence)
-	if err != nil {
-		t.Fatalf("compose Space creator: %v", err)
 	}
 	sessions := &recordingBrowserSessions{user: identity.AuthenticatedUser{
 		UserID:      "50000000-0000-4000-8000-000000000005",
@@ -329,7 +344,7 @@ func emailTestAPIWithSources(
 	if err != nil {
 		t.Fatalf("compose User identity routes: %v", err)
 	}
-	spaceRoutes, err := NewUserSpaceRoutes(spaceCreator)
+	spaceRoutes, err := NewUserSpaceRoutes(spaceCreation)
 	if err != nil {
 		t.Fatalf("compose User Space routes: %v", err)
 	}

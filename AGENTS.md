@@ -1,6 +1,6 @@
 # Carry Agent Contract
 
-Current gate: **Issue #6 — non-Node pre-Node15 coherence corrective.** Issues #3/#5 and Node 14 are closed. Node 15 research and production remain paused until Issue #6 has one fresh coherence Gate, `make check`, one corrective commit, push, terminal CI, and closure; then Node 15 restarts from its simplified journey rather than the paused design.
+Current gate: **Issue #7 — final pre-Node15 entering-product recovery corrective.** Issues #3/#5/#6 and Node 14 are closed. Because Issue #7 changes the invitation return journey, it uses the ordinary ten-field research, design, implementation, three-review, supervisor, check, commit, push and terminal-CI gates. Node 15 remains paused until Issue #7 closes; it then restarts from its simplified journey rather than the paused design.
 
 Carry is an AI teammate: a person hands a responsibility over in carry.ai Web, a named Agent owns keeping it moving, and the Work stays true across Conversations, Agent sessions, Hosts, channels and time.
 
