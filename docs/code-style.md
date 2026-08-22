@@ -10,7 +10,7 @@
 
 | # | 阻断 | 修法 |
 | --- | --- | --- |
-| B1 | 一个 `if` 合并了三个以上互相独立的事实 | 一个分支一条规则，一个含义一个错误 |
+| B1 | 不同恢复方式被合并成一个错误；同一恢复方式被拆成多个同错分支；或安全/隐私要求刻意统一却没有注释 | 按恢复方式分组：不同恢复用不同错误，同一恢复用一个谓词，刻意统一写明约束 |
 | B2 | 一个长条件被藏在 helper、方法或 `isValid` 里 | 展开并拆开，或让该 helper 成为一条有自己错误的 owner 规则 |
 | B3 | 一个 command / struct 字面量携带接收方拥有或可推导的事实 | 删掉这些字段 |
 | B4 | struct 字面量一行写多个字段 | 一行一个字段 |
@@ -26,27 +26,35 @@
 
 ## 2. 条件
 
-一个 `if` 表达一个停下来的理由。
+一个 `if` 的存在必须让调用方或用户多知道一件能改变恢复方式的事。错误数量由恢复方式数量决定，不由被检查的事实数量决定。
 
 ```go
-// 错：九个独立事实、一个没有含义的错误、没有恢复路径。
-if code == "" || code != pending.Code || pending.Used ||
-    pending.ExpiresAt.Before(now) || pending.SpaceID != spaceID ||
-    member.ID == "" || !member.Active || !member.CanConnectHost ||
-    fingerprint != pending.Fingerprint {
+// 错：这些失败需要不同恢复，却被合成一个没有含义的错误。
+if code != pending.Code || pending.Used ||
+    !pending.ExpiresAt.After(now) || pending.SpaceID != spaceID ||
+    !member.CanConnectHost {
     return ErrInvalid
 }
 ```
 
 ```go
-// 同样错：九个事实换了个名字。读者仍然不知道哪一条失败，调用方仍然无法恢复。
-if !pending.isValid(code, spaceID, member, fingerprint, now) {
-    return ErrInvalid
+// 也错：这些输入只有一种恢复，却被拆成四个同错分支。
+if uuid.Validate(spaceID) != nil {
+    return ErrInvalidInvitation
+}
+if uuid.Validate(actorUserID) != nil {
+    return ErrInvalidInvitation
+}
+if uuid.Validate(invitationID) != nil {
+    return ErrInvalidInvitation
+}
+if !validCommandKey(idempotencyKey) {
+    return ErrInvalidInvitation
 }
 ```
 
 ```go
-// 对：每条规则有名字、有结果、有恢复。
+// 对：不同恢复有不同结果。
 if pending.Code != code {
     return ErrCodeMismatch
 }
@@ -64,9 +72,23 @@ if !member.CanConnectHost {
 }
 ```
 
-- 当多个事实构成一个不可分割的谓词（一个区间、一次准确的重放相等判断）时，`&&` 可以用；
-- 只有当一个谓词是一条拥有自己错误的 owner 规则时才抽出来；`isValid`、`ok`、`check`、`verifyAll` 是气味；
-- 不同失败含义得到不同分支、不同错误、不同用户恢复。
+```go
+// 对：所有畸形命令都只能由调用方修正后重试，所以是一个谓词、一个错误。
+if uuid.Validate(spaceID) != nil ||
+    uuid.Validate(actorUserID) != nil ||
+    uuid.Validate(invitationID) != nil ||
+    !validCommandKey(idempotencyKey) {
+    return ErrInvalidInvitation
+}
+```
+
+完整规则只有三种情况：
+
+1. 不同失败会触发不同恢复：保留独立分支与独立错误；
+2. 安全或隐私要求刻意隐藏失败细节：统一错误，并在函数上用一行注释解释不能区分的约束；
+3. 其余失败只有同一种恢复：在同一判定阶段合并成一个谓词、一个错误。若解析或锁读的数据依赖要求分阶段，可以保留多个分支，但仍须注释为什么调用方只能看到统一错误。
+
+不要把长条件藏进 `isValid`、`ok`、`check` 或 `verifyAll`。只有当 helper 本身是一条由 owner 命名、拥有明确错误与恢复的规则时才抽取。一个区间、一次准确重放相等判断等不可分割谓词可以自然使用 `&&`。
 
 ## 3. 命令与字面量
 
@@ -239,4 +261,4 @@ require.ErrorIs(t, second, run.ErrAlreadyClaimed)
 
 注释解释意外的约束，不解释语法。名字使用产品和 owner 语言；有具体名词时避免 `Manager`、`Processor`、`Coordinator`、`Resource`、`Payload`、`Data`、`Info`、`Utils`、`Common`。
 
-宣布 diff 就绪前回答：读者能否说出每个被改事实的 owner；happy path 是否线性；每个失败分支是否只有一个理由和一个恢复；字面量是否只携带调用方拥有的事实；事务阶段是否可见；新 package 是否对应事实 owner、具体 adapter，或一个不拥有产品策略的明确 composition/transport 边界；有没有重复或转发；这个节点是否删除了它替代的东西；是否有直接证据显示这条旅程真的跑过。
+宣布 diff 就绪前回答：读者能否说出每个被改事实的 owner；happy path 是否线性；不同恢复是否有不同错误、同一恢复是否没有同错仪式、刻意统一是否解释了安全或隐私约束；字面量是否只携带调用方拥有的事实；事务阶段是否可见；新 package 是否对应事实 owner、具体 adapter，或一个不拥有产品策略的明确 composition/transport 边界；有没有重复或转发；这个节点是否删除了它替代的东西；是否有直接证据显示这条旅程真的跑过。

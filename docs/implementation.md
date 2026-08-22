@@ -4,7 +4,7 @@
 
 节点 0–12 是旧合同下的技术证据。旧的节点 13–19 作废，不得实施。本文件是节点 12 之后唯一的活动路线，拥有节点路线、研究程序、评审协议和证据标准。
 
-Roadmap reset 已由 Issue #1、commit `f2a10bc` 与 CI `32504005646` 关闭；节点 13 已由 Issue #2、commit `663123b` 与 CI `32525708982` 关闭。节点 14 已在 Issue #3 重开 corrective closure；原 closing commit 不是 corrective 终态。当前 gate 是 Issue #5 的 pre-Node15 全项目检查，节点 15 研究暂停；Issue #3 corrective、Issue #5 gate 与用户从零产品体验全部通过前不得恢复节点 15 或写其生产实现。
+Roadmap reset 已由 Issue #1、commit `f2a10bc` 与 CI `32504005646` 关闭；节点 13 已由 Issue #2、commit `663123b` 与 CI `32525708982` 关闭；节点 14 corrective 与 pre-Node15 全项目检查已由 Issues #3/#5、commit `9a283bd` 与 CI `32554850043` 关闭。对该 commit 的复核以 B1′、OAuth actor split 与可信代理来源回退为窄范围重开 Issue #5；这条 follow-up 完成提交、push 与 CI 前不得写节点 15 production。之后节点 15 从简单旅程重新冻结并恢复有界研究。
 
 ## 1. 路线规则
 
@@ -539,7 +539,7 @@ GATE：<1 产品与直接证据 | 2 权限并发隐私与 AI-native | 3 美学�
 
 **线性流程**：干净环境 → 部署 → 冒烟一次真实旅程 → 升级到新版本并跑 migration → 从备份恢复一次 → 同一条旅程仍然成立。
 
-**研究问题**：哪一条最小的发布与升级链路能同时证明 migration 前向兼容与备份可恢复？**反证问题**：哪种升级顺序会让运行中的 Host 与新 Server 的协议不兼容而无人察觉？
+**研究问题**：哪一条最小的发布与升级链路能同时证明 migration 前向兼容与备份可恢复，并用容量 canary 判断 OAuth start 当前 global advisory lock 与每次全局过期清理的串行天花板是否仍满足真实负载？**反证问题**：哪种升级顺序会让运行中的 Host 与新 Server 的协议不兼容而无人察觉，或哪种 start 流量会让当前全局串行 admission 在正确限流之前先成为可用性瓶颈？
 
 **权限 / 失败 / 直接证据**：升级期间已接入的 Host 行为可预测；备份恢复后 Work 真相不丢；发布产物有 checksum 与来源记录。
 

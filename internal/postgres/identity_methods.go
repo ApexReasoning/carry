@@ -209,6 +209,7 @@ type identityMethodKey struct {
 	githubID     int64
 }
 
+// lockIdentityMethodKey deliberately collapses missing, changed, and foreign ownership into ErrIdentityMethodNotLinked so callers cannot probe another User's methods.
 func lockIdentityMethodKey(
 	ctx context.Context,
 	queries *dbsqlc.Queries,
@@ -288,6 +289,7 @@ func lockIdentityMethodKey(
 	return key, nil
 }
 
+// revalidateIdentityMethodKey preserves the same privacy boundary after locking: every absent, replaced, or foreign method remains indistinguishable.
 func revalidateIdentityMethodKey(
 	ctx context.Context,
 	queries *dbsqlc.Queries,

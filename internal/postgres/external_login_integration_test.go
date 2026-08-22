@@ -20,7 +20,7 @@ func TestExternalLoginAdmissionCapsConcurrentSourceAndReclaimsExpiry(t *testing.
 	var sourceDigest [32]byte
 	sourceDigest[0] = 1
 
-	const attempts = maxLiveExternalLoginsPerSource + 12
+	const attempts = identity.ExternalLoginSourceAdmissionLimit + 12
 	start := make(chan struct{})
 	results := make(chan error, attempts)
 	var group sync.WaitGroup
@@ -32,7 +32,6 @@ func TestExternalLoginAdmissionCapsConcurrentSourceAndReclaimsExpiry(t *testing.
 			_, err := store.CreateExternalLogin(ctx, identity.CreateExternalLoginCommand{
 				TransactionID: uuid.NewString(),
 				Provider:      identity.GoogleLoginProvider,
-				Purpose:       identity.LoginPurpose,
 				SourceDigest:  sourceDigest,
 			})
 			results <- err
@@ -54,8 +53,19 @@ func TestExternalLoginAdmissionCapsConcurrentSourceAndReclaimsExpiry(t *testing.
 			t.Fatalf("external login admission: %v", err)
 		}
 	}
-	if succeeded != maxLiveExternalLoginsPerSource || limited != attempts-maxLiveExternalLoginsPerSource {
+	if succeeded != identity.ExternalLoginSourceAdmissionLimit || limited != attempts-identity.ExternalLoginSourceAdmissionLimit {
 		t.Fatalf("admission winners = %d, limited = %d", succeeded, limited)
+	}
+
+	userID, sessions := seedIdentityUser(t, ctx, store, "admission-proof@example.com", 1)
+	if _, err := store.CreateExternalIdentityProof(ctx, identity.CreateExternalIdentityProofCommand{
+		TransactionID:       uuid.NewString(),
+		Provider:            identity.GitHubLoginProvider,
+		Purpose:             identity.LinkPurpose,
+		TargetUserID:        userID,
+		InitiatingSessionID: sessions[0],
+	}); err != nil {
+		t.Fatalf("identity proof was limited by anonymous admission: %v", err)
 	}
 
 	if _, err := pool.Exec(ctx, `
@@ -68,7 +78,6 @@ func TestExternalLoginAdmissionCapsConcurrentSourceAndReclaimsExpiry(t *testing.
 	if _, err := store.CreateExternalLogin(ctx, identity.CreateExternalLoginCommand{
 		TransactionID: uuid.NewString(),
 		Provider:      identity.GitHubLoginProvider,
-		Purpose:       identity.LoginPurpose,
 		SourceDigest:  sourceDigest,
 	}); err != nil {
 		t.Fatalf("admit after expiry: %v", err)
@@ -101,7 +110,7 @@ func TestExternalLoginGlobalAdmissionHasOneConcurrentWinner(t *testing.T) {
 			decode(lpad(to_hex(value), 64, '0'), 'hex'),
 			transaction_timestamp() + interval '10 minutes'
 		FROM generate_series(1, $1::integer) AS value
-	`, maxLiveExternalLoginsGlobal-1); err != nil {
+	`, identity.ExternalLoginGlobalAdmissionLimit-1); err != nil {
 		t.Fatalf("seed global external login admission: %v", err)
 	}
 
@@ -120,7 +129,6 @@ func TestExternalLoginGlobalAdmissionHasOneConcurrentWinner(t *testing.T) {
 			_, err := store.CreateExternalLogin(ctx, identity.CreateExternalLoginCommand{
 				TransactionID: uuid.NewString(),
 				Provider:      identity.GitHubLoginProvider,
-				Purpose:       identity.LoginPurpose,
 				SourceDigest:  sourceDigest,
 			})
 			results <- err
@@ -156,7 +164,6 @@ func TestExternalLoginPersistsOpaqueInvitationContinuationAcrossOutcomeAndReplay
 	if _, err := store.CreateExternalLogin(ctx, identity.CreateExternalLoginCommand{
 		TransactionID: transactionID,
 		Provider:      identity.GitHubLoginProvider,
-		Purpose:       identity.LoginPurpose,
 		InvitationID:  invitationID,
 	}); err != nil {
 		t.Fatal(err)
@@ -203,7 +210,6 @@ func TestExternalLoginPersistsOpaqueInvitationContinuationAcrossOutcomeAndReplay
 	if _, err := store.CreateExternalLogin(ctx, identity.CreateExternalLoginCommand{
 		TransactionID: deniedID,
 		Provider:      identity.GoogleLoginProvider,
-		Purpose:       identity.LoginPurpose,
 		InvitationID:  invitationID,
 	}); err != nil {
 		t.Fatal(err)

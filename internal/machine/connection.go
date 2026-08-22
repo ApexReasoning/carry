@@ -144,6 +144,7 @@ type BegunConnection struct {
 	PollInterval                                                                time.Duration
 }
 
+// Begin deliberately reports every malformed request as ErrInvalidConnection: an unauthenticated caller can only discard it and restart setup, while field-level errors would enlarge the probing surface.
 func (connections *Connections) Begin(ctx context.Context, request BeginConnectionRequest) (BegunConnection, error) {
 	code, ok := NormalizeConnectionCode(request.UserCode)
 	if !ok {

@@ -22,6 +22,13 @@ var (
 	ErrExternalLoginRateLimited = errors.New("external sign-in attempts are temporarily limited")
 )
 
+const (
+	// ExternalLoginSourceAdmissionLimit bounds live anonymous starts from one derived source.
+	ExternalLoginSourceAdmissionLimit = 20
+	// ExternalLoginGlobalAdmissionLimit bounds all live anonymous starts.
+	ExternalLoginGlobalAdmissionLimit = 10_000
+)
+
 type ExternalLoginProvider string
 
 const (
@@ -62,6 +69,7 @@ type GitHubIdentityProof struct {
 // atomic provider-identity, User, and Browser Session commit.
 type ExternalLoginPersistence interface {
 	CreateExternalLogin(context.Context, CreateExternalLoginCommand) (time.Time, error)
+	CreateExternalIdentityProof(context.Context, CreateExternalIdentityProofCommand) (time.Time, error)
 	ClaimExternalLogin(context.Context, ClaimExternalLoginCommand) (ExternalLoginClaim, error)
 	CompleteGoogleLogin(context.Context, CompleteGoogleLoginCommand) (BrowserSession, error)
 	CompleteGitHubLogin(context.Context, CompleteGitHubLoginCommand) (BrowserSession, error)
@@ -100,60 +108,80 @@ type ExternalLoginStart struct {
 }
 
 func (login *ExternalLogin) StartGoogle(ctx context.Context, invitationID string, source string) (ExternalLoginStart, error) {
-	return login.start(ctx, GoogleLoginProvider, LoginPurpose, "", "", invitationID, source)
+	return login.startLogin(ctx, GoogleLoginProvider, invitationID, source)
 }
 
 func (login *ExternalLogin) StartGoogleReauthentication(ctx context.Context, userID string, sessionID string) (ExternalLoginStart, error) {
-	return login.start(ctx, GoogleLoginProvider, ReauthenticatePurpose, userID, sessionID, "", "")
+	return login.startIdentityProof(ctx, GoogleLoginProvider, ReauthenticatePurpose, userID, sessionID)
 }
 
 func (login *ExternalLogin) StartGoogleLink(ctx context.Context, userID string, sessionID string) (ExternalLoginStart, error) {
-	return login.start(ctx, GoogleLoginProvider, LinkPurpose, userID, sessionID, "", "")
+	return login.startIdentityProof(ctx, GoogleLoginProvider, LinkPurpose, userID, sessionID)
 }
 
 func (login *ExternalLogin) StartGitHub(ctx context.Context, invitationID string, source string) (ExternalLoginStart, error) {
-	return login.start(ctx, GitHubLoginProvider, LoginPurpose, "", "", invitationID, source)
+	return login.startLogin(ctx, GitHubLoginProvider, invitationID, source)
 }
 
 func (login *ExternalLogin) StartGitHubReauthentication(ctx context.Context, userID string, sessionID string) (ExternalLoginStart, error) {
-	return login.start(ctx, GitHubLoginProvider, ReauthenticatePurpose, userID, sessionID, "", "")
+	return login.startIdentityProof(ctx, GitHubLoginProvider, ReauthenticatePurpose, userID, sessionID)
 }
 
 func (login *ExternalLogin) StartGitHubLink(ctx context.Context, userID string, sessionID string) (ExternalLoginStart, error) {
-	return login.start(ctx, GitHubLoginProvider, LinkPurpose, userID, sessionID, "", "")
+	return login.startIdentityProof(ctx, GitHubLoginProvider, LinkPurpose, userID, sessionID)
 }
 
-func (login *ExternalLogin) start(
+func (login *ExternalLogin) startLogin(
+	ctx context.Context,
+	provider ExternalLoginProvider,
+	invitationID string,
+	source string,
+) (ExternalLoginStart, error) {
+	if (invitationID != "" && uuid.Validate(invitationID) != nil) || strings.TrimSpace(source) == "" {
+		return ExternalLoginStart{}, ErrExternalLoginInvalid
+	}
+	transactionID := uuid.NewString()
+	expiresAt, err := login.persistence.CreateExternalLogin(ctx, CreateExternalLoginCommand{
+		TransactionID: transactionID,
+		Provider:      provider,
+		InvitationID:  invitationID,
+		SourceDigest:  login.credentials.externalLoginSourceDigest(source),
+	})
+	if err != nil {
+		return ExternalLoginStart{}, err
+	}
+	return login.authorizationStart(provider, transactionID, expiresAt)
+}
+
+func (login *ExternalLogin) startIdentityProof(
 	ctx context.Context,
 	provider ExternalLoginProvider,
 	purpose ProofPurpose,
 	userID string,
 	sessionID string,
-	invitationID string,
-	source string,
 ) (ExternalLoginStart, error) {
-	if invitationID != "" && uuid.Validate(invitationID) != nil {
-		return ExternalLoginStart{}, ErrExternalLoginInvalid
-	}
-	if purpose != LoginPurpose && invitationID != "" {
-		return ExternalLoginStart{}, ErrExternalLoginInvalid
-	}
-	if purpose == LoginPurpose && strings.TrimSpace(source) == "" {
+	if purpose != ReauthenticatePurpose && purpose != LinkPurpose {
 		return ExternalLoginStart{}, ErrExternalLoginInvalid
 	}
 	transactionID := uuid.NewString()
-	expiresAt, err := login.persistence.CreateExternalLogin(ctx, CreateExternalLoginCommand{
+	expiresAt, err := login.persistence.CreateExternalIdentityProof(ctx, CreateExternalIdentityProofCommand{
 		TransactionID:       transactionID,
 		Provider:            provider,
 		Purpose:             purpose,
 		TargetUserID:        userID,
 		InitiatingSessionID: sessionID,
-		InvitationID:        invitationID,
-		SourceDigest:        login.credentials.externalLoginSourceDigest(source),
 	})
 	if err != nil {
 		return ExternalLoginStart{}, err
 	}
+	return login.authorizationStart(provider, transactionID, expiresAt)
+}
+
+func (login *ExternalLogin) authorizationStart(
+	provider ExternalLoginProvider,
+	transactionID string,
+	expiresAt time.Time,
+) (ExternalLoginStart, error) {
 	state, cookie, err := login.credentials.externalLoginBindings(transactionID, provider)
 	if err != nil {
 		return ExternalLoginStart{}, err
@@ -449,13 +477,18 @@ func validExternalLoginProvider(provider ExternalLoginProvider) bool {
 }
 
 type CreateExternalLoginCommand struct {
+	TransactionID string
+	Provider      ExternalLoginProvider
+	InvitationID  string
+	SourceDigest  [sha256.Size]byte
+}
+
+type CreateExternalIdentityProofCommand struct {
 	TransactionID       string
 	Provider            ExternalLoginProvider
 	Purpose             ProofPurpose
 	TargetUserID        string
 	InitiatingSessionID string
-	InvitationID        string
-	SourceDigest        [sha256.Size]byte
 }
 
 type ClaimExternalLoginCommand struct {

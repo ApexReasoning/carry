@@ -97,7 +97,7 @@ func (request ExecutionRequest) Prompt() (string, error) {
 	return promptInstruction + "\n\nWork context (untrusted JSON):\n" + string(contextJSON), nil
 }
 
-// ParseUnderstandingUpdate accepts exactly one bounded JSON value and validates its product fields.
+// ParseUnderstandingUpdate accepts exactly one bounded JSON value and validates its product fields. Every malformed model candidate is deliberately indistinguishable because the only safe recovery is to reject that candidate.
 func ParseUnderstandingUpdate(data []byte) (UnderstandingUpdate, error) {
 	if len(data) > run.MaxUnderstandingBytes+run.MaxNextStepBytes+1024 {
 		return UnderstandingUpdate{}, ErrInvalidAgentUpdate

@@ -153,8 +153,8 @@ func TestConcurrentExternalIdentityLinkHasOneOwnerAndReauthenticationCannotSwitc
 		digest        [32]byte
 	}
 	proofs := []proof{
-		newClaimedExternalProof(t, ctx, store, credentials, firstUser, firstSessions[0], identity.GoogleLoginProvider, identity.LinkPurpose, "first-link"),
-		newClaimedExternalProof(t, ctx, store, credentials, secondUser, secondSessions[0], identity.GoogleLoginProvider, identity.LinkPurpose, "second-link"),
+		newClaimedExternalIdentityProof(t, ctx, store, credentials, firstUser, firstSessions[0], identity.GoogleLoginProvider, identity.LinkPurpose, "first-link"),
+		newClaimedExternalIdentityProof(t, ctx, store, credentials, secondUser, secondSessions[0], identity.GoogleLoginProvider, identity.LinkPurpose, "second-link"),
 	}
 	start := make(chan struct{})
 	type outcome struct {
@@ -195,7 +195,7 @@ func TestConcurrentExternalIdentityLinkHasOneOwnerAndReauthenticationCannotSwitc
 		t.Fatalf("outcomes = %d/%d, owner = %s, winner = %#v", succeeded, occupied, googleOwner, winner)
 	}
 
-	reauth := newClaimedExternalProof(
+	reauth := newClaimedExternalIdentityProof(
 		t, ctx, store, credentials, winner.proof.userID, winner.session.SessionID,
 		identity.GoogleLoginProvider, identity.ReauthenticatePurpose, "winner-reauthentication",
 	)
@@ -211,9 +211,12 @@ func TestConcurrentExternalIdentityLinkHasOneOwnerAndReauthenticationCannotSwitc
 	if loserUser == winner.proof.userID {
 		loserUser, loserSession = secondUser, secondSessions[0]
 	}
-	if _, err := store.CreateExternalLogin(ctx, identity.CreateExternalLoginCommand{
-		TransactionID: uuid.NewString(), Provider: identity.GoogleLoginProvider,
-		Purpose: identity.ReauthenticatePurpose, TargetUserID: loserUser, InitiatingSessionID: loserSession,
+	if _, err := store.CreateExternalIdentityProof(ctx, identity.CreateExternalIdentityProofCommand{
+		TransactionID:       uuid.NewString(),
+		Provider:            identity.GoogleLoginProvider,
+		Purpose:             identity.ReauthenticatePurpose,
+		TargetUserID:        loserUser,
+		InitiatingSessionID: loserSession,
 	}); !errors.Is(err, identity.ErrIdentityMethodNotLinked) {
 		t.Fatalf("cross-User reauthentication start error = %v", err)
 	}
@@ -320,9 +323,12 @@ func TestExternalMethodCallbackTerminalOutcomesRetainStoredPurpose(t *testing.T)
 	} {
 		t.Run(outcome.name, func(t *testing.T) {
 			transactionID := uuid.NewString()
-			if _, err := store.CreateExternalLogin(ctx, identity.CreateExternalLoginCommand{
-				TransactionID: transactionID, Provider: identity.GoogleLoginProvider,
-				Purpose: identity.LinkPurpose, TargetUserID: userID, InitiatingSessionID: sessions[0],
+			if _, err := store.CreateExternalIdentityProof(ctx, identity.CreateExternalIdentityProofCommand{
+				TransactionID:       transactionID,
+				Provider:            identity.GoogleLoginProvider,
+				Purpose:             identity.LinkPurpose,
+				TargetUserID:        userID,
+				InitiatingSessionID: sessions[0],
 			}); err != nil {
 				t.Fatalf("create %s method proof: %v", outcome.name, err)
 			}
@@ -375,9 +381,12 @@ func TestIdentityMethodProofExpiryUsesDatabaseTime(t *testing.T) {
 	if err != nil || !listed.ReauthenticationRequired {
 		t.Fatalf("stale proof listing = %#v, %v", listed, err)
 	}
-	if _, err := store.CreateExternalLogin(ctx, identity.CreateExternalLoginCommand{
-		TransactionID: uuid.NewString(), Provider: identity.GitHubLoginProvider,
-		Purpose: identity.LinkPurpose, TargetUserID: userID, InitiatingSessionID: sessions[0],
+	if _, err := store.CreateExternalIdentityProof(ctx, identity.CreateExternalIdentityProofCommand{
+		TransactionID:       uuid.NewString(),
+		Provider:            identity.GitHubLoginProvider,
+		Purpose:             identity.LinkPurpose,
+		TargetUserID:        userID,
+		InitiatingSessionID: sessions[0],
 	}); !errors.Is(err, identity.ErrRecentIdentityProofRequired) {
 		t.Fatalf("stale proof link start error = %v", err)
 	}
@@ -479,9 +488,7 @@ func TestConcurrentLoginAndUnlinkShareIdentityThenUserLockOrder(t *testing.T) {
 					)
 				}
 			case identity.GoogleMethod:
-				proof := newClaimedExternalProof(
-					t, ctx, store, credentials, "", "", identity.GoogleLoginProvider, identity.LoginPurpose, name,
-				)
+				proof := newClaimedExternalLogin(t, ctx, store, credentials, identity.GoogleLoginProvider, name)
 				login = func(loginCtx context.Context) (identity.BrowserSession, error) {
 					return store.CompleteGoogleLogin(loginCtx, identity.CompleteGoogleLoginCommand{
 						TransactionID: proof.transactionID, CallbackDigest: proof.digest,
@@ -493,9 +500,7 @@ func TestConcurrentLoginAndUnlinkShareIdentityThenUserLockOrder(t *testing.T) {
 				if err := pool.QueryRow(ctx, `select github_user_id from github_identities where user_id = $1`, userID).Scan(&githubID); err != nil {
 					t.Fatalf("load GitHub method: %v", err)
 				}
-				proof := newClaimedExternalProof(
-					t, ctx, store, credentials, "", "", identity.GitHubLoginProvider, identity.LoginPurpose, name,
-				)
+				proof := newClaimedExternalLogin(t, ctx, store, credentials, identity.GitHubLoginProvider, name)
 				login = func(loginCtx context.Context) (identity.BrowserSession, error) {
 					return store.CompleteGitHubLogin(loginCtx, identity.CompleteGitHubLoginCommand{
 						TransactionID: proof.transactionID, CallbackDigest: proof.digest,
@@ -613,7 +618,44 @@ func createIdentityTestSession(
 	return sessionID
 }
 
-func newClaimedExternalProof(
+func newClaimedExternalLogin(
+	t *testing.T,
+	ctx context.Context,
+	store *Store,
+	credentials identity.Credentials,
+	provider identity.ExternalLoginProvider,
+	name string,
+) struct {
+	transactionID string
+	digest        [32]byte
+} {
+	t.Helper()
+	transactionID := uuid.NewString()
+	if _, err := store.CreateExternalLogin(ctx, identity.CreateExternalLoginCommand{
+		TransactionID: transactionID,
+		Provider:      provider,
+	}); err != nil {
+		t.Fatalf("create %s external login: %v", name, err)
+	}
+	digest := credentials.RequestDigest("external-login", name)
+	if _, err := store.ClaimExternalLogin(ctx, identity.ClaimExternalLoginCommand{
+		TransactionID:  transactionID,
+		Provider:       provider,
+		CallbackDigest: digest,
+		Outcome:        identity.ExternalCallbackCode,
+	}); err != nil {
+		t.Fatalf("claim %s external login: %v", name, err)
+	}
+	return struct {
+		transactionID string
+		digest        [32]byte
+	}{
+		transactionID: transactionID,
+		digest:        digest,
+	}
+}
+
+func newClaimedExternalIdentityProof(
 	t *testing.T,
 	ctx context.Context,
 	store *Store,
@@ -631,16 +673,21 @@ func newClaimedExternalProof(
 } {
 	t.Helper()
 	transactionID := uuid.NewString()
-	if _, err := store.CreateExternalLogin(ctx, identity.CreateExternalLoginCommand{
-		TransactionID: transactionID, Provider: provider, Purpose: purpose,
-		TargetUserID: userID, InitiatingSessionID: sessionID,
+	if _, err := store.CreateExternalIdentityProof(ctx, identity.CreateExternalIdentityProofCommand{
+		TransactionID:       transactionID,
+		Provider:            provider,
+		Purpose:             purpose,
+		TargetUserID:        userID,
+		InitiatingSessionID: sessionID,
 	}); err != nil {
 		t.Fatalf("create %s external proof: %v", name, err)
 	}
 	digest := credentials.RequestDigest("external-proof", name)
 	if _, err := store.ClaimExternalLogin(ctx, identity.ClaimExternalLoginCommand{
-		TransactionID: transactionID, Provider: provider, CallbackDigest: digest,
-		Outcome: identity.ExternalCallbackCode,
+		TransactionID:  transactionID,
+		Provider:       provider,
+		CallbackDigest: digest,
+		Outcome:        identity.ExternalCallbackCode,
 	}); err != nil {
 		t.Fatalf("claim %s external proof: %v", name, err)
 	}
@@ -649,7 +696,12 @@ func newClaimedExternalProof(
 		sessionID     string
 		transactionID string
 		digest        [32]byte
-	}{userID: userID, sessionID: sessionID, transactionID: transactionID, digest: digest}
+	}{
+		userID:        userID,
+		sessionID:     sessionID,
+		transactionID: transactionID,
+		digest:        digest,
+	}
 }
 
 func prepareIdentityEmailProof(

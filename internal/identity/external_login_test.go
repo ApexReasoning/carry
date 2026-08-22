@@ -77,8 +77,8 @@ func TestExternalLoginInvitationContinuationSurvivesSuccessDenialAndReplay(t *te
 	}
 	invitationID := "33333333-3333-4333-8333-333333333333"
 	start, err := login.StartGoogle(context.Background(), invitationID, "198.51.100.10")
-	if err != nil || persistence.create.InvitationID != invitationID {
-		t.Fatalf("start continuation = %#v, %v", persistence.create, err)
+	if err != nil || persistence.loginCreate.InvitationID != invitationID {
+		t.Fatalf("start continuation = %#v, %v", persistence.loginCreate, err)
 	}
 	state := queryParameter(t, start.AuthorizationURL, "state")
 	callback := ExternalLoginCallback{
@@ -313,16 +313,16 @@ func TestExternalLoginStartsFixedReauthenticationAndLinkPurposes(t *testing.T) {
 	if _, err := login.StartGoogleReauthentication(context.Background(), userID, sessionID); err != nil {
 		t.Fatalf("start Google reauthentication: %v", err)
 	}
-	if persistence.create.Purpose != ReauthenticatePurpose || persistence.create.Provider != GoogleLoginProvider ||
-		persistence.create.TargetUserID != userID || persistence.create.InitiatingSessionID != sessionID {
-		t.Fatalf("Google reauthentication command = %#v", persistence.create)
+	if persistence.proofCreate.Purpose != ReauthenticatePurpose || persistence.proofCreate.Provider != GoogleLoginProvider ||
+		persistence.proofCreate.TargetUserID != userID || persistence.proofCreate.InitiatingSessionID != sessionID {
+		t.Fatalf("Google reauthentication command = %#v", persistence.proofCreate)
 	}
 	if _, err := login.StartGitHubLink(context.Background(), userID, sessionID); err != nil {
 		t.Fatalf("start GitHub link: %v", err)
 	}
-	if persistence.create.Purpose != LinkPurpose || persistence.create.Provider != GitHubLoginProvider ||
-		persistence.create.TargetUserID != userID || persistence.create.InitiatingSessionID != sessionID {
-		t.Fatalf("GitHub link command = %#v", persistence.create)
+	if persistence.proofCreate.Purpose != LinkPurpose || persistence.proofCreate.Provider != GitHubLoginProvider ||
+		persistence.proofCreate.TargetUserID != userID || persistence.proofCreate.InitiatingSessionID != sessionID {
+		t.Fatalf("GitHub link command = %#v", persistence.proofCreate)
 	}
 }
 
@@ -386,7 +386,10 @@ func TestExternalLoginRejectsWrongBrowserBindingBeforeProvider(t *testing.T) {
 }
 
 type externalLoginMemoryPersistence struct {
-	create                  CreateExternalLoginCommand
+	loginCreate             CreateExternalLoginCommand
+	proofCreate             CreateExternalIdentityProofCommand
+	createdPurpose          ProofPurpose
+	createdInvitationID     string
 	transactionID           string
 	provider                ExternalLoginProvider
 	claimed                 bool
@@ -404,7 +407,21 @@ func (p *externalLoginMemoryPersistence) CreateExternalLogin(
 	_ context.Context,
 	command CreateExternalLoginCommand,
 ) (time.Time, error) {
-	p.create = command
+	p.loginCreate = command
+	p.createdPurpose = LoginPurpose
+	p.createdInvitationID = command.InvitationID
+	p.transactionID = command.TransactionID
+	p.provider = command.Provider
+	return time.Now().Add(30 * time.Minute), nil
+}
+
+func (p *externalLoginMemoryPersistence) CreateExternalIdentityProof(
+	_ context.Context,
+	command CreateExternalIdentityProofCommand,
+) (time.Time, error) {
+	p.proofCreate = command
+	p.createdPurpose = command.Purpose
+	p.createdInvitationID = ""
 	p.transactionID = command.TransactionID
 	p.provider = command.Provider
 	return time.Now().Add(30 * time.Minute), nil
@@ -420,8 +437,8 @@ func (p *externalLoginMemoryPersistence) ClaimExternalLogin(
 		return ExternalLoginClaim{}, ErrExternalLoginInvalid
 	}
 	claim := ExternalLoginClaim{
-		Purpose:      p.create.Purpose,
-		InvitationID: p.create.InvitationID,
+		Purpose:      p.createdPurpose,
+		InvitationID: p.createdInvitationID,
 	}
 	if command.Outcome == ExternalCallbackDenied {
 		return claim, ErrExternalLoginDenied

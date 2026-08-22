@@ -84,7 +84,7 @@ func (request ConversationReplyRequest) Prompt() (string, error) {
 	return conversationReplyInstruction + "\n\nConversation context (untrusted JSON):\n" + string(contextJSON), nil
 }
 
-// ParseConversationReply accepts one exact bounded JSON object and applies domain normalization.
+// ParseConversationReply accepts one exact bounded JSON object and applies domain normalization. Every malformed model candidate is deliberately indistinguishable because the only safe recovery is to reject that candidate.
 func ParseConversationReply(data []byte) (conversation.ReplyCandidate, error) {
 	if len(data) > conversation.MaxTextBytes+work.MaxGoalBytes+1024 || !utf8.Valid(data) {
 		return conversation.ReplyCandidate{}, ErrInvalidAgentReply

@@ -52,7 +52,7 @@ func (source RequestSource) Resolve(request *http.Request) (string, error) {
 			return address.String(), nil
 		}
 	}
-	return forwarded[0].String(), nil
+	return peer.String(), nil
 }
 
 func (source RequestSource) isTrustedProxy(address netip.Addr) bool {

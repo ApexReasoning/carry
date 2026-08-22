@@ -37,6 +37,22 @@ func TestRequestSourceUsesRightmostUntrustedAddressBehindTrustedProxy(t *testing
 	}
 }
 
+func TestRequestSourceFallsBackToPeerWhenEveryForwardedAddressIsTrusted(t *testing.T) {
+	t.Parallel()
+	trusted := []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")}
+	request := httptest.NewRequest("POST", "/v1/auth/email/challenges", nil)
+	request.RemoteAddr = "10.0.0.8:443"
+	request.Header.Set("X-Forwarded-For", "10.9.8.7, 10.1.2.3")
+
+	resolved, err := NewRequestSource(trusted).Resolve(request)
+	if err != nil {
+		t.Fatalf("resolve all-trusted proxy chain: %v", err)
+	}
+	if resolved != "10.0.0.8" {
+		t.Fatalf("all-trusted proxy source = %q", resolved)
+	}
+}
+
 func TestRequestSourceRejectsMalformedTrustedProxyChain(t *testing.T) {
 	t.Parallel()
 	trusted := []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")}

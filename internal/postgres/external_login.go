@@ -3,6 +3,7 @@ package postgres
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"strings"
@@ -14,96 +15,49 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-const (
-	maxLiveExternalLoginsPerSource = 20
-	maxLiveExternalLoginsGlobal    = 10_000
-)
-
 func (s *Store) CreateExternalLogin(
 	ctx context.Context,
 	command identity.CreateExternalLoginCommand,
 ) (time.Time, error) {
-	if command.Purpose == "" {
-		command.Purpose = identity.LoginPurpose
-	}
-	if uuid.Validate(command.TransactionID) != nil || !validExternalProvider(command.Provider) {
-		return time.Time{}, identity.ErrExternalLoginInvalid
-	}
-	if !validIdentityProofTarget(command.Purpose, command.TargetUserID, command.InitiatingSessionID) {
-		return time.Time{}, identity.ErrExternalLoginInvalid
-	}
-	if command.InvitationID != "" && uuid.Validate(command.InvitationID) != nil {
-		return time.Time{}, identity.ErrExternalLoginInvalid
-	}
-	if command.Purpose != identity.LoginPurpose && command.InvitationID != "" {
+	if uuid.Validate(command.TransactionID) != nil ||
+		!validExternalProvider(command.Provider) ||
+		(command.InvitationID != "" && uuid.Validate(command.InvitationID) != nil) {
 		return time.Time{}, identity.ErrExternalLoginInvalid
 	}
 	transaction, err := s.pool.Begin(ctx)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("begin external proof: %w", err)
+		return time.Time{}, fmt.Errorf("begin external login: %w", err)
 	}
 	defer func() { _ = transaction.Rollback(context.Background()) }()
 	queries := s.queries.WithTx(transaction)
-	if command.Purpose == identity.LoginPurpose {
-		if err := queries.LockExternalLoginAdmission(ctx); err != nil {
-			return time.Time{}, fmt.Errorf("lock external login admission: %w", err)
-		}
-		if err := queries.LockExternalLoginSource(ctx, command.SourceDigest[:]); err != nil {
-			return time.Time{}, fmt.Errorf("lock external login source: %w", err)
-		}
-		if _, err := queries.DeleteExpiredExternalLogins(ctx); err != nil {
-			return time.Time{}, fmt.Errorf("delete expired external logins: %w", err)
-		}
-		sourceCount, err := queries.CountLiveExternalLoginsForSource(ctx, command.SourceDigest[:])
-		if err != nil {
-			return time.Time{}, fmt.Errorf("count live external logins for source: %w", err)
-		}
-		globalCount, err := queries.CountLiveExternalLogins(ctx)
-		if err != nil {
-			return time.Time{}, fmt.Errorf("count live external logins: %w", err)
-		}
-		if sourceCount >= maxLiveExternalLoginsPerSource {
-			return time.Time{}, identity.ErrExternalLoginRateLimited
-		}
-		if globalCount >= maxLiveExternalLoginsGlobal {
-			return time.Time{}, identity.ErrExternalLoginRateLimited
-		}
+	if err := queries.LockExternalLoginAdmission(ctx); err != nil {
+		return time.Time{}, fmt.Errorf("lock external login admission: %w", err)
 	}
-	if command.Purpose != identity.LoginPurpose {
-		if _, err := queries.LockUserForIdentityChange(ctx, command.TargetUserID); errors.Is(err, pgx.ErrNoRows) {
-			return time.Time{}, identity.ErrUnauthenticated
-		} else if err != nil {
-			return time.Time{}, fmt.Errorf("lock external proof User: %w", err)
-		}
-		if _, _, err := loadIdentitySession(
-			ctx, queries, command.TargetUserID, command.InitiatingSessionID,
-			command.Purpose == identity.LinkPurpose,
-		); err != nil {
-			return time.Time{}, err
-		}
-		if command.Purpose == identity.ReauthenticatePurpose {
-			var methodErr error
-			switch command.Provider {
-			case identity.GoogleLoginProvider:
-				_, methodErr = queries.LoadGoogleMethodForUser(ctx, command.TargetUserID)
-			case identity.GitHubLoginProvider:
-				_, methodErr = queries.LoadGitHubMethodForUser(ctx, command.TargetUserID)
-			}
-			if errors.Is(methodErr, pgx.ErrNoRows) {
-				return time.Time{}, identity.ErrIdentityMethodNotLinked
-			}
-			if methodErr != nil {
-				return time.Time{}, fmt.Errorf("load reauthentication method: %w", methodErr)
-			}
-		}
+	if err := queries.LockExternalLoginSource(ctx, command.SourceDigest[:]); err != nil {
+		return time.Time{}, fmt.Errorf("lock external login source: %w", err)
 	}
-	targetUserID, _ := nullablePostgresUUID(command.TargetUserID)
-	initiatingSessionID, _ := nullablePostgresUUID(command.InitiatingSessionID)
+	if _, err := queries.DeleteExpiredExternalLogins(ctx); err != nil {
+		return time.Time{}, fmt.Errorf("delete expired external logins: %w", err)
+	}
+	sourceCount, err := queries.CountLiveExternalLoginsForSource(ctx, command.SourceDigest[:])
+	if err != nil {
+		return time.Time{}, fmt.Errorf("count live external logins for source: %w", err)
+	}
+	globalCount, err := queries.CountLiveExternalLogins(ctx)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("count live external logins: %w", err)
+	}
+	if sourceCount >= identity.ExternalLoginSourceAdmissionLimit ||
+		globalCount >= identity.ExternalLoginGlobalAdmissionLimit {
+		return time.Time{}, identity.ErrExternalLoginRateLimited
+	}
+	targetUserID, _ := nullablePostgresUUID("")
+	initiatingSessionID, _ := nullablePostgresUUID("")
 	invitationID, _ := nullablePostgresUUID(command.InvitationID)
 	expiresAt, err := queries.CreateExternalLogin(ctx, dbsqlc.CreateExternalLoginParams{
 		TransactionID:       command.TransactionID,
 		Provider:            command.Provider.String(),
-		Purpose:             string(command.Purpose),
+		Purpose:             string(identity.LoginPurpose),
 		TargetUserID:        targetUserID,
 		InitiatingSessionID: initiatingSessionID,
 		InvitationID:        invitationID,
@@ -113,10 +67,80 @@ func (s *Store) CreateExternalLogin(
 		return time.Time{}, fmt.Errorf("create external login transaction: %w", err)
 	}
 	if !expiresAt.Valid {
-		return time.Time{}, errors.New("external proof expiry is invalid")
+		return time.Time{}, errors.New("external login expiry is invalid")
 	}
 	if err := transaction.Commit(ctx); err != nil {
-		return time.Time{}, fmt.Errorf("commit external proof: %w", err)
+		return time.Time{}, fmt.Errorf("commit external login: %w", err)
+	}
+	return expiresAt.Time, nil
+}
+
+func (s *Store) CreateExternalIdentityProof(
+	ctx context.Context,
+	command identity.CreateExternalIdentityProofCommand,
+) (time.Time, error) {
+	if uuid.Validate(command.TransactionID) != nil ||
+		!validExternalProvider(command.Provider) ||
+		command.Purpose == identity.LoginPurpose ||
+		!validIdentityProofTarget(command.Purpose, command.TargetUserID, command.InitiatingSessionID) {
+		return time.Time{}, identity.ErrExternalLoginInvalid
+	}
+	transaction, err := s.pool.Begin(ctx)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("begin external identity proof: %w", err)
+	}
+	defer func() { _ = transaction.Rollback(context.Background()) }()
+	queries := s.queries.WithTx(transaction)
+	if _, err := queries.LockUserForIdentityChange(ctx, command.TargetUserID); errors.Is(err, pgx.ErrNoRows) {
+		return time.Time{}, identity.ErrUnauthenticated
+	} else if err != nil {
+		return time.Time{}, fmt.Errorf("lock external identity proof User: %w", err)
+	}
+	if _, _, err := loadIdentitySession(
+		ctx,
+		queries,
+		command.TargetUserID,
+		command.InitiatingSessionID,
+		command.Purpose == identity.LinkPurpose,
+	); err != nil {
+		return time.Time{}, err
+	}
+	if command.Purpose == identity.ReauthenticatePurpose {
+		var methodErr error
+		switch command.Provider {
+		case identity.GoogleLoginProvider:
+			_, methodErr = queries.LoadGoogleMethodForUser(ctx, command.TargetUserID)
+		case identity.GitHubLoginProvider:
+			_, methodErr = queries.LoadGitHubMethodForUser(ctx, command.TargetUserID)
+		}
+		if errors.Is(methodErr, pgx.ErrNoRows) {
+			return time.Time{}, identity.ErrIdentityMethodNotLinked
+		}
+		if methodErr != nil {
+			return time.Time{}, fmt.Errorf("load reauthentication method: %w", methodErr)
+		}
+	}
+	targetUserID, _ := nullablePostgresUUID(command.TargetUserID)
+	initiatingSessionID, _ := nullablePostgresUUID(command.InitiatingSessionID)
+	invitationID, _ := nullablePostgresUUID("")
+	var sourceDigest [sha256.Size]byte
+	expiresAt, err := queries.CreateExternalLogin(ctx, dbsqlc.CreateExternalLoginParams{
+		TransactionID:       command.TransactionID,
+		Provider:            command.Provider.String(),
+		Purpose:             string(command.Purpose),
+		TargetUserID:        targetUserID,
+		InitiatingSessionID: initiatingSessionID,
+		InvitationID:        invitationID,
+		SourceDigest:        sourceDigest[:],
+	})
+	if err != nil {
+		return time.Time{}, fmt.Errorf("create external identity proof transaction: %w", err)
+	}
+	if !expiresAt.Valid {
+		return time.Time{}, errors.New("external identity proof expiry is invalid")
+	}
+	if err := transaction.Commit(ctx); err != nil {
+		return time.Time{}, fmt.Errorf("commit external identity proof: %w", err)
 	}
 	return expiresAt.Time, nil
 }
@@ -335,6 +359,7 @@ func validateExternalCompletion(
 	return current, nil
 }
 
+// resolveGoogleIdentity deliberately makes absent, replaced, and foreign reauthentication methods indistinguishable so one User cannot probe another User's identity methods.
 func resolveGoogleIdentity(
 	ctx context.Context,
 	queries *dbsqlc.Queries,
@@ -441,6 +466,7 @@ func resolveGoogleIdentity(
 	}
 }
 
+// resolveGitHubIdentity deliberately makes absent, replaced, and foreign reauthentication methods indistinguishable so one User cannot probe another User's identity methods.
 func resolveGitHubIdentity(
 	ctx context.Context,
 	queries *dbsqlc.Queries,
