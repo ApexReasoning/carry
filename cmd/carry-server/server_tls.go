@@ -6,7 +6,9 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"io"
 	"os"
+	"runtime"
 	"strings"
 
 	"github.com/ApexReasoning/carry/internal/machine"
@@ -22,7 +24,7 @@ func loadServerTLS(
 	if err != nil {
 		return nil, nil, fmt.Errorf("read CA certificate: %w", err)
 	}
-	caPrivateKeyPEM, err := os.ReadFile(caPrivateKeyPath)
+	caPrivateKeyPEM, err := readPrivateKey(caPrivateKeyPath)
 	if err != nil {
 		return nil, nil, fmt.Errorf("read CA private key: %w", err)
 	}
@@ -30,7 +32,15 @@ func loadServerTLS(
 	if err != nil {
 		return nil, nil, err
 	}
-	serverCertificate, err := tls.LoadX509KeyPair(serverCertificatePath, serverPrivateKeyPath)
+	serverCertificatePEM, err := os.ReadFile(serverCertificatePath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read server certificate: %w", err)
+	}
+	serverPrivateKeyPEM, err := readPrivateKey(serverPrivateKeyPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read server private key: %w", err)
+	}
+	serverCertificate, err := tls.X509KeyPair(serverCertificatePEM, serverPrivateKeyPEM)
 	if err != nil {
 		return nil, nil, fmt.Errorf("load server certificate: %w", err)
 	}
@@ -50,4 +60,43 @@ func loadServerTLS(
 		ClientCAs:    clientCAs,
 		ClientAuth:   tls.VerifyClientCertIfGiven,
 	}, authority, nil
+}
+
+func readPrivateKey(path string) (contents []byte, err error) {
+	pathInfo, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	if pathInfo.Mode()&os.ModeSymlink != 0 || !pathInfo.Mode().IsRegular() {
+		return nil, errors.New("private key is not a regular file")
+	}
+	if runtime.GOOS != "windows" && pathInfo.Mode().Perm()&0o077 != 0 {
+		return nil, errors.New("private key is accessible by group or others")
+	}
+
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if closeErr := file.Close(); err == nil && closeErr != nil {
+			err = closeErr
+		}
+	}()
+	openedInfo, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !os.SameFile(pathInfo, openedInfo) || !openedInfo.Mode().IsRegular() {
+		return nil, errors.New("private key changed while opening")
+	}
+	const maximumPrivateKeyBytes = 1 << 20
+	contents, err = io.ReadAll(io.LimitReader(file, maximumPrivateKeyBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(contents) > maximumPrivateKeyBytes {
+		return nil, errors.New("private key is too large")
+	}
+	return contents, nil
 }

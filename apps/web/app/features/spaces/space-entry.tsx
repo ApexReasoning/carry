@@ -3,23 +3,30 @@ import {
   MutationOutcomeUnknownError,
   SpaceSlugConflictError,
 } from "../../carry-api";
-import { createExactSpace } from "./space-creation";
+import {
+  CorruptPendingSpaceCreationError,
+  createExactSpace,
+  discardCorruptPendingSpaceCreation,
+} from "./space-creation";
 import { useState } from "react";
 
 type CreationState =
   | { kind: "idle" }
   | { kind: "creating"; suffix: number | undefined }
   | { kind: "error"; message: string }
+  | { kind: "damaged"; message: string }
   | { kind: "unknown"; message: string; suffix: number | undefined }
   | { kind: "conflict"; value: SpaceSlugConflictError };
 
 export function SpaceEntry({
   user,
   onEnter,
+  onSignOut,
   notice,
 }: {
   user: User;
   onEnter: (slug: string) => void;
+  onSignOut: () => void;
   notice?: string | null;
 }) {
   const [name, setName] = useState("");
@@ -27,12 +34,14 @@ export function SpaceEntry({
   const busy = creation.kind === "creating";
   const conflict = creation.kind === "conflict" ? creation.value : null;
   const error =
-    creation.kind === "error" || creation.kind === "unknown"
+    creation.kind === "error" ||
+    creation.kind === "damaged" ||
+    creation.kind === "unknown"
       ? creation.message
       : conflict?.message;
 
   async function create(suffix?: number) {
-    if (!name.trim()) return;
+    if (!name.trim() || creation.kind === "damaged") return;
     setCreation({ kind: "creating", suffix });
     try {
       const created = await createExactSpace(user.user_id, name, suffix);
@@ -41,6 +50,8 @@ export function SpaceEntry({
     } catch (caught) {
       if (caught instanceof SpaceSlugConflictError) {
         setCreation({ kind: "conflict", value: caught });
+      } else if (caught instanceof CorruptPendingSpaceCreationError) {
+        setCreation({ kind: "damaged", message: caught.message });
       } else if (caught instanceof MutationOutcomeUnknownError) {
         setCreation({ kind: "unknown", message: caught.message, suffix });
       } else {
@@ -55,9 +66,17 @@ export function SpaceEntry({
         className="space-entry-panel"
         aria-labelledby="space-entry-title"
       >
-        <p className="brand-mark">
-          Carry<span className="brand-dot">.</span>
-        </p>
+        <div className="space-entry-account">
+          <p className="brand-mark">
+            Carry<span className="brand-dot">.</span>
+          </p>
+          <div>
+            <span className="member-name">{user.display_name}</span>
+            <button className="ghost-button" type="button" onClick={onSignOut}>
+              Sign out
+            </button>
+          </div>
+        </div>
         <p className="eyebrow">Your Spaces</p>
         <h1 id="space-entry-title">Choose a Space</h1>
         {user.spaces.length === 0 ? (
@@ -96,7 +115,7 @@ export function SpaceEntry({
           <button
             className="primary-button"
             type="submit"
-            disabled={busy || !name.trim()}
+            disabled={busy || creation.kind === "damaged" || !name.trim()}
           >
             {busy
               ? "Creating…"
@@ -105,6 +124,30 @@ export function SpaceEntry({
                 : "Create Space"}
           </button>
         </form>
+        {creation.kind === "damaged" ? (
+          <section className="identity-confirmation">
+            <p>
+              Review the authoritative Space list above before discarding the
+              damaged local request identities. Discarding them allows a new
+              creation but cannot prove whether an earlier unknown creation
+              completed.
+            </p>
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={() => {
+                try {
+                  discardCorruptPendingSpaceCreation();
+                  setCreation({ kind: "idle" });
+                } catch (caught) {
+                  setCreation({ kind: "damaged", message: message(caught) });
+                }
+              }}
+            >
+              Discard damaged Space identities
+            </button>
+          </section>
+        ) : null}
         {conflict?.suggestedSlug && conflict.suggestedSuffix ? (
           <div className="space-conflict">
             <p>

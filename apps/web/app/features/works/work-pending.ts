@@ -5,6 +5,8 @@ const uuidPattern =
 
 type PendingMutations = Record<string, string>;
 
+export class CorruptPendingWorkIdentitiesError extends Error {}
+
 type MutationCommand = {
   operation: "create" | "message" | "retry" | "accept-review";
   memberID: string;
@@ -58,6 +60,20 @@ export async function pendingReviewIdentity(
   );
 }
 
+export function discardCorruptPendingWorkIdentities(): void {
+  const encoded = window.sessionStorage.getItem(storageKey);
+  if (!encoded) return;
+  try {
+    if (isPendingMutations(JSON.parse(encoded) as unknown)) return;
+  } catch {
+    // The explicit recovery below owns malformed JSON and invalid shapes alike.
+  }
+  window.sessionStorage.removeItem(storageKey);
+  if (window.sessionStorage.getItem(storageKey) !== null) {
+    throw new Error("Damaged pending Work identities could not be cleared");
+  }
+}
+
 export function clearPendingIdentity(identity: MutationIdentity): void {
   const pending = loadPending();
   if (pending[identity.digest] !== identity.idempotencyKey) return;
@@ -95,10 +111,15 @@ function loadPending(): PendingMutations {
   try {
     value = JSON.parse(encoded);
   } catch (caught) {
-    throw new Error("Pending Work identities are invalid", { cause: caught });
+    throw new CorruptPendingWorkIdentitiesError(
+      "Pending Work identities are damaged",
+      { cause: caught },
+    );
   }
   if (!isPendingMutations(value)) {
-    throw new Error("Pending Work identities are invalid");
+    throw new CorruptPendingWorkIdentitiesError(
+      "Pending Work identities are damaged",
+    );
   }
   return value;
 }

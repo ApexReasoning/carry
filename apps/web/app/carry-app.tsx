@@ -50,9 +50,22 @@ export function App() {
         <p className="alert" role="alert">
           {session.error}
         </p>
-        <button className="ghost-button" type="button" onClick={session.retry}>
-          Try again
-        </button>
+        <div className="identity-method-actions">
+          <button
+            className="ghost-button"
+            type="button"
+            onClick={session.retry}
+          >
+            Try again
+          </button>
+          <button
+            className="secondary-button"
+            type="button"
+            onClick={session.returnHome}
+          >
+            Return to Carry home
+          </button>
+        </div>
       </main>
     );
   }
@@ -140,6 +153,7 @@ export function App() {
         <SpaceEntry
           user={session.user}
           notice={session.error}
+          onSignOut={() => void session.signOut()}
           onEnter={(slug) => {
             window.location.assign(`/s/${encodeURIComponent(slug)}`);
           }}
@@ -283,6 +297,22 @@ export function App() {
           <p className="alert global-alert" role="alert">
             {session.error ?? board.error}
           </p>
+        ) : null}
+        {board.pendingIdentitiesCorrupt ? (
+          <section className="identity-confirmation">
+            <p>
+              Review the authoritative Work list before discarding the damaged
+              local request identities. Discarding them allows new actions but
+              cannot prove whether an earlier unknown action completed.
+            </p>
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={board.discardDamagedPendingIdentities}
+            >
+              Discard damaged Work identities
+            </button>
+          </section>
         ) : null}
         {board.spaceID ? (
           <>

@@ -4,7 +4,7 @@
 
 节点 0–12 是旧合同下的技术证据。旧的节点 13–19 作废，不得实施。本文件是节点 12 之后唯一的活动路线，拥有节点路线、研究程序、评审协议和证据标准。
 
-Roadmap reset 已由 Issue #1、commit `f2a10bc` 与 CI `32504005646` 关闭；节点 13 已由 Issue #2、commit `663123b` 与 CI `32525708982` 关闭。当前节点是 **节点 14 — 邀请链接的登录与接受（实现中）**；Issue #3 的研究审计与 Revised exact design freeze v3 已通过，生产改动必须留在审计预算内。
+Roadmap reset 已由 Issue #1、commit `f2a10bc` 与 CI `32504005646` 关闭；节点 13 已由 Issue #2、commit `663123b` 与 CI `32525708982` 关闭。节点 14 已在 Issue #3 重开 corrective closure；原 closing commit 不是 corrective 终态。当前 gate 是 Issue #5 的 pre-Node15 全项目检查，节点 15 研究暂停；Issue #3 corrective、Issue #5 gate 与用户从零产品体验全部通过前不得恢复节点 15 或写其生产实现。
 
 ## 1. 路线规则
 
@@ -287,11 +287,11 @@ GATE：<1 产品与直接证据 | 2 权限并发隐私与 AI-native | 3 美学�
 
 **删除/替换**：删除 `Invitations.destinationURL` 与固定 `/invitations` 构造、`ExternalOrigin.InvitationsURL`、Web 把 `/invitations` 当作邮件准确入口的分支、会丢失准确意图的 history rewrites、通用 no-match/first-Space recovery 和固定通用链接断言。保留认证后的 `/invitations` inbox、email-owner list、delivery observation 与现有 Identity method 管理。
 
-**线性流程**：manager 签发并看到/复制由当前 origin 与 invitation ID 派生的准确链接 → 收件人打开链接 → 认证前只看到三种登录方式 → Email 验证留在当前页，Google/GitHub 的 login transaction 只携带 UUID → 有效成功/失败/重放回准确路径，失去 cookie/state 绑定则回 root 并要求重开链接 → 登录后 owner-only read → non-owner/unknown 统一 unavailable，恢复只取决于 viewer 自己是否已有 Email method → 准确 owner 看 pending/accepted/revoked/expired → pending 且 Email proof 不足 10 分钟时在页内证明 → 显式 Accept → 完整导航到 `/` chooser。
+**线性流程**：manager 签发并看到/复制由当前 origin 与 invitation ID 派生的准确链接 → 收件人打开链接 → 认证前只看到三种登录方式 → Email 验证留在当前页，Google/GitHub 的 login transaction 只携带 UUID → 有效成功/失败/重放回准确路径，失去 cookie/state 绑定则回 root 并要求重开链接 → 登录后 owner-only read → non-owner/unknown 统一 unavailable，恢复只取决于 viewer 自己是否已有 Email method → 准确 owner 看 pending/accepted/revoked/expired → pending 时可用 `Not now` 只在当前 browser session 暂缓自动优先级并进入 chooser，显式 inbox/准确链接始终重新打开且不改变 authority → pending 且 Email proof 不足 10 分钟时在页内证明 → 显式 Accept → 完整导航到 `/` chooser。
 
-**事务与隐私**：`external_login_transactions.invitation_id` nullable UUID、无 FK，并约束只能用于 `purpose='login'`。Accept 在任何 Membership 写入前完成 session identity/method/revocation、准确 Email owner、邀请 identity 与终态的无时间授权；最后可能等待的 Membership insert 后只取一次 `clock_timestamp()`，同一个值校验 session/proof/expiry、写 accepted timestamp 与 SQL predicate。Revoke 在 manager 与邀请锁后同样只取一次 clock。owner/scope 成立后 expired→410、revoked→410、accepted→409；wrong User、unknown、cross-owner/cross-Space 始终统一 404。页面使用 `no-referrer`，认证前没有 preview。
+**事务与隐私**：`external_login_transactions.invitation_id` nullable UUID、无 FK，并约束只能用于 `purpose='login'`。未认证 OAuth start 只接受有界且字段准确的 form；Server 从可信代理规则推导来源，PostgreSQL 按 global→source 顺序取 advisory lock、删除过期 transaction、裁决 live source/global cap，再创建 transaction，超限返回 429。Accept 在任何 Membership 写入前完成 session identity/method/revocation、准确 Email owner、邀请 identity 与终态的无时间授权；最后可能等待的 Membership insert 后只取一次 `clock_timestamp()`，同一个值校验 session/proof/expiry、写 accepted timestamp 与 SQL predicate。Revoke 在 manager 与邀请锁后同样只取一次 clock。owner/scope 成立后 expired→410、revoked→410、accepted→409；wrong User、unknown、cross-owner/cross-Space 始终统一 404。页面使用 `no-referrer`，认证前没有 preview。
 
-**直接证据**：准确 URL 与 persisted-ID issue replay；login-only migration/no-FK；OAuth success/failure/replay/cookie binding；targeted pending/terminal/current/former owner projection与所有 non-owner 组合统一；non-owner Accept 零 Membership 后果；Accept/Revoke 两连接等待跨越 wall expiry 后拒绝；Accept-vs-Revoke 单 winner；页面内 Email proof、Unknown reload、manager copy/same resend URL、通用 inbox fallback、无 pre-auth preview/no-referrer 与 public-process 准确链接旅程。live Google/GitHub 凭据缺失只作为 residual 报告，按 Issue #3 v2 不阻断。
+**直接证据**：准确 URL 与 persisted-ID issue replay；login-only migration/no-FK；OAuth success/failure/replay/cookie binding、有界/准确 form、来源透传、并发 source cap 与过期行回收；targeted pending/terminal/current/former owner projection与所有 non-owner 组合统一；non-owner Accept 零 Membership 后果；Accept/Revoke 两连接等待跨越 wall expiry 后拒绝；Accept-vs-Revoke 单 winner；页面内 Email proof、Unknown reload、manager copy/same resend URL、通用 inbox fallback、无 pre-auth preview/no-referrer 与 public-process 准确链接旅程。live Google/GitHub 凭据缺失只作为 residual 报告，按 Issue #3 v2 不阻断。
 
 **命令**：`go test ./internal/space/... ./internal/identity/... ./internal/server/...`；`./scripts/test-db ./internal/postgres/...`；`./scripts/test-db ./cmd/carry-server/...`；`mise exec node@24.19.0 -- pnpm --dir apps/web test`；`mise exec node@24.19.0 -- pnpm --dir apps/web typecheck`；`mise exec node@24.19.0 -- make check`。
 
@@ -311,11 +311,11 @@ GATE：<1 产品与直接证据 | 2 权限并发隐私与 AI-native | 3 美学�
 
 **研究问题**：一台 Host 上的具体 Agent 如何被发现并绑定成一个持久身份，并把新身份的人类 owner 只取自准确的浏览器批准成员，使 Host 掉线与重复发现都不改变已有身份？**反证问题**：在哪种真实情况下（重装、克隆机器、同机多进程、改名、第二名成员重新接入）同一路径会产生重复身份、冒充另一个 Agent、改写已有 owner，或复活 Removed 身份？
 
-**权限 / 失败 / 直接证据**：只有具有连接 Host 权限的批准成员能成为新 Agent 的人类 owner；setup shell 与发现内容不能提供 owner；重复名字被数据库拒绝并给出建议；两次 `setup` 不产生重复 Agent；第二名成员重新接入时已有 Agent 的 owner 不变而只对真正的新身份使用当前批准者；Removed 不被发现复活；杀掉 Host 后清单仍显示 Agent 且标为不在线；未确认的接入不授予任何权限；真实机器上完成一次 setup 并在浏览器看到清单。
+**权限 / 失败 / 直接证据**：只有具有连接 Host 权限的批准成员能成为新 Agent 的人类 owner；setup shell 与发现内容不能提供 owner；Host 不提交名字，PostgreSQL 分配不可变 Machine ordinal 并自动产生 Space-unique 的 `Pi`/`Codex` 配对名字，不存在冲突建议协议；两次 `setup` 不产生重复 Agent；第二名成员重新接入时已有 Agent 的 owner 不变而只对真正的新身份使用当前批准者；Removed 不被发现复活；杀掉 Host 后清单仍显示 Agent 且标为不在线；未确认的接入不授予任何权限；真实机器上完成一次 setup 并在浏览器看到清单。
 
 **命令**：`go test ./internal/agent/... ./internal/machine/... ./internal/host/...`；`make test-db`；`pnpm --dir apps/web test`；`make check-product`。
 
-**不做**：per-Agent owner 选择界面、Host 与 Agent 的移除与离场（节点 28）、模型选择界面（节点 16 判定）、Agent 与 Work 的关系、任何 provider 目录。
+**不做**：per-Agent owner 选择界面、完整 Host/Agent 移除确认、受影响 Work 交接与离场 UX（节点 28；节点 15 仍须让当前 Machine revoke 原子地把绑定的 Active Agent 置为 Removed）、模型选择界面（节点 16 判定）、Agent 与 Work 的关系、任何 provider 目录。
 
 ### 节点 16 — 选定 Agent 的对话与可恢复会话
 

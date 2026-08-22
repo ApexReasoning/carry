@@ -38,17 +38,19 @@ Carry 是用户可以长期托付责任的 AI 同事：用户在 carry.ai Web �
 
 Membership 只保留两项彼此独立的窄权限：管理成员、连接 Host。它们不是角色层级或通用权限系统。创建 Space 的成员初始拥有两项；当前持有人可以把自己拥有的某一项授予同 Space 的 Active 成员，邀请人也只能授予自己已有的权限。除非结束整个 Space，每项始终至少有一名 Active 持有人。
 
-具有成员管理权限的成员从设置里生成邀请链接。链接包含现有邀请 ID 的准确路径；该 ID 只用于在登录后恢复导航意图，持有它不披露邀请内容，也不授权接受。认证前只显示通用登录方式，不预览 Space、邀请人、权限、收件人、有效期或状态。准确受邀 Email 的当前 owner 登录后能看到 Space、邀请人、两项权限，并在接受前用页面内 Email 验证完成近期证明；Google/GitHub profile email 不授予邀请权限。链接一次性、有有效期、可撤销；准确 owner 能看到 revoked、expired、accepted 的真实终态，其他 User、未知 ID 和由别人接受的邀请都得到同一个无元数据的 unavailable 结果。已失效的链接给出明确原因，不静默失败。成员移除也要求这项权限；连接或撤销 Host 要求连接 Host 权限。
+具有成员管理权限的成员从设置里生成邀请链接。链接包含现有邀请 ID 的准确路径；该 ID 只用于在登录后恢复导航意图，持有它不披露邀请内容，也不授权接受。认证前只显示通用登录方式，不预览 Space、邀请人、权限、收件人、有效期或状态。准确受邀 Email 的当前 owner 登录后能看到 Space、邀请人、两项权限，并在接受前用页面内 Email 验证完成近期证明；Google/GitHub profile email 不授予邀请权限。链接一次性、有有效期、可撤销；准确 owner 能看到 revoked、expired、accepted 的真实终态，其他 User、未知 ID 和由别人接受的邀请都得到同一个无元数据的 unavailable 结果。已失效的链接给出明确原因，不静默失败。认证后的 User 可以选择 `Not now`，只在当前浏览器 session 内暂缓自动邀请优先级并进入 Space 选择；显式打开邀请 inbox 或准确链接始终重新显示邀请。这个 browser presentation 状态不改变邀请终态、可见性或接受权限。成员移除也要求这项权限；连接或撤销 Host 要求连接 Host 权限。
 
 ### 2.3 Host 与 Agent
 
-用户在设置里选择 Add Host，在目标机器上运行显示出来的命令（`carry setup`），然后在浏览器里核对这台机器确实是自己刚才操作的那一台。确认后 Web 显示这台 Host 以及它上面的 Agent 清单。设置里可以增加和移除 Host。
+用户在设置里选择 Add Host，在目标机器上运行显示出来的 `carry setup`，然后在浏览器里核对这台机器确实是自己刚才操作的那一台。确认并兑换后，同一个命令继续进入第一次前台长驻 Host；以后用 `carry host start` 重启，不安装后台服务。Web 显示这台 Host 以及它上面的 Agent 清单。设置里可以增加和撤销 Host。
 
-Agent 清单上每个 Agent 显示：名字（在 Space 内唯一）、确定性生成的头像、所属 Host、人类 owner、状态（Active / Removed），以及在线、最近活跃和正在参与的 Work。Space 内所有成员都可以选择其中的 Active Agent；第一版没有 per-Agent access mode。当具体 Agent 能可靠报告当前可选模型时，界面才显示模型选择；发现失败时使用 provider 默认值且不显示选择器。没有头像上传，没有模型或 provider 目录。
+第一版每个逻辑 Host 至多暴露一个默认 Pi Agent 和一个默认 Codex Agent；没有 profile、slot、provider/model/runtime 目录或操作员 roster。Agent 清单上每个 Agent 显示：名字（在 Space 内唯一）、确定性生成的头像、所属 Host、人类 owner、状态（Active / Removed），以及在线、最近活跃和正在参与的 Work。名字由 PostgreSQL 自动分配为同一 Host 配对的 `Pi` / `Codex`、`Pi 2` / `Codex 2` 等稳定名字；Host 或人不提交名字，Removed 名字不复用。Space 内所有成员都可以选择其中的 Active Agent；第一版没有 per-Agent access mode。当具体 Agent 能可靠报告当前可选模型时，界面才显示模型选择；发现失败时使用 provider 默认值且不显示选择器。没有头像上传。
 
-一个新 Agent 的人类 owner 是在浏览器中批准这台 Host 接入的已认证成员，不来自 setup shell、进程发现内容或模型输出。再次 setup 或发现只更新在场：不改写已有 Agent 的人类 owner、名字或生命周期，也不复活 Removed Agent。自愿情况下，只有当前人类 owner 可以把 Agent 转给同一 Space 的另一名 Active 成员，或把它转为 Removed；安全撤销 Host/Agent 与成员强制移除是独立的强制路径，不因此获得 Work owner 权限。
+一个新 Agent 的人类 owner 是浏览器批准该逻辑 Host 的已认证成员，不来自 setup shell、进程发现内容或模型输出；该成员仍须是当前 Membership。每份在场报告必须完整说明 Pi 与 Codex 各自 present/absent：明确 absent 立即显示离线，报告过期后按数据库时间显示离线，最近活跃取最近一次数据库确认 present 的时间。再次 setup 或发现只更新在场：不改写已有 Agent 的人类 owner、名字或生命周期，也不复活 Removed Agent。
 
-Host 掉线不删除 Agent 身份：Agent 仍在清单里，只是不在线。
+复制完整 Host 本地状态表示复制同一个逻辑 Host，Carry 不声称能识别两台物理机器；修复方式是撤销该 Host，再分别重新 setup。丢失本地状态或重装后的新 setup 是一台新逻辑 Host，Web 同时保留旧、新 Host，不按 hostname、显示名或 provider 状态猜测合并；用户可以撤销旧 Host。Host 意外掉线不删除 Agent 身份，只让它们离线。撤销 Host 会在同一数据库裁决中把它绑定的 Active Agent 置为 Removed；强制移除成员也在撤销 Membership 前把该成员的 Active Agent 置为 Removed。完整离场与受影响 Work 交接仍属于后续离场旅程。
+
+自愿情况下，只有当前人类 owner 可以把 Agent 转给同一 Space 的另一名 Active 成员，或把它转为 Removed；安全撤销 Host/Agent 与成员强制移除是独立的强制路径，不因此获得 Work owner 权限。
 
 ### 2.4 对话
 

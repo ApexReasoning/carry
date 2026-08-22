@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -136,23 +137,47 @@ func (client *appServerClient) startThread(ctx context.Context, cwd string) (str
 		return "", err
 	}
 	var started threadStartResult
-	if json.Unmarshal(response, &started) != nil || !started.isolatedFor(cwd) {
-		return "", fmt.Errorf("%w: Codex did not establish the required isolated thread", host.ErrAgentFailed)
+	if err := json.Unmarshal(response, &started); err != nil {
+		return "", fmt.Errorf("%w: decode Codex thread: %v", host.ErrAgentFailed, err)
+	}
+	if err := started.validateIsolation(cwd); err != nil {
+		return "", fmt.Errorf("%w: %v", host.ErrAgentFailed, err)
 	}
 	return started.Thread.ID, nil
 }
 
-func (started threadStartResult) isolatedFor(cwd string) bool {
-	return started.Thread.ID != "" &&
-		started.Thread.Ephemeral &&
-		filepath.Clean(started.Thread.CWD) == filepath.Clean(cwd) &&
-		started.Thread.GitInfo == nil &&
-		len(started.RuntimeWorkspaceRoots) == 1 &&
-		filepath.Clean(started.RuntimeWorkspaceRoots[0]) == filepath.Clean(cwd) &&
-		len(started.InstructionSources) == 0 &&
-		started.ApprovalPolicy == "never" &&
-		started.Sandbox.Type == "readOnly" &&
-		!started.Sandbox.NetworkAccess
+func (started threadStartResult) validateIsolation(cwd string) error {
+	if started.Thread.ID == "" {
+		return errors.New("Codex omitted the isolated thread identity")
+	}
+	if !started.Thread.Ephemeral {
+		return errors.New("Codex thread is not ephemeral")
+	}
+	if filepath.Clean(started.Thread.CWD) != filepath.Clean(cwd) {
+		return errors.New("Codex thread uses another working directory")
+	}
+	if started.Thread.GitInfo != nil {
+		return errors.New("Codex thread inherited Git repository authority")
+	}
+	if len(started.RuntimeWorkspaceRoots) != 1 {
+		return errors.New("Codex thread did not establish one isolated workspace root")
+	}
+	if filepath.Clean(started.RuntimeWorkspaceRoots[0]) != filepath.Clean(cwd) {
+		return errors.New("Codex thread workspace root differs from its working directory")
+	}
+	if len(started.InstructionSources) != 0 {
+		return errors.New("Codex thread inherited instruction sources")
+	}
+	if started.ApprovalPolicy != "never" {
+		return errors.New("Codex thread can request provider-side approval")
+	}
+	if started.Sandbox.Type != "readOnly" {
+		return errors.New("Codex thread sandbox is not read-only")
+	}
+	if started.Sandbox.NetworkAccess {
+		return errors.New("Codex thread sandbox allows network access")
+	}
+	return nil
 }
 
 func (client *appServerClient) sendRequest(id int, method string, params any) error {

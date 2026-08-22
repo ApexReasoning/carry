@@ -69,19 +69,6 @@ p {
   background: var(--accent-soft);
 }
 
-.visually-hidden {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  margin: -1px;
-  padding: 0;
-  border: 0;
-  clip: rect(0 0 0 0);
-  clip-path: inset(50%);
-  overflow: hidden;
-  white-space: nowrap;
-}
-
 /* Brand */
 
 .brand,
@@ -342,6 +329,16 @@ textarea::placeholder {
   border: 1px solid var(--line);
   border-radius: var(--radius-medium);
   box-shadow: var(--shadow-raised);
+}
+.space-entry-account,
+.space-entry-account > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.space-entry-account > div {
+  justify-content: flex-end;
 }
 .space-entry-panel h1 {
   margin: 0.7rem 0 1.25rem;

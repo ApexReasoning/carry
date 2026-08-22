@@ -1,8 +1,15 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  render,
+  renderHook,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, test, vi } from "vitest";
 
 import { App } from "../../carry-app";
+import { useUserSession } from "./use-user-session";
 
 const userID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const actualSpaceID = "11111111-1111-4111-8111-111111111111";
@@ -80,7 +87,7 @@ test("signed-out exact invitation reveals no metadata and carries only its ID", 
 
 test("malformed exact invitation path fails before authentication or preview", async () => {
   window.history.replaceState(null, "", "/invitations/%E0%A4%A");
-  const fetch = vi.fn();
+  const fetch = vi.fn(async () => unauthenticated());
   vi.stubGlobal("fetch", fetch);
 
   render(<App />);
@@ -89,6 +96,17 @@ test("malformed exact invitation path fails before authentication or preview", a
     "This invitation link is invalid.",
   );
   expect(fetch).not.toHaveBeenCalled();
+
+  await userEvent
+    .setup()
+    .click(screen.getByRole("button", { name: "Return to Carry home" }));
+  expect(window.location.pathname).toBe("/");
+  expect(
+    await screen.findByRole("heading", {
+      name: "Work that stays in good hands.",
+    }),
+  ).toBeVisible();
+  expect(fetch).toHaveBeenCalledOnce();
 });
 
 test("targeted invitation loading and read failure stay explicit", async () => {
@@ -196,8 +214,9 @@ test("shows a neutral provider callback outcome and removes it from the URL", as
   expect(window.sessionStorage.length).toBe(0);
 });
 
-test("pending invitation outranks a current Space for an existing member", async () => {
+test("pending invitation outranks a current Space but Not now defers without restoring the session", async () => {
   window.history.replaceState(null, "", "/s/research");
+  let currentUserCalls = 0;
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -205,6 +224,7 @@ test("pending invitation outranks a current Space for an existing member", async
         input instanceof Request ? input : new Request(input, init);
       const path = new URL(request.url).pathname;
       if (request.method === "GET" && path === "/v1/me") {
+        currentUserCalls += 1;
         return json(
           currentUser([
             {
@@ -242,7 +262,8 @@ test("pending invitation outranks a current Space for an existing member", async
     }),
   );
 
-  render(<App />);
+  const user = userEvent.setup();
+  const firstMount = render(<App />);
 
   expect(
     await screen.findByRole("heading", { name: "Space invitations" }),
@@ -251,6 +272,251 @@ test("pending invitation outranks a current Space for an existing member", async
   expect(
     screen.queryByRole("heading", { name: "What should Carry keep moving?" }),
   ).not.toBeInTheDocument();
+
+  await user.click(screen.getByRole("button", { name: "Not now" }));
+  expect(window.location.pathname).toBe("/");
+  expect(
+    await screen.findByRole("heading", { name: "Choose a Space" }),
+  ).toBeVisible();
+  expect(screen.getByRole("link", { name: /Research/ })).toBeVisible();
+  expect(screen.queryByText("Opening Carry…")).not.toBeInTheDocument();
+  expect(currentUserCalls).toBe(1);
+  expect(window.sessionStorage).toHaveLength(1);
+  expect(window.sessionStorage.getItem("carry.deferred-invitations.v1")).toBe(
+    userID,
+  );
+
+  firstMount.unmount();
+  window.history.replaceState(null, "", "/s/research");
+  render(<App />);
+  expect(
+    await screen.findByRole("heading", {
+      name: "What should Carry keep moving?",
+    }),
+  ).toBeVisible();
+  expect(currentUserCalls).toBe(2);
+});
+
+test("a foreign or malformed invitation deferral never hides this User's invitation", async () => {
+  for (const stored of [
+    "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    "not-a-user-id",
+  ]) {
+    window.sessionStorage.setItem("carry.deferred-invitations.v1", stored);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request =
+          input instanceof Request ? input : new Request(input, init);
+        const path = new URL(request.url).pathname;
+        if (request.method === "GET" && path === "/v1/me")
+          return json(currentUser([]));
+        if (request.method === "GET" && path === "/v1/invitations") {
+          return json({
+            invitations: [
+              {
+                invitation_id: "22222222-2222-4222-8222-222222222222",
+                space_id: "33333333-3333-4333-8333-333333333333",
+                space_name: "Operations",
+                inviter_display_name: "Member bbbbbbbb",
+                can_manage_members: false,
+                can_enroll_machines: false,
+                created_at: "2026-08-21T00:00:00Z",
+                expires_at: "2026-08-28T00:00:00Z",
+              },
+            ],
+            reauthentication_required: false,
+          });
+        }
+        throw new Error(`unexpected request: ${request.method} ${path}`);
+      }),
+    );
+
+    const mounted = renderHook(() => useUserSession());
+    await waitFor(() =>
+      expect(mounted.result.current.phase).toBe("invitations"),
+    );
+    mounted.unmount();
+  }
+  expect(window.sessionStorage).toHaveLength(0);
+});
+
+test("an explicit invitation inbox clears and bypasses the current User's deferral", async () => {
+  window.sessionStorage.setItem("carry.deferred-invitations.v1", userID);
+  window.history.replaceState(null, "", "/invitations");
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request =
+        input instanceof Request ? input : new Request(input, init);
+      const path = new URL(request.url).pathname;
+      if (request.method === "GET" && path === "/v1/me")
+        return json(currentUser([]));
+      if (request.method === "GET" && path === "/v1/invitations")
+        return json({ invitations: [], reauthentication_required: false });
+      throw new Error(`unexpected request: ${request.method} ${path}`);
+    }),
+  );
+
+  const { result } = renderHook(() => useUserSession());
+  await waitFor(() => expect(result.current.phase).toBe("invitations"));
+  expect(window.sessionStorage).toHaveLength(0);
+});
+
+test("Not now leaves a terminal invitation even when session storage is unavailable", async () => {
+  const invitationID = "22222222-2222-4222-8222-222222222222";
+  window.history.replaceState(null, "", `/invitations/${invitationID}`);
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request =
+        input instanceof Request ? input : new Request(input, init);
+      const path = new URL(request.url).pathname;
+      if (request.method === "GET" && path === "/v1/me")
+        return json(currentUser([]));
+      if (
+        request.method === "GET" &&
+        path === `/v1/invitations/${invitationID}`
+      ) {
+        return json({
+          invitation_id: invitationID,
+          space_id: "33333333-3333-4333-8333-333333333333",
+          space_name: "Operations",
+          inviter_display_name: "Member bbbbbbbb",
+          can_manage_members: false,
+          can_enroll_machines: false,
+          created_at: "2026-08-21T00:00:00Z",
+          expires_at: "2026-08-28T00:00:00Z",
+          state: "accepted",
+          accept_result: "joined",
+          current_member: true,
+          reauthentication_required: false,
+        });
+      }
+      throw new Error(`unexpected request: ${request.method} ${path}`);
+    }),
+  );
+
+  const { result } = renderHook(() => useUserSession());
+  await waitFor(() => expect(result.current.phase).toBe("invitation"));
+  const storageFailure = vi
+    .spyOn(window.sessionStorage, "setItem")
+    .mockImplementation(() => {
+      throw new Error("storage unavailable");
+    });
+  act(() => result.current.skipInvitations());
+  expect(result.current.phase).toBe("ready");
+  expect(window.location.pathname).toBe("/");
+  storageFailure.mockRestore();
+});
+
+test("Not now stays on a pending invitation when session deferral cannot be confirmed", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request =
+        input instanceof Request ? input : new Request(input, init);
+      const path = new URL(request.url).pathname;
+      if (request.method === "GET" && path === "/v1/me")
+        return json(currentUser([]));
+      if (request.method === "GET" && path === "/v1/invitations") {
+        return json({
+          invitations: [
+            {
+              invitation_id: "22222222-2222-4222-8222-222222222222",
+              space_id: "33333333-3333-4333-8333-333333333333",
+              space_name: "Operations",
+              inviter_display_name: "Member bbbbbbbb",
+              can_manage_members: false,
+              can_enroll_machines: false,
+              created_at: "2026-08-21T00:00:00Z",
+              expires_at: "2026-08-28T00:00:00Z",
+            },
+          ],
+          reauthentication_required: false,
+        });
+      }
+      throw new Error(`unexpected request: ${request.method} ${path}`);
+    }),
+  );
+  const storageFailure = vi
+    .spyOn(window.sessionStorage, "setItem")
+    .mockImplementationOnce(() => {
+      throw new Error("storage unavailable");
+    });
+
+  const { result } = renderHook(() => useUserSession());
+  await waitFor(() => expect(result.current.phase).toBe("invitations"));
+  act(() => result.current.skipInvitations());
+  expect(result.current.phase).toBe("invitations");
+  expect(result.current.error).toContain(
+    "Carry could not defer this invitation in the current tab",
+  );
+  storageFailure.mockRestore();
+});
+
+test("invitation deferral is cleared before a different User signs in", async () => {
+  let signedOut = false;
+  let secondSignedIn = false;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request =
+        input instanceof Request ? input : new Request(input, init);
+      const path = new URL(request.url).pathname;
+      if (request.method === "GET" && path === "/v1/me") {
+        if (signedOut && !secondSignedIn) return unauthenticated();
+        return json(currentUser([]));
+      }
+      if (request.method === "GET" && path === "/v1/invitations") {
+        return json({
+          invitations: [
+            {
+              invitation_id: "22222222-2222-4222-8222-222222222222",
+              space_id: "33333333-3333-4333-8333-333333333333",
+              space_name: "Operations",
+              inviter_display_name: "Member bbbbbbbb",
+              can_manage_members: false,
+              can_enroll_machines: false,
+              created_at: "2026-08-21T00:00:00Z",
+              expires_at: "2026-08-28T00:00:00Z",
+            },
+          ],
+          reauthentication_required: false,
+        });
+      }
+      if (
+        request.method === "DELETE" &&
+        path === "/v1/browser/sessions/current"
+      ) {
+        signedOut = true;
+        return new Response(null, { status: 204 });
+      }
+      if (request.method === "POST" && path === "/v1/auth/email/challenges")
+        return acceptedChallenge(request);
+      if (request.method === "POST" && path.endsWith("/verify")) {
+        secondSignedIn = true;
+        return json({
+          user_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          display_name: "Member bbbbbbbb",
+          spaces: [],
+        });
+      }
+      throw new Error(`unexpected request: ${request.method} ${path}`);
+    }),
+  );
+
+  const { result } = renderHook(() => useUserSession());
+  await waitFor(() => expect(result.current.phase).toBe("invitations"));
+  act(() => result.current.skipInvitations());
+  expect(result.current.phase).toBe("ready");
+  expect(window.sessionStorage).toHaveLength(1);
+  await act(async () => result.current.signOut());
+  expect(result.current.phase).toBe("email");
+  expect(window.sessionStorage).toHaveLength(0);
+  await act(async () => result.current.sendCode("second@example.com"));
+  await act(async () => result.current.verifyCode("123456"));
+  await waitFor(() => expect(result.current.phase).toBe("invitations"));
 });
 
 test("shows a wrong email code and lets the User retry", async () => {

@@ -1,6 +1,35 @@
 -- name: ExternalLoginDatabaseTime :one
 SELECT transaction_timestamp()::timestamptz;
 
+-- name: LockExternalLoginAdmission :exec
+SELECT pg_advisory_xact_lock(
+    hashtextextended('external-login-admission', 14)
+);
+
+-- name: LockExternalLoginSource :exec
+SELECT pg_advisory_xact_lock(
+    hashtextextended(encode(sqlc.arg(source_digest)::bytea, 'hex'), 15)
+);
+
+-- name: DeleteExpiredExternalLogins :execrows
+DELETE FROM external_login_transactions
+WHERE expires_at <= transaction_timestamp();
+
+-- name: CountLiveExternalLoginsForSource :one
+SELECT count(*)
+FROM external_login_transactions
+WHERE source_digest = sqlc.arg(source_digest)
+    AND purpose = 'login'
+    AND status IN ('prepared', 'exchanging')
+    AND expires_at > transaction_timestamp();
+
+-- name: CountLiveExternalLogins :one
+SELECT count(*)
+FROM external_login_transactions
+WHERE purpose = 'login'
+    AND status IN ('prepared', 'exchanging')
+    AND expires_at > transaction_timestamp();
+
 -- name: CreateExternalLogin :one
 INSERT INTO external_login_transactions (
     transaction_id,
@@ -9,6 +38,7 @@ INSERT INTO external_login_transactions (
     target_user_id,
     initiating_session_id,
     invitation_id,
+    source_digest,
     expires_at
 ) VALUES (
     sqlc.arg(transaction_id),
@@ -17,6 +47,7 @@ INSERT INTO external_login_transactions (
     sqlc.narg(target_user_id),
     sqlc.narg(initiating_session_id),
     sqlc.narg(invitation_id),
+    sqlc.arg(source_digest),
     transaction_timestamp() + interval '10 minutes'
 )
 RETURNING expires_at;

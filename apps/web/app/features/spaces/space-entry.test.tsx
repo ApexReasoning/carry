@@ -2,16 +2,26 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, test, vi } from "vitest";
 
-const creation = vi.hoisted(() => ({ createExactSpace: vi.fn() }));
-vi.mock("./space-creation", () => ({
-  createExactSpace: creation.createExactSpace,
+const creation = vi.hoisted(() => ({
+  createExactSpace: vi.fn(),
+  discardCorruptPendingSpaceCreation: vi.fn(),
 }));
+vi.mock("./space-creation", () => {
+  class CorruptPendingSpaceCreationError extends Error {}
+  return {
+    CorruptPendingSpaceCreationError,
+    createExactSpace: creation.createExactSpace,
+    discardCorruptPendingSpaceCreation:
+      creation.discardCorruptPendingSpaceCreation,
+  };
+});
 
 import {
   MutationOutcomeUnknownError,
   SpaceSlugConflictError,
 } from "../../carry-api";
 import type { User } from "../../generated/types.gen";
+import { CorruptPendingSpaceCreationError } from "./space-creation";
 import { SpaceEntry } from "./space-entry";
 
 const user: User = {
@@ -28,16 +38,57 @@ const user: User = {
   ],
 };
 
-beforeEach(() => creation.createExactSpace.mockReset());
+beforeEach(() => {
+  creation.createExactSpace.mockReset();
+  creation.discardCorruptPendingSpaceCreation.mockReset();
+});
 
 test("one Space still renders the explicit chooser and URL link", () => {
-  render(<SpaceEntry user={user} onEnter={vi.fn()} />);
+  render(<SpaceEntry user={user} onEnter={vi.fn()} onSignOut={vi.fn()} />);
 
   expect(screen.getByRole("heading", { name: "Choose a Space" })).toBeVisible();
   expect(screen.getByRole("link", { name: /Research/ })).toHaveAttribute(
     "href",
     "/s/%E7%A0%94%E7%A9%B6-team",
   );
+});
+
+test("a member without a Space can sign out of the chooser", async () => {
+  const onSignOut = vi.fn();
+  render(
+    <SpaceEntry
+      user={{ ...user, spaces: [] }}
+      onEnter={vi.fn()}
+      onSignOut={onSignOut}
+    />,
+  );
+
+  await userEvent
+    .setup()
+    .click(screen.getByRole("button", { name: "Sign out" }));
+
+  expect(onSignOut).toHaveBeenCalledOnce();
+});
+
+test("requires explicit recovery before discarding damaged creation identities", async () => {
+  creation.createExactSpace.mockRejectedValue(
+    new CorruptPendingSpaceCreationError("damaged"),
+  );
+  render(<SpaceEntry user={user} onEnter={vi.fn()} onSignOut={vi.fn()} />);
+  const actor = userEvent.setup();
+
+  await actor.type(screen.getByLabelText("Space name"), "Operations");
+  await actor.click(screen.getByRole("button", { name: "Create Space" }));
+
+  expect(creation.discardCorruptPendingSpaceCreation).not.toHaveBeenCalled();
+  expect(screen.getByRole("button", { name: "Create Space" })).toBeDisabled();
+  await actor.click(
+    screen.getByRole("button", {
+      name: "Discard damaged Space identities",
+    }),
+  );
+  expect(creation.discardCorruptPendingSpaceCreation).toHaveBeenCalledOnce();
+  expect(screen.getByRole("button", { name: "Create Space" })).toBeEnabled();
 });
 
 test("creates with one visible name and enters the committed slug", async () => {
@@ -47,7 +98,13 @@ test("creates with one visible name and enters the committed slug", async () => 
     slug: "operations",
   });
   const onEnter = vi.fn();
-  render(<SpaceEntry user={{ ...user, spaces: [] }} onEnter={onEnter} />);
+  render(
+    <SpaceEntry
+      user={{ ...user, spaces: [] }}
+      onEnter={onEnter}
+      onSignOut={vi.fn()}
+    />,
+  );
   const actor = userEvent.setup();
 
   await actor.type(screen.getByLabelText("Space name"), "Operations");
@@ -70,7 +127,13 @@ test("an unknown suggested suffix retries the exact accepted request", async () 
       name: "Acme",
       slug: "acme-2",
     });
-  render(<SpaceEntry user={{ ...user, spaces: [] }} onEnter={vi.fn()} />);
+  render(
+    <SpaceEntry
+      user={{ ...user, spaces: [] }}
+      onEnter={vi.fn()}
+      onSignOut={vi.fn()}
+    />,
+  );
   const actor = userEvent.setup();
 
   await actor.type(screen.getByLabelText("Space name"), "Acme");
@@ -96,7 +159,13 @@ test("shows an unreserved suggestion and submits its suffix explicitly", async (
       name: "Acme",
       slug: "acme-2",
     });
-  render(<SpaceEntry user={{ ...user, spaces: [] }} onEnter={vi.fn()} />);
+  render(
+    <SpaceEntry
+      user={{ ...user, spaces: [] }}
+      onEnter={vi.fn()}
+      onSignOut={vi.fn()}
+    />,
+  );
   const actor = userEvent.setup();
 
   await actor.type(screen.getByLabelText("Space name"), "Acme");

@@ -127,7 +127,8 @@ make test-db       真实 PostgreSQL 集成测试
 make check-go      只读验证 Go、生成代码、数据库测试和两个二进制
 make check-web     只读验证 Web 格式、类型、测试和 build
 make check-product 少量关键浏览器旅程
-make check         组合三个 check target
+make check-vulnerabilities 扫描当前 Go 调用图中的可达漏洞
+make check         组合三个 PR required check target
 make build         构建 carry-server、carry 和 Web
 make dev           启动本地开发环境
 ```
@@ -180,7 +181,7 @@ Web `dist/`、coverage、Playwright report、临时协议输出和 container bui
 
 CI 的目标是用最短、最稳定的路径阻止真实回归。V1 只有一个 PR workflow，正式发布后再由真实发布路径增加一个 release workflow。不按语言、目录、实验或每个检查拆出十几个 workflow。
 
-PR 按三个失败 owner 分组，每组一次 toolchain setup 后调用一个 target：`make check-go`、`make check-web`、`make check-product`。具体命令只在 Makefile 和工具配置中维护。
+PR 按三个失败 owner 分组，每组一次 toolchain setup 后调用一个 target：`make check-go`、`make check-web`、`make check-product`。Main push 另跑 `make check-vulnerabilities`，避免外部漏洞库可用性阻断普通 PR，同时阻止已知可达漏洞留在主分支。具体命令只在 Makefile 和工具配置中维护。
 
 只有下列情况才拆更多 job：需要不同操作系统；需要不同 secret 权限；运行时间差异足以显著缩短反馈；失败 owner 完全不同。"一个 Make target 一个 job"不是理由。
 

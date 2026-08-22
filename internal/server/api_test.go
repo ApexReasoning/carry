@@ -337,11 +337,11 @@ func testUserRoutes(t *testing.T, authority *machine.CertificateAuthority) *User
 
 type unavailableExternalLogin struct{}
 
-func (unavailableExternalLogin) StartGoogle(context.Context, string) (identity.ExternalLoginStart, error) {
+func (unavailableExternalLogin) StartGoogle(context.Context, string, string) (identity.ExternalLoginStart, error) {
 	return identity.ExternalLoginStart{}, errors.New("not implemented")
 }
 
-func (unavailableExternalLogin) StartGitHub(context.Context, string) (identity.ExternalLoginStart, error) {
+func (unavailableExternalLogin) StartGitHub(context.Context, string, string) (identity.ExternalLoginStart, error) {
 	return identity.ExternalLoginStart{}, errors.New("not implemented")
 }
 

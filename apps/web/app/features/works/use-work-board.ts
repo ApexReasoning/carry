@@ -19,6 +19,8 @@ import {
 } from "./work-page";
 import {
   clearPendingIdentity,
+  CorruptPendingWorkIdentitiesError,
+  discardCorruptPendingWorkIdentities,
   pendingCreateIdentity,
   pendingMessageIdentity,
   pendingReviewIdentity,
@@ -31,6 +33,8 @@ export function useWorkBoard(user: User | null, spaceID: string | null) {
   const [needsYouOnly, setNeedsYouOnly] = useState(false);
   const [details, setDetails] = useState<WorkDetails | null>(null);
   const [busy, setBusy] = useState(false);
+  const [pendingIdentitiesCorrupt, setPendingIdentitiesCorrupt] =
+    useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -109,6 +113,9 @@ export function useWorkBoard(user: User | null, spaceID: string | null) {
       spaceID,
       goal,
     ).catch((caught: unknown) => {
+      setPendingIdentitiesCorrupt(
+        caught instanceof CorruptPendingWorkIdentitiesError,
+      );
       setError(errorMessage(caught));
       return null;
     });
@@ -132,6 +139,9 @@ export function useWorkBoard(user: User | null, spaceID: string | null) {
       workID,
       text,
     ).catch((caught: unknown) => {
+      setPendingIdentitiesCorrupt(
+        caught instanceof CorruptPendingWorkIdentitiesError,
+      );
       setError(errorMessage(caught));
       return null;
     });
@@ -157,6 +167,9 @@ export function useWorkBoard(user: User | null, spaceID: string | null) {
       workID,
       reviewID,
     ).catch((caught: unknown) => {
+      setPendingIdentitiesCorrupt(
+        caught instanceof CorruptPendingWorkIdentitiesError,
+      );
       setError(errorMessage(caught));
       return null;
     });
@@ -202,6 +215,9 @@ export function useWorkBoard(user: User | null, spaceID: string | null) {
       spaceID,
       workID,
     ).catch((caught: unknown) => {
+      setPendingIdentitiesCorrupt(
+        caught instanceof CorruptPendingWorkIdentitiesError,
+      );
       setError(errorMessage(caught));
       return null;
     });
@@ -227,6 +243,16 @@ export function useWorkBoard(user: User | null, spaceID: string | null) {
         );
       }
     });
+  }
+
+  function discardDamagedPendingIdentities(): void {
+    try {
+      discardCorruptPendingWorkIdentities();
+      setPendingIdentitiesCorrupt(false);
+      setError(null);
+    } catch (caught) {
+      setError(errorMessage(caught));
+    }
   }
 
   function updateDetails(reloaded: WorkDetails) {
@@ -264,7 +290,9 @@ export function useWorkBoard(user: User | null, spaceID: string | null) {
     needsYouOnly,
     details,
     busy,
+    pendingIdentitiesCorrupt,
     error,
+    discardDamagedPendingIdentities,
     showNeedsYou,
     loadEarlierWorks,
     selectWork,

@@ -58,6 +58,46 @@ func TestWorkerContinuesAfterTemporaryCommitResponseLoss(t *testing.T) {
 	}
 }
 
+func TestWorkerContinuesAfterStaleRunAttempt(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	runs := &recordingRunClient{
+		claims:       []run.Claim{workClaim("stale-work"), workClaim("current-work")},
+		commitErrors: []error{run.ErrStaleAttempt},
+		onCommit:     cancel,
+	}
+	executor := &recordingExecutor{update: UnderstandingUpdate{Understanding: "Known.", NextStep: "Continue."}}
+	worker := testWorker(runs, &recordingConversationClient{}, executor)
+
+	if err := worker.Serve(ctx); err != nil {
+		t.Fatalf("serve after stale Run Attempt: %v", err)
+	}
+	if runs.commits != 1 || !reflect.DeepEqual(executor.order, []string{"work", "work"}) {
+		t.Fatalf("successful commits = %d, execution order = %#v", runs.commits, executor.order)
+	}
+}
+
+func TestWorkerContinuesAfterStaleConversationReplyClaim(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	conversations := &recordingConversationClient{
+		claims:       []conversation.ReplyClaim{privateClaim("stale-message"), privateClaim("current-message")},
+		commitErrors: []error{conversation.ErrStaleReplyClaim},
+		onCommit:     cancel,
+	}
+	executor := &recordingExecutor{}
+	worker := testWorker(&recordingRunClient{}, conversations, executor)
+
+	if err := worker.Serve(ctx); err != nil {
+		t.Fatalf("serve after stale Conversation reply claim: %v", err)
+	}
+	if conversations.commits != 1 || !reflect.DeepEqual(executor.order, []string{"conversation", "conversation"}) {
+		t.Fatalf("successful commits = %d, execution order = %#v", conversations.commits, executor.order)
+	}
+}
+
 func TestWorkerStopsOnUnclassifiedControlPlaneFailure(t *testing.T) {
 	t.Parallel()
 
@@ -452,13 +492,14 @@ func (client *recordingRunClient) Finish(_ context.Context, _ run.Claim, outcome
 }
 
 type recordingConversationClient struct {
-	claims    []conversation.ReplyClaim
-	renewals  int
-	renewErr  error
-	committed conversation.ReplyCandidate
-	commits   int
-	onRenew   func()
-	onCommit  func()
+	claims       []conversation.ReplyClaim
+	commitErrors []error
+	renewals     int
+	renewErr     error
+	committed    conversation.ReplyCandidate
+	commits      int
+	onRenew      func()
+	onCommit     func()
 }
 
 func (client *recordingConversationClient) ClaimConversation(context.Context) (conversation.ReplyClaim, error) {
@@ -487,6 +528,11 @@ func (client *recordingConversationClient) CommitConversation(
 	_ conversation.ReplyClaim,
 	candidate conversation.ReplyCandidate,
 ) (conversation.CommitReplyResult, error) {
+	if len(client.commitErrors) > 0 {
+		err := client.commitErrors[0]
+		client.commitErrors = client.commitErrors[1:]
+		return conversation.CommitReplyResult{}, err
+	}
 	client.committed = candidate
 	client.commits++
 	if client.onCommit != nil {

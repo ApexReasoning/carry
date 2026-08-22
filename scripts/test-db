@@ -7,8 +7,31 @@ if ((${#packages[@]} == 0)); then
 fi
 
 if [[ -n "${CARRY_TEST_DATABASE_URL:-}" ]]; then
-  go run ./scripts/check_test_database.go "$CARRY_TEST_DATABASE_URL"
-  exec go test -count=1 -tags=integration "${packages[@]}"
+  server_url="$CARRY_TEST_DATABASE_URL"
+  suffix="$(openssl rand -hex 6)"
+  database="carry_test_$(date -u +%Y%m%d%H%M%S)_${suffix}_postgres"
+  created=false
+  cleanup_external_database() {
+    if [[ "$created" != true ]]; then
+      return 0
+    fi
+    if go run ./scripts/check_test_database.go --drop "$database" "$server_url"; then
+      created=false
+      return 0
+    fi
+    return 1
+  }
+  trap cleanup_external_database EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+
+  export CARRY_TEST_DATABASE_URL="$(go run ./scripts/check_test_database.go --create "$database" "$server_url")"
+  created=true
+  go run ./scripts/check_test_database.go --wait 30s "$CARRY_TEST_DATABASE_URL"
+  go test -count=1 -tags=integration "${packages[@]}"
+  cleanup_external_database
+  trap - EXIT INT TERM
+  exit 0
 fi
 
 if ! command -v docker >/dev/null 2>&1; then

@@ -299,30 +299,40 @@ export async function identityMethods(): Promise<IdentityMethods> {
   );
 }
 
+type IdentityEmailCodeRequest =
+  | {
+      purpose: "reauthenticate";
+      challengeID: string;
+      idempotencyKey: string;
+    }
+  | {
+      purpose: "link";
+      challengeID: string;
+      idempotencyKey: string;
+      email: string;
+    };
+
 export async function requestIdentityEmailCode(
-  purpose: "reauthenticate" | "link",
-  challengeID: string,
-  idempotencyKey: string,
-  email?: string,
+  command: IdentityEmailCodeRequest,
 ): Promise<EmailChallenge> {
   const request =
-    purpose === "link"
+    command.purpose === "link"
       ? requestEmailLinkCodeRequest({
           ...sameOrigin,
-          body: { challenge_id: challengeID, email: email ?? "" },
-          headers: { "Idempotency-Key": idempotencyKey },
+          body: { challenge_id: command.challengeID, email: command.email },
+          headers: { "Idempotency-Key": command.idempotencyKey },
         })
       : requestEmailReauthenticationCodeRequest({
           ...sameOrigin,
-          body: { challenge_id: challengeID },
-          headers: { "Idempotency-Key": idempotencyKey },
+          body: { challenge_id: command.challengeID },
+          headers: { "Idempotency-Key": command.idempotencyKey },
         });
   const result = await request;
   return requireMutationData(
     result.data,
     result.response,
     result.error,
-    purpose === "link" ? "Link email" : "Confirm email",
+    command.purpose === "link" ? "Link email" : "Confirm email",
   );
 }
 

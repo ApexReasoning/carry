@@ -14,11 +14,11 @@ done < <(find internal -type d -mindepth 1 2>/dev/null)
 
 while IFS='|' read -r package imports; do
   case "$package" in
-    "$module_path"/internal/server*|"$module_path"/internal/postgres*|"$module_path"/internal/agent*|"$module_path"/internal/connector*|"$module_path"/internal/cli*)
+    "$module_path"/internal/server*|"$module_path"/internal/postgres*|"$module_path"/internal/agent*|"$module_path"/internal/connector*|"$module_path"/internal/cli*|"$module_path"/internal/host*)
       continue
       ;;
     "$module_path"/internal/*)
-      if [[ ",$imports," =~ ,$module_path/internal/(server|postgres|agent|connector|cli)(/[^,]*)?, ]]; then
+      if [[ ",$imports," =~ ,$module_path/internal/(server|postgres|agent|connector|cli|host)(/[^,]*)?, ]]; then
         printf 'domain package %s imports an adapter package\n' "$package" >&2
         exit 1
       fi

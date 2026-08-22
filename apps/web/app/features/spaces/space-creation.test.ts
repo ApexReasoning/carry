@@ -12,7 +12,9 @@ vi.mock("../../carry-api", () => {
 
 import { MutationOutcomeUnknownError } from "../../carry-api";
 import {
+  CorruptPendingSpaceCreationError,
   createExactSpace,
+  discardCorruptPendingSpaceCreation,
   pendingSpaceCreationIdentity,
 } from "./space-creation";
 
@@ -33,6 +35,24 @@ test("persists only a content-free identity and reuses it for exact input", asyn
   );
   expect(stored).not.toContain("Secret Team");
   expect(stored).not.toContain("Other Team");
+});
+
+test("retains malformed app-owned state until explicit recovery", async () => {
+  const storageKey = "carry.pending-space-creation.v1";
+  window.sessionStorage.setItem(storageKey, "{not-json");
+  window.sessionStorage.setItem("unrelated", "preserved");
+
+  await expect(
+    pendingSpaceCreationIdentity("member-1", "Research"),
+  ).rejects.toThrow(CorruptPendingSpaceCreationError);
+  expect(window.sessionStorage.getItem(storageKey)).toBe("{not-json");
+  expect(window.sessionStorage.getItem("unrelated")).toBe("preserved");
+
+  discardCorruptPendingSpaceCreation();
+  expect(window.sessionStorage.getItem(storageKey)).toBeNull();
+  const recovered = await pendingSpaceCreationIdentity("member-1", "Research");
+  expect(recovered.idempotencyKey).toBeTruthy();
+  expect(window.sessionStorage.getItem(storageKey)).toBeTruthy();
 });
 
 test("replays an unknown outcome with the exact request identity", async () => {

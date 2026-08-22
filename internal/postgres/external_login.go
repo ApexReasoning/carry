@@ -14,6 +14,11 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+const (
+	maxLiveExternalLoginsPerSource = 20
+	maxLiveExternalLoginsGlobal    = 10_000
+)
+
 func (s *Store) CreateExternalLogin(
 	ctx context.Context,
 	command identity.CreateExternalLoginCommand,
@@ -39,6 +44,31 @@ func (s *Store) CreateExternalLogin(
 	}
 	defer func() { _ = transaction.Rollback(context.Background()) }()
 	queries := s.queries.WithTx(transaction)
+	if command.Purpose == identity.LoginPurpose {
+		if err := queries.LockExternalLoginAdmission(ctx); err != nil {
+			return time.Time{}, fmt.Errorf("lock external login admission: %w", err)
+		}
+		if err := queries.LockExternalLoginSource(ctx, command.SourceDigest[:]); err != nil {
+			return time.Time{}, fmt.Errorf("lock external login source: %w", err)
+		}
+		if _, err := queries.DeleteExpiredExternalLogins(ctx); err != nil {
+			return time.Time{}, fmt.Errorf("delete expired external logins: %w", err)
+		}
+		sourceCount, err := queries.CountLiveExternalLoginsForSource(ctx, command.SourceDigest[:])
+		if err != nil {
+			return time.Time{}, fmt.Errorf("count live external logins for source: %w", err)
+		}
+		globalCount, err := queries.CountLiveExternalLogins(ctx)
+		if err != nil {
+			return time.Time{}, fmt.Errorf("count live external logins: %w", err)
+		}
+		if sourceCount >= maxLiveExternalLoginsPerSource {
+			return time.Time{}, identity.ErrExternalLoginRateLimited
+		}
+		if globalCount >= maxLiveExternalLoginsGlobal {
+			return time.Time{}, identity.ErrExternalLoginRateLimited
+		}
+	}
 	if command.Purpose != identity.LoginPurpose {
 		if _, err := queries.LockUserForIdentityChange(ctx, command.TargetUserID); errors.Is(err, pgx.ErrNoRows) {
 			return time.Time{}, identity.ErrUnauthenticated
@@ -77,6 +107,7 @@ func (s *Store) CreateExternalLogin(
 		TargetUserID:        targetUserID,
 		InitiatingSessionID: initiatingSessionID,
 		InvitationID:        invitationID,
+		SourceDigest:        command.SourceDigest[:],
 	})
 	if err != nil {
 		return time.Time{}, fmt.Errorf("create external login transaction: %w", err)

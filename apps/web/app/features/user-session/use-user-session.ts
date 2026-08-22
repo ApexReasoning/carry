@@ -14,9 +14,12 @@ import type {
   User,
 } from "../../generated/types.gen";
 import {
+  clearDeferredInvitations,
   clearPendingSignOut,
+  deferInvitations,
   finishBrowserSignOut,
   hasPendingSignOut,
+  invitationsDeferredFor,
   markPendingSignOut,
 } from "./browser-session";
 import {
@@ -52,8 +55,6 @@ export function useUserSession() {
   const [targetedInvitation, setTargetedInvitation] =
     useState<TargetedInvitationState>({ status: "loading" });
   const invitationID = invitationIDFromPath(window.location.pathname);
-  const invalidInvitationPath =
-    window.location.pathname.startsWith("/invitations/") && !invitationID;
   const [challenge, setChallenge] = useState<EmailChallengeCommand | null>(
     null,
   );
@@ -61,66 +62,71 @@ export function useUserSession() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const routeUser = useCallback(
-    async (loaded: User | null) => {
-      setUser(loaded);
-      setInbox(null);
-      if (!loaded) {
-        setPhase("email");
-        return;
-      }
-      if (invitationID) {
-        setTargetedInvitation({ status: "loading" });
-        setPhase("invitation");
-        try {
-          setTargetedInvitation({
-            status: "owner",
-            invitation: await invitation(invitationID),
-          });
-        } catch (caught) {
-          if (caught instanceof APIResponseError && caught.status === 404) {
-            try {
-              const methods = await identityMethods();
-              setTargetedInvitation({
-                status: "unavailable",
-                hasEmail: methods.methods.includes("email"),
-              });
-            } catch (methodError) {
-              setTargetedInvitation({
-                status: "error",
-                message: errorMessage(methodError),
-              });
-            }
-          } else {
+  const routeUser = useCallback(async (loaded: User | null) => {
+    setUser(loaded);
+    setInbox(null);
+    if (!loaded) {
+      setPhase("email");
+      return;
+    }
+    const pathname = window.location.pathname;
+    const currentInvitationID = invitationIDFromPath(pathname);
+    const explicitInvitationPath =
+      pathname === "/invitations" || currentInvitationID !== null;
+    if (explicitInvitationPath) clearDeferredInvitations();
+    if (currentInvitationID) {
+      setTargetedInvitation({ status: "loading" });
+      setPhase("invitation");
+      try {
+        setTargetedInvitation({
+          status: "owner",
+          invitation: await invitation(currentInvitationID),
+        });
+      } catch (caught) {
+        if (caught instanceof APIResponseError && caught.status === 404) {
+          try {
+            const methods = await identityMethods();
+            setTargetedInvitation({
+              status: "unavailable",
+              hasEmail: methods.methods.includes("email"),
+            });
+          } catch (methodError) {
             setTargetedInvitation({
               status: "error",
-              message: errorMessage(caught),
+              message: errorMessage(methodError),
             });
           }
+        } else {
+          setTargetedInvitation({
+            status: "error",
+            message: errorMessage(caught),
+          });
         }
-        return;
       }
-      const invitations = await invitationInbox();
-      if (
-        invitations.invitations.length > 0 ||
-        window.location.pathname === "/invitations"
-      ) {
-        setInbox(invitations);
-        setPhase("invitations");
-        return;
-      }
+      return;
+    }
+    if (invitationsDeferredFor(loaded.user_id)) {
       setPhase("ready");
-    },
-    [invitationID],
-  );
+      return;
+    }
+    const invitations = await invitationInbox();
+    if (invitations.invitations.length > 0 || explicitInvitationPath) {
+      setInbox(invitations);
+      setPhase("invitations");
+      return;
+    }
+    setPhase("ready");
+  }, []);
 
   useEffect(() => {
     let active = true;
     async function restore() {
       setError(takeExternalSignInStatus());
-      if (invalidInvitationPath) {
+      if (isMalformedInvitationPath(window.location.pathname)) {
         setPhase("failed");
-        setError("This invitation link is invalid.");
+        setError(
+          "This invitation link is invalid. Check the link or return to Carry home.",
+        );
         return;
       }
       if (hasPendingSignOut()) {
@@ -143,7 +149,7 @@ export function useUserSession() {
     return () => {
       active = false;
     };
-  }, [invalidInvitationPath, routeUser]);
+  }, [routeUser]);
 
   async function refresh() {
     try {
@@ -157,6 +163,13 @@ export function useUserSession() {
   async function retryRestore() {
     setPhase("checking");
     setError(null);
+    if (isMalformedInvitationPath(window.location.pathname)) {
+      setPhase("failed");
+      setError(
+        "This invitation link is invalid. Check the link or return to Carry home.",
+      );
+      return;
+    }
     try {
       const loaded = await currentUser();
       await routeUser(loaded);
@@ -252,6 +265,7 @@ export function useUserSession() {
       await finishBrowserSignOut();
       if (!isActive()) return;
       clearPendingSignOut();
+      clearDeferredInvitations();
       setError(null);
       setPhase("email");
     } catch (caught) {
@@ -277,8 +291,44 @@ export function useUserSession() {
     busy,
     error,
     retry: () => void retryRestore(),
+    returnHome: () => {
+      window.history.replaceState(null, "", "/");
+      void retryRestore();
+    },
     refresh: () => void refresh(),
-    skipInvitations: () => window.location.assign("/"),
+    skipInvitations: () => {
+      let shouldDefer = false;
+      if (phase === "invitations") {
+        shouldDefer = true;
+      }
+      if (phase === "invitation") {
+        if (targetedInvitation.status === "owner") {
+          if (targetedInvitation.invitation.state === "pending") {
+            shouldDefer = true;
+          }
+        }
+      }
+      if (shouldDefer) {
+        if (!user) {
+          setError(
+            "Carry could not identify which signed-in account should defer this invitation.",
+          );
+          return;
+        }
+        try {
+          deferInvitations(user.user_id);
+        } catch (caught) {
+          setError(
+            `Carry could not defer this invitation in the current tab. ${errorMessage(caught)}`,
+          );
+          return;
+        }
+      }
+      window.history.replaceState(null, "", "/");
+      setError(null);
+      setInbox(null);
+      setPhase("ready");
+    },
     sendCode,
     retryCodeRequest,
     verifyCode,
@@ -292,6 +342,12 @@ export function useUserSession() {
     signOut,
     finishSignOut: () => finishSignOut(),
   };
+}
+
+function isMalformedInvitationPath(pathname: string): boolean {
+  return (
+    pathname.startsWith("/invitations/") && !invitationIDFromPath(pathname)
+  );
 }
 
 function takeExternalSignInStatus(): string | null {

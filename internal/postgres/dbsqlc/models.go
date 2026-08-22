@@ -159,6 +159,7 @@ type ExternalLoginTransaction struct {
 	TargetUserID        pgtype.UUID
 	InitiatingSessionID pgtype.UUID
 	InvitationID        pgtype.UUID
+	SourceDigest        []byte
 }
 
 type GithubIdentity struct {

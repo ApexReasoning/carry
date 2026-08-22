@@ -200,10 +200,26 @@ func (s *Store) ApproveCLILogin(ctx context.Context, command identity.ApproveCLI
 			return identity.CLILoginRequest{}, identity.ErrCLIReplacementInvalid
 		}
 	}
+	actorUserID, err := postgresUUID(actor.UserID)
+	if err != nil {
+		return identity.CLILoginRequest{}, fmt.Errorf("parse CLI approval User identity: %w", err)
+	}
+	spaceID, err := postgresUUID(command.SpaceID)
+	if err != nil {
+		return identity.CLILoginRequest{}, fmt.Errorf("parse CLI approval Space identity: %w", err)
+	}
+	credentialID, err := postgresUUID(command.CredentialID)
+	if err != nil {
+		return identity.CLILoginRequest{}, fmt.Errorf("parse prepared CLI credential identity: %w", err)
+	}
 	approved, err := queries.ApproveCLILogin(ctx, dbsqlc.ApproveCLILoginParams{
-		UserID: mustPostgresUUID(actor.UserID), SpaceID: mustPostgresUUID(command.SpaceID),
-		IdempotencyKey: &command.IdempotencyKey, RequestDigest: command.RequestDigest[:],
-		CredentialID: mustPostgresUUID(command.CredentialID), ReplacementCredentialID: replacement, RequestID: command.RequestID,
+		UserID:                  actorUserID,
+		SpaceID:                 spaceID,
+		IdempotencyKey:          &command.IdempotencyKey,
+		RequestDigest:           command.RequestDigest[:],
+		CredentialID:            credentialID,
+		ReplacementCredentialID: replacement,
+		RequestID:               command.RequestID,
 	})
 	if err != nil {
 		return identity.CLILoginRequest{}, fmt.Errorf("approve CLI login: %w", err)
@@ -252,9 +268,15 @@ func (s *Store) DenyCLILogin(ctx context.Context, command identity.DenyCLILoginC
 	if err := liveCLILoginDecisionError(request, databaseTime.Time); err != nil {
 		return err
 	}
+	actorUserID, err := postgresUUID(actor.UserID)
+	if err != nil {
+		return fmt.Errorf("parse CLI denial User identity: %w", err)
+	}
 	if _, err := queries.DenyCLILogin(ctx, dbsqlc.DenyCLILoginParams{
-		UserID: mustPostgresUUID(actor.UserID), IdempotencyKey: &command.IdempotencyKey,
-		RequestDigest: command.RequestDigest[:], RequestID: command.RequestID,
+		UserID:         actorUserID,
+		IdempotencyKey: &command.IdempotencyKey,
+		RequestDigest:  command.RequestDigest[:],
+		RequestID:      command.RequestID,
 	}); err != nil {
 		return fmt.Errorf("deny CLI login: %w", err)
 	}
@@ -337,10 +359,17 @@ func (s *Store) PollCLILogin(ctx context.Context, command identity.PollCLILoginC
 		if lockErr != nil || replacement.UserID != userID || replacement.RevokedAt.Valid || !replacement.ExpiresAt.Time.After(now) {
 			return identity.RedeemedCLICredential{}, identity.ErrCLIReplacementInvalid
 		}
+		replacementUserID, parseErr := postgresUUID(userID)
+		if parseErr != nil {
+			return identity.RedeemedCLICredential{}, fmt.Errorf("parse replaced CLI credential User identity: %w", parseErr)
+		}
 		key := "replacement:" + request.RequestID
 		digest := identityRequestDigest(replacementID, request.RequestID)
 		if _, revokeErr := queries.RevokeCLICredential(ctx, dbsqlc.RevokeCLICredentialParams{
-			UserID: mustPostgresUUID(userID), IdempotencyKey: &key, RequestDigest: digest[:], CredentialID: replacementID,
+			UserID:         replacementUserID,
+			IdempotencyKey: &key,
+			RequestDigest:  digest[:],
+			CredentialID:   replacementID,
 		}); revokeErr != nil {
 			return identity.RedeemedCLICredential{}, fmt.Errorf("revoke replaced CLI credential: %w", revokeErr)
 		}
@@ -352,7 +381,14 @@ func (s *Store) PollCLILogin(ctx context.Context, command identity.PollCLILoginC
 	if err != nil {
 		return identity.RedeemedCLICredential{}, fmt.Errorf("create CLI credential: %w", err)
 	}
-	request, err = queries.RedeemCLILogin(ctx, dbsqlc.RedeemCLILoginParams{CredentialID: mustPostgresUUID(credentialID), RequestID: request.RequestID})
+	redeemedCredentialID, err := postgresUUID(credentialID)
+	if err != nil {
+		return identity.RedeemedCLICredential{}, fmt.Errorf("parse redeemed CLI credential identity: %w", err)
+	}
+	request, err = queries.RedeemCLILogin(ctx, dbsqlc.RedeemCLILoginParams{
+		CredentialID: redeemedCredentialID,
+		RequestID:    request.RequestID,
+	})
 	if err != nil {
 		return identity.RedeemedCLICredential{}, fmt.Errorf("redeem CLI login: %w", err)
 	}
@@ -475,9 +511,15 @@ func (s *Store) RevokeCLICredential(ctx context.Context, command identity.Revoke
 		}
 		return identity.ErrCLILoginConflict
 	}
+	revokingUserID, err := postgresUUID(actorUserID)
+	if err != nil {
+		return fmt.Errorf("parse CLI revocation User identity: %w", err)
+	}
 	if _, err := queries.RevokeCLICredential(ctx, dbsqlc.RevokeCLICredentialParams{
-		UserID: mustPostgresUUID(actorUserID), IdempotencyKey: &command.IdempotencyKey,
-		RequestDigest: command.RequestDigest[:], CredentialID: command.CredentialID,
+		UserID:         revokingUserID,
+		IdempotencyKey: &command.IdempotencyKey,
+		RequestDigest:  command.RequestDigest[:],
+		CredentialID:   command.CredentialID,
 	}); err != nil {
 		return fmt.Errorf("revoke CLI credential: %w", err)
 	}
@@ -542,14 +584,6 @@ func redeemedCredential(request dbsqlc.CliLoginRequest, credential dbsqlc.CliCre
 		CredentialID: credential.CredentialID, UserID: credential.UserID,
 		SpaceID: uuidValue(request.ApprovedSpaceID), Label: credential.Label, ExpiresAt: credential.ExpiresAt.Time,
 	}
-}
-
-func mustPostgresUUID(value string) pgtype.UUID {
-	result, err := postgresUUID(value)
-	if err != nil {
-		panic("validated UUID became invalid")
-	}
-	return result
 }
 
 func identityRequestDigest(parts ...string) [sha256.Size]byte {

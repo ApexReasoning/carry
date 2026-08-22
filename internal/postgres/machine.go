@@ -139,8 +139,14 @@ func (s *Store) DecideMachineConnection(ctx context.Context, command machine.Dec
 	var spaceID pgtype.UUID
 	var preparedMachineID pgtype.UUID
 	if command.Decision == "approved" {
-		spaceID = mustPostgresUUID(command.SpaceID)
-		preparedMachineID = mustPostgresUUID(command.PreparedMachineID)
+		spaceID, err = postgresUUID(command.SpaceID)
+		if err != nil {
+			return machine.ConnectionRequest{}, fmt.Errorf("parse approved Machine Space identity: %w", err)
+		}
+		preparedMachineID, err = postgresUUID(command.PreparedMachineID)
+		if err != nil {
+			return machine.ConnectionRequest{}, fmt.Errorf("parse prepared Machine identity: %w", err)
+		}
 		if _, err := queries.LockSpaceForMachineConnection(ctx, command.SpaceID); errors.Is(err, pgx.ErrNoRows) {
 			return machine.ConnectionRequest{}, machine.ErrMachineAuthority
 		} else if err != nil {
@@ -187,12 +193,20 @@ func (s *Store) DecideMachineConnection(ctx context.Context, command machine.Dec
 	if !request.ExpiresAt.Time.After(nowValue.Time) {
 		return machine.ConnectionRequest{}, machine.ErrConnectionExpired
 	}
+	actorUserID, err := postgresUUID(userID)
+	if err != nil {
+		return machine.ConnectionRequest{}, fmt.Errorf("parse Machine decision User identity: %w", err)
+	}
 	decision := command.Decision
 	key := command.IdempotencyKey
 	updated, err := queries.DecideMachineConnection(ctx, dbsqlc.DecideMachineConnectionParams{
-		Decision: &decision, UserID: mustPostgresUUID(userID), SpaceID: spaceID,
-		IdempotencyKey: &key, RequestDigest: command.RequestDigest[:], PreparedMachineID: preparedMachineID,
-		RequestID: command.RequestID,
+		Decision:          &decision,
+		UserID:            actorUserID,
+		SpaceID:           spaceID,
+		IdempotencyKey:    &key,
+		RequestDigest:     command.RequestDigest[:],
+		PreparedMachineID: preparedMachineID,
+		RequestID:         command.RequestID,
 	})
 	if err != nil {
 		var postgresError *pgconn.PgError
@@ -292,7 +306,14 @@ func (s *Store) PollMachineConnection(ctx context.Context, command machine.PollC
 	if err != nil {
 		return machine.ConnectedMachine{}, fmt.Errorf("create approved Machine: %w", err)
 	}
-	request, err = queries.RedeemMachineConnection(ctx, dbsqlc.RedeemMachineConnectionParams{MachineID: mustPostgresUUID(machineID), RequestID: command.RequestID})
+	redeemedMachineID, err := postgresUUID(machineID)
+	if err != nil {
+		return machine.ConnectedMachine{}, fmt.Errorf("parse redeemed Machine identity: %w", err)
+	}
+	request, err = queries.RedeemMachineConnection(ctx, dbsqlc.RedeemMachineConnectionParams{
+		MachineID: redeemedMachineID,
+		RequestID: command.RequestID,
+	})
 	if err != nil {
 		return machine.ConnectedMachine{}, fmt.Errorf("redeem Machine connection: %w", err)
 	}
@@ -424,9 +445,16 @@ func (s *Store) RevokeMachineFromBrowser(ctx context.Context, command machine.Re
 		}
 		return storedMachineRecord(stored), nil
 	}
+	actorUserID, err := postgresUUID(userID)
+	if err != nil {
+		return machine.MachineRecord{}, fmt.Errorf("parse Machine revocation User identity: %w", err)
+	}
 	key := command.IdempotencyKey
 	stored, err = queries.RevokeMachineByUser(ctx, dbsqlc.RevokeMachineByUserParams{
-		UserID: mustPostgresUUID(userID), IdempotencyKey: &key, RequestDigest: command.RequestDigest[:], MachineID: command.MachineID,
+		UserID:         actorUserID,
+		IdempotencyKey: &key,
+		RequestDigest:  command.RequestDigest[:],
+		MachineID:      command.MachineID,
 	})
 	if err != nil {
 		var postgresError *pgconn.PgError

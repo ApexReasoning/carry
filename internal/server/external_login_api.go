@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"mime"
 	"net/http"
 	"net/url"
 	"strings"
@@ -86,8 +87,8 @@ func (origin ExternalOrigin) acceptsSensitivePOST(request *http.Request) bool {
 
 // ExternalLogin is the Identity provider-login behavior consumed by HTTP.
 type ExternalLogin interface {
-	StartGoogle(context.Context, string) (identity.ExternalLoginStart, error)
-	StartGitHub(context.Context, string) (identity.ExternalLoginStart, error)
+	StartGoogle(context.Context, string, string) (identity.ExternalLoginStart, error)
+	StartGitHub(context.Context, string, string) (identity.ExternalLoginStart, error)
 	StartGoogleReauthentication(context.Context, string, string) (identity.ExternalLoginStart, error)
 	StartGitHubReauthentication(context.Context, string, string) (identity.ExternalLoginStart, error)
 	StartGoogleLink(context.Context, string, string) (identity.ExternalLoginStart, error)
@@ -97,10 +98,11 @@ type ExternalLogin interface {
 }
 
 type externalLoginAPI struct {
-	login       ExternalLogin
-	sessions    BrowserSessions
-	credentials identity.Credentials
-	origin      ExternalOrigin
+	login          ExternalLogin
+	sessions       BrowserSessions
+	credentials    identity.Credentials
+	origin         ExternalOrigin
+	requestSources RequestSource
 }
 
 func (api externalLoginAPI) startGoogle(response http.ResponseWriter, request *http.Request) {
@@ -130,7 +132,7 @@ func (api externalLoginAPI) startGitHubLink(response http.ResponseWriter, reques
 func (api externalLoginAPI) start(
 	response http.ResponseWriter,
 	request *http.Request,
-	start func(context.Context, string) (identity.ExternalLoginStart, error),
+	start func(context.Context, string, string) (identity.ExternalLoginStart, error),
 ) {
 	response.Header().Set("Referrer-Policy", "no-referrer")
 	if !api.origin.matches(request) {
@@ -146,18 +148,52 @@ func (api externalLoginAPI) start(
 		writeAPIError(response, http.StatusConflict, "sign out before using another sign-in method")
 		return
 	}
-	invitationID := request.PostFormValue("invitation_id")
+	invitationID, ok := externalLoginInvitation(response, request)
+	if !ok {
+		return
+	}
 	if invitationID != "" && uuid.Validate(invitationID) != nil {
 		writeAPIError(response, http.StatusBadRequest, "invitation continuation is invalid")
 		return
 	}
-	result, err := start(request.Context(), invitationID)
+	source, err := api.requestSources.Resolve(request)
+	if err != nil {
+		writeAPIError(response, http.StatusBadRequest, "request source is invalid")
+		return
+	}
+	result, err := start(request.Context(), invitationID, source)
+	if errors.Is(err, identity.ErrExternalLoginRateLimited) {
+		writeAPIError(response, http.StatusTooManyRequests, err.Error())
+		return
+	}
 	if err != nil {
 		writeAPIError(response, http.StatusServiceUnavailable, "start external sign-in")
 		return
 	}
 	setExternalLoginCookie(response, result.BrowserCredential, result.ExpiresAt)
 	http.Redirect(response, request, result.AuthorizationURL, http.StatusSeeOther)
+}
+
+func externalLoginInvitation(response http.ResponseWriter, request *http.Request) (string, bool) {
+	if request.ContentLength != 0 {
+		mediaType, _, err := mime.ParseMediaType(request.Header.Get("Content-Type"))
+		if err != nil || mediaType != "application/x-www-form-urlencoded" {
+			writeAPIError(response, http.StatusBadRequest, "external sign-in form is invalid")
+			return "", false
+		}
+	}
+	request.Body = http.MaxBytesReader(response, request.Body, maxCommandBytes)
+	if err := request.ParseForm(); err != nil {
+		writeAPIError(response, http.StatusBadRequest, "external sign-in form is invalid")
+		return "", false
+	}
+	for name, values := range request.PostForm {
+		if name != "invitation_id" || len(values) != 1 {
+			writeAPIError(response, http.StatusBadRequest, "external sign-in form is invalid")
+			return "", false
+		}
+	}
+	return request.PostForm.Get("invitation_id"), true
 }
 
 func (api externalLoginAPI) startMethod(

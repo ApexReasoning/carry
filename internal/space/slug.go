@@ -137,20 +137,26 @@ func validSlugScripts(slug string) bool {
 	if len(scripts) <= 1 {
 		return true
 	}
-	return scriptSubset(scripts, "Latin", "Han", "Hiragana", "Katakana") ||
-		scriptSubset(scripts, "Latin", "Han", "Hangul") ||
-		scriptSubset(scripts, "Latin", "Han", "Bopomofo")
-}
 
-func scriptSubset(got map[string]struct{}, allowed ...string) bool {
-	set := make(map[string]struct{}, len(allowed))
-	for _, name := range allowed {
-		set[name] = struct{}{}
-	}
-	for name := range got {
-		if _, ok := set[name]; !ok {
+	for name := range scripts {
+		switch name {
+		case "Latin", "Han", "Hiragana", "Katakana", "Hangul", "Bopomofo":
+		default:
 			return false
 		}
 	}
-	return true
+
+	writingSystems := 0
+	_, hasHiragana := scripts["Hiragana"]
+	_, hasKatakana := scripts["Katakana"]
+	if hasHiragana || hasKatakana {
+		writingSystems++
+	}
+	if _, hasHangul := scripts["Hangul"]; hasHangul {
+		writingSystems++
+	}
+	if _, hasBopomofo := scripts["Bopomofo"]; hasBopomofo {
+		writingSystems++
+	}
+	return writingSystems <= 1
 }

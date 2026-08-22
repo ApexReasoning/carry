@@ -1,7 +1,6 @@
 # Carry Agent Contract
 
-Current Node: **Node 14 — invitation link login and acceptance (implementation active).**
-Issue #3 owns the approved journey, research and Revised exact design freeze v3; implementation must stay inside that audited budget.
+Current gate: **Issue #5 — pre-Node15 full-project review.** Node 14 is reopened for the corrective closure recorded in Issue #3; Node 15 research is paused, and no Node 15 production implementation may begin before this gate and its research/design audits pass.
 
 Carry is an AI teammate: a person hands a responsibility over in carry.ai Web, a named Agent owns keeping it moving, and the Work stays true across Conversations, Agent sessions, Hosts, channels and time.
 
@@ -27,9 +26,9 @@ Do not reopen silently:
 
 - humans use carry.ai Web; sign-in is GitHub, Google or Email, and GitHub sign-in grants no repository authority; MVP has no onboarding form; after sign-in a member accepts an invited Space or chooses/creates one;
 - a Space has a display name that may repeat and a globally unique normalized slug derived from it; MVP slugs are immutable; invite links are single-use, expiring and revocable; Membership carries only the two already-earned independent authorities to manage members and connect Hosts, with no role hierarchy or generic permission system; until Space end each authority has at least one Active holder;
-- a Space has many Hosts, a Host exposes many concrete Agents (Pi, Codex), and an Agent belongs to exactly one Host;
-- Agent is a durable fact owner and a user-visible identity: stable ID, Space, Space-unique normalized name, deterministic preset avatar, one human owner, one Host binding, Active/Removed lifecycle, created time; a new Agent's human owner is the authenticated member who approved that Host connection, while repeat discovery never changes an existing Agent's owner, name or lifecycle; every active Agent is selectable by members of its Space, and a Host going offline does not delete Agent identity;
-- Online, Last active, current Runs and any optional model choice are derived observations, never stored identity, and there is no provider/model/runtime registry;
+- a Space has many logical Hosts; V1 statically composes at most one default Pi and one default Codex Agent per Host, with no slot/profile/registry product, and an Agent belongs to exactly one Host;
+- Agent is a durable fact owner and a user-visible identity: stable ID, Space, PostgreSQL-allocated Space-unique normalized name (`Pi`/`Codex`, paired numeric suffixes for later Hosts), deterministic preset avatar, one human owner, one Host binding, Active/Removed lifecycle, created time; a new Agent's human owner is the still-active authenticated member who approved that Host connection, while repeat discovery never changes an existing Agent's owner, name or lifecycle; every Active Agent is selectable by members of its Space, and a Host going offline does not delete Agent identity;
+- Machine owns complete Pi/Codex present/absent observations; Online and Last active derive from Agent lifecycle plus database-time freshness, while current Runs and any optional model choice remain separate derived facts; copied Machine state is one logical Host, fresh setup after state loss is a new Host, and there is no physical-clone guess or provider/model/runtime registry;
 - the `carry` executable is the long-running Host, shallow operator commands for Host setup, and an Agent-facing interface; it is never a parallel human product, and an Agent never holds member credentials, the Machine private key or a direct Server path;
 - a Conversation fixes its Agent at the first message; changing Agent starts a new Conversation; provider continuation handles stay private to the owning Host and there is no public Session API;
 - every Work has exactly one human owner (goal, scope, external authorization, Inbox response, acceptance, closure) and exactly one Agent owner (progress, plan, comment interpretation and routing, collaborator choice, notices, schedules); Host or Agent loss never deletes Work or silently replaces that owner;

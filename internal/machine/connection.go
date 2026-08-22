@@ -145,34 +145,89 @@ type BegunConnection struct {
 }
 
 func (connections *Connections) Begin(ctx context.Context, request BeginConnectionRequest) (BegunConnection, error) {
-	name := strings.TrimSpace(request.DisplayName)
 	code, ok := NormalizeConnectionCode(request.UserCode)
+	if !ok {
+		return BegunConnection{}, ErrInvalidConnection
+	}
 	requestID, secretOK := ParseConnectionPollSecret(request.PollSecret)
-	if !ok || !secretOK || requestID != request.RequestID || uuid.Validate(request.RequestID) != nil ||
-		!validIdempotencyKey(request.IdempotencyKey) || name == "" || len([]byte(name)) > DisplayNameMaximumBytes ||
-		!utf8.ValidString(name) || request.Origin != connections.origin || strings.TrimSpace(request.Source) == "" {
+	if !secretOK {
+		return BegunConnection{}, ErrInvalidConnection
+	}
+	if requestID != request.RequestID {
+		return BegunConnection{}, ErrInvalidConnection
+	}
+	if uuid.Validate(request.RequestID) != nil {
+		return BegunConnection{}, ErrInvalidConnection
+	}
+	if !validIdempotencyKey(request.IdempotencyKey) {
+		return BegunConnection{}, ErrInvalidConnection
+	}
+	name := strings.TrimSpace(request.DisplayName)
+	if name == "" {
+		return BegunConnection{}, ErrInvalidConnection
+	}
+	if len([]byte(name)) > DisplayNameMaximumBytes {
+		return BegunConnection{}, ErrInvalidConnection
+	}
+	if !utf8.ValidString(name) {
+		return BegunConnection{}, ErrInvalidConnection
+	}
+	if request.Origin != connections.origin {
+		return BegunConnection{}, ErrInvalidConnection
+	}
+	if strings.TrimSpace(request.Source) == "" {
 		return BegunConnection{}, ErrInvalidConnection
 	}
 	publicKey, err := parseEd25519PublicKey(request.PublicKeyDER)
-	if err != nil || len(request.KeyProof) != ed25519.SignatureSize ||
-		!ed25519.Verify(publicKey, ConnectionKeyProofMessage(request.Origin, request.RequestID, name, request.PublicKeyDER, code, request.PollSecret), request.KeyProof) {
+	if err != nil {
 		return BegunConnection{}, ErrInvalidConnection
 	}
-	digest := connectionDigest(request.RequestID, request.Origin, name, code, request.PollSecret,
-		base64.RawStdEncoding.EncodeToString(request.PublicKeyDER), base64.RawStdEncoding.EncodeToString(request.KeyProof))
+	if len(request.KeyProof) != ed25519.SignatureSize {
+		return BegunConnection{}, ErrInvalidConnection
+	}
+	proofMessage := ConnectionKeyProofMessage(
+		request.Origin,
+		request.RequestID,
+		name,
+		request.PublicKeyDER,
+		code,
+		request.PollSecret,
+	)
+	if !ed25519.Verify(publicKey, proofMessage, request.KeyProof) {
+		return BegunConnection{}, ErrInvalidConnection
+	}
+	digest := connectionDigest(
+		request.RequestID,
+		request.Origin,
+		name,
+		code,
+		request.PollSecret,
+		base64.RawStdEncoding.EncodeToString(request.PublicKeyDER),
+		base64.RawStdEncoding.EncodeToString(request.KeyProof),
+	)
 	created, err := connections.persistence.BeginMachineConnection(ctx, BeginConnectionCommand{
-		RequestID: request.RequestID, IdempotencyKey: request.IdempotencyKey, DisplayName: name,
-		PublicKeyDER: append([]byte(nil), request.PublicKeyDER...), KeyProof: append([]byte(nil), request.KeyProof...),
-		RequestDigest: digest, SourceDigest: connections.credentials.SourceDigest(request.Source),
-		CodeDigest: connections.credentials.CodeDigest(code), PollDigest: connections.credentials.PollDigest(request.PollSecret),
+		RequestID:      request.RequestID,
+		IdempotencyKey: request.IdempotencyKey,
+		DisplayName:    name,
+		PublicKeyDER:   append([]byte(nil), request.PublicKeyDER...),
+		KeyProof:       append([]byte(nil), request.KeyProof...),
+		RequestDigest:  digest,
+		SourceDigest:   connections.credentials.SourceDigest(request.Source),
+		CodeDigest:     connections.credentials.CodeDigest(code),
+		PollDigest:     connections.credentials.PollDigest(request.PollSecret),
 	})
 	if err != nil {
 		return BegunConnection{}, err
 	}
 	return BegunConnection{
-		RequestID: created.RequestID, DisplayName: created.DisplayName, UserCode: code, PollSecret: request.PollSecret,
-		Fingerprint: PublicKeyFingerprint(created.PublicKeyDER), VerificationPath: "/machine-connect",
-		ExpiresAt: created.ExpiresAt, PollInterval: created.PollInterval,
+		RequestID:        created.RequestID,
+		DisplayName:      created.DisplayName,
+		UserCode:         code,
+		PollSecret:       request.PollSecret,
+		Fingerprint:      PublicKeyFingerprint(created.PublicKeyDER),
+		VerificationPath: "/machine-connect",
+		ExpiresAt:        created.ExpiresAt,
+		PollInterval:     created.PollInterval,
 	}, nil
 }
 

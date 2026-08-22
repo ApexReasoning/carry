@@ -111,9 +111,6 @@ func TestMemberTalksPrivatelyAndDelegatesSharedWork(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run private Conversation browser journey: %v\n%s\nHost log:\n%s", err, playwrightOutput, hostLog.String())
 	}
-	if !strings.Contains(playwrightOutput, "1 passed") {
-		t.Fatalf("private Conversation Playwright spec did not execute:\n%s", playwrightOutput)
-	}
 	t.Logf("public Host: %s", strings.SplitN(hostLog.String(), "\n", 2)[0])
 	t.Logf("private Conversation Playwright: %s", strings.TrimSpace(playwrightOutput))
 

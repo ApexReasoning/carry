@@ -405,6 +405,58 @@ func TestMigrateUpgradesTerminalNode2Runs(t *testing.T) {
 	}
 }
 
+func TestMigration18BackfillsExternalLoginAdmissionSource(t *testing.T) {
+	ctx := context.Background()
+	pool := openMigratedTestPool(t, ctx)
+	if _, err := pool.Exec(ctx, `drop schema public cascade; create schema public`); err != nil {
+		t.Fatal(err)
+	}
+	connection, err := pool.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := connection.Exec(ctx, `create table carry_schema_migrations (version text primary key, applied_at timestamptz not null default transaction_timestamp())`); err != nil {
+		connection.Release()
+		t.Fatal(err)
+	}
+	entries, err := migrationFiles.ReadDir("migrations")
+	if err != nil {
+		connection.Release()
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if entry.Name() >= "0018_external_login_admission.sql" {
+			continue
+		}
+		migration, readErr := migrationFiles.ReadFile("migrations/" + entry.Name())
+		if readErr != nil {
+			connection.Release()
+			t.Fatal(readErr)
+		}
+		if err := applyMigration(ctx, connection, entry.Name(), string(migration)); err != nil {
+			connection.Release()
+			t.Fatalf("apply %s: %v", entry.Name(), err)
+		}
+	}
+	connection.Release()
+
+	transactionID := uuid.NewString()
+	if _, err := pool.Exec(ctx, `insert into external_login_transactions(transaction_id,provider,purpose,expires_at) values($1,'google','login',transaction_timestamp()+interval '10 minutes')`, transactionID); err != nil {
+		t.Fatal(err)
+	}
+	if err := Migrate(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	var sourceBytes int
+	if err := pool.QueryRow(ctx, `select octet_length(source_digest) from external_login_transactions where transaction_id=$1`, transactionID).Scan(&sourceBytes); err != nil || sourceBytes != 32 {
+		t.Fatalf("backfilled source bytes = %d, %v", sourceBytes, err)
+	}
+	var indexes int
+	if err := pool.QueryRow(ctx, `select count(*) from pg_indexes where schemaname='public' and indexname in ('external_login_expiry_idx','external_login_live_source_idx')`).Scan(&indexes); err != nil || indexes != 2 {
+		t.Fatalf("external login admission indexes = %d, %v", indexes, err)
+	}
+}
+
 func TestMigration17AddsLoginOnlyInvitationContinuationWithoutForeignKey(t *testing.T) {
 	ctx := context.Background()
 	pool := openMigratedTestPool(t, ctx)
@@ -452,7 +504,7 @@ func TestMigration17AddsLoginOnlyInvitationContinuationWithoutForeignKey(t *test
 		t.Fatalf("backfilled continuation = %v, %v", continuation, err)
 	}
 	arbitraryInvitationID := uuid.NewString()
-	if _, err := pool.Exec(ctx, `insert into external_login_transactions(transaction_id,provider,purpose,invitation_id,expires_at) values($1,'github','login',$2,transaction_timestamp()+interval '10 minutes')`, uuid.NewString(), arbitraryInvitationID); err != nil {
+	if _, err := pool.Exec(ctx, `insert into external_login_transactions(transaction_id,provider,purpose,invitation_id,source_digest,expires_at) values($1,'github','login',$2,decode(repeat('00',32),'hex'),transaction_timestamp()+interval '10 minutes')`, uuid.NewString(), arbitraryInvitationID); err != nil {
 		t.Fatalf("non-FK continuation was rejected: %v", err)
 	}
 	targetUserID := uuid.NewString()
@@ -463,7 +515,7 @@ func TestMigration17AddsLoginOnlyInvitationContinuationWithoutForeignKey(t *test
 	if _, err := pool.Exec(ctx, `insert into browser_sessions(session_id,user_id,expires_at,identity_proof_method) values($1,$2,transaction_timestamp()+interval '1 hour','github')`, initiatingSessionID, targetUserID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, `insert into external_login_transactions(transaction_id,provider,purpose,target_user_id,initiating_session_id,invitation_id,expires_at) values($1,'github','link',$2,$3,$4,transaction_timestamp()+interval '10 minutes')`, uuid.NewString(), targetUserID, initiatingSessionID, arbitraryInvitationID); err == nil {
+	if _, err := pool.Exec(ctx, `insert into external_login_transactions(transaction_id,provider,purpose,target_user_id,initiating_session_id,invitation_id,source_digest,expires_at) values($1,'github','link',$2,$3,$4,decode(repeat('00',32),'hex'),transaction_timestamp()+interval '10 minutes')`, uuid.NewString(), targetUserID, initiatingSessionID, arbitraryInvitationID); err == nil {
 		t.Fatal("valid link-purpose transaction accepted an invitation continuation")
 	}
 	var foreignKeys int

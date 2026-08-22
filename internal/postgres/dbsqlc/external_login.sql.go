@@ -72,6 +72,37 @@ func (q *Queries) CompleteExternalLogin(ctx context.Context, arg CompleteExterna
 	return result.RowsAffected(), nil
 }
 
+const countLiveExternalLogins = `-- name: CountLiveExternalLogins :one
+SELECT count(*)
+FROM external_login_transactions
+WHERE purpose = 'login'
+    AND status IN ('prepared', 'exchanging')
+    AND expires_at > transaction_timestamp()
+`
+
+func (q *Queries) CountLiveExternalLogins(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, countLiveExternalLogins)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countLiveExternalLoginsForSource = `-- name: CountLiveExternalLoginsForSource :one
+SELECT count(*)
+FROM external_login_transactions
+WHERE source_digest = $1
+    AND purpose = 'login'
+    AND status IN ('prepared', 'exchanging')
+    AND expires_at > transaction_timestamp()
+`
+
+func (q *Queries) CountLiveExternalLoginsForSource(ctx context.Context, sourceDigest []byte) (int64, error) {
+	row := q.db.QueryRow(ctx, countLiveExternalLoginsForSource, sourceDigest)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createExternalLogin = `-- name: CreateExternalLogin :one
 INSERT INTO external_login_transactions (
     transaction_id,
@@ -80,6 +111,7 @@ INSERT INTO external_login_transactions (
     target_user_id,
     initiating_session_id,
     invitation_id,
+    source_digest,
     expires_at
 ) VALUES (
     $1,
@@ -88,6 +120,7 @@ INSERT INTO external_login_transactions (
     $4,
     $5,
     $6,
+    $7,
     transaction_timestamp() + interval '10 minutes'
 )
 RETURNING expires_at
@@ -100,6 +133,7 @@ type CreateExternalLoginParams struct {
 	TargetUserID        pgtype.UUID
 	InitiatingSessionID pgtype.UUID
 	InvitationID        pgtype.UUID
+	SourceDigest        []byte
 }
 
 func (q *Queries) CreateExternalLogin(ctx context.Context, arg CreateExternalLoginParams) (pgtype.Timestamptz, error) {
@@ -110,6 +144,7 @@ func (q *Queries) CreateExternalLogin(ctx context.Context, arg CreateExternalLog
 		arg.TargetUserID,
 		arg.InitiatingSessionID,
 		arg.InvitationID,
+		arg.SourceDigest,
 	)
 	var expires_at pgtype.Timestamptz
 	err := row.Scan(&expires_at)
@@ -160,6 +195,19 @@ type CreateGoogleIdentityParams struct {
 func (q *Queries) CreateGoogleIdentity(ctx context.Context, arg CreateGoogleIdentityParams) error {
 	_, err := q.db.Exec(ctx, createGoogleIdentity, arg.Issuer, arg.Subject, arg.UserID)
 	return err
+}
+
+const deleteExpiredExternalLogins = `-- name: DeleteExpiredExternalLogins :execrows
+DELETE FROM external_login_transactions
+WHERE expires_at <= transaction_timestamp()
+`
+
+func (q *Queries) DeleteExpiredExternalLogins(ctx context.Context) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteExpiredExternalLogins)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const externalLoginDatabaseTime = `-- name: ExternalLoginDatabaseTime :one
@@ -239,7 +287,7 @@ func (q *Queries) LoadGoogleIdentity(ctx context.Context, arg LoadGoogleIdentity
 }
 
 const lockExternalLogin = `-- name: LockExternalLogin :one
-SELECT transaction_id, provider, status, callback_digest, created_at, expires_at, completed_at, user_id, browser_session_id, purpose, target_user_id, initiating_session_id, invitation_id
+SELECT transaction_id, provider, status, callback_digest, created_at, expires_at, completed_at, user_id, browser_session_id, purpose, target_user_id, initiating_session_id, invitation_id, source_digest
 FROM external_login_transactions
 WHERE transaction_id = $1
 FOR UPDATE
@@ -262,8 +310,31 @@ func (q *Queries) LockExternalLogin(ctx context.Context, transactionID string) (
 		&i.TargetUserID,
 		&i.InitiatingSessionID,
 		&i.InvitationID,
+		&i.SourceDigest,
 	)
 	return i, err
+}
+
+const lockExternalLoginAdmission = `-- name: LockExternalLoginAdmission :exec
+SELECT pg_advisory_xact_lock(
+    hashtextextended('external-login-admission', 14)
+)
+`
+
+func (q *Queries) LockExternalLoginAdmission(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, lockExternalLoginAdmission)
+	return err
+}
+
+const lockExternalLoginSource = `-- name: LockExternalLoginSource :exec
+SELECT pg_advisory_xact_lock(
+    hashtextextended(encode($1::bytea, 'hex'), 15)
+)
+`
+
+func (q *Queries) LockExternalLoginSource(ctx context.Context, sourceDigest []byte) error {
+	_, err := q.db.Exec(ctx, lockExternalLoginSource, sourceDigest)
+	return err
 }
 
 const lockGitHubIdentityKey = `-- name: LockGitHubIdentityKey :exec

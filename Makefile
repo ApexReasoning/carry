@@ -1,6 +1,6 @@
 GO ?= go
 
-.PHONY: build check check-go check-product check-web format generate test test-db
+.PHONY: build check check-go check-product check-vulnerabilities check-web format generate test test-db
 
 build:
 	$(GO) build ./cmd/carry-server ./cmd/carry
@@ -41,6 +41,9 @@ check-web:
 	pnpm --dir apps/web build
 
 check-product:
-	./scripts/test-db ./e2e/...
+	./scripts/test-db -v ./e2e/...
+
+check-vulnerabilities:
+	$(GO) tool govulncheck ./...
 
 check: check-go check-web check-product

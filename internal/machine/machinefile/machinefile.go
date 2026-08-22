@@ -303,22 +303,72 @@ func validateCredential(credential Credential) error {
 }
 
 func validatePending(pending PendingConnection) error {
-	code, codeOK := machine.NormalizeConnectionCode(pending.UserCode)
+	if !validServerURL(pending.ServerURL) {
+		return errors.New("pending Machine server URL is invalid")
+	}
+	if uuid.Validate(pending.RequestID) != nil {
+		return errors.New("pending Machine request identity is invalid")
+	}
+	if uuid.Validate(pending.IdempotencyKey) != nil {
+		return errors.New("pending Machine idempotency identity is invalid")
+	}
 	requestID, secretOK := machine.ParseConnectionPollSecret(pending.PollSecret)
-	if !validServerURL(pending.ServerURL) || uuid.Validate(pending.RequestID) != nil || uuid.Validate(pending.IdempotencyKey) != nil ||
-		requestID != pending.RequestID || !secretOK || !codeOK || code != pending.UserCode ||
-		strings.TrimSpace(pending.DisplayName) == "" || len([]byte(pending.DisplayName)) > machine.DisplayNameMaximumBytes ||
-		len(pending.PublicKeyDER) == 0 || len(pending.KeyProof) != ed25519.SignatureSize ||
-		pending.Fingerprint != machine.PublicKeyFingerprint(pending.PublicKeyDER) || pending.ExpiresAt.IsZero() ||
-		pending.IntervalSeconds < int(machine.ConnectionInitialInterval/time.Second) || pending.IntervalSeconds > int(machine.ConnectionMaximumInterval/time.Second) {
-		return errors.New("pending Machine connection content is invalid")
+	if !secretOK {
+		return errors.New("pending Machine poll secret is invalid")
+	}
+	if requestID != pending.RequestID {
+		return errors.New("pending Machine poll secret belongs to another request")
+	}
+	code, codeOK := machine.NormalizeConnectionCode(pending.UserCode)
+	if !codeOK {
+		return errors.New("pending Machine connection code is invalid")
+	}
+	if code != pending.UserCode {
+		return errors.New("pending Machine connection code is not canonical")
+	}
+	if strings.TrimSpace(pending.DisplayName) == "" {
+		return errors.New("pending Machine display name is empty")
+	}
+	if len([]byte(pending.DisplayName)) > machine.DisplayNameMaximumBytes {
+		return errors.New("pending Machine display name is too long")
+	}
+	if len(pending.PublicKeyDER) == 0 {
+		return errors.New("pending Machine public key is empty")
+	}
+	if len(pending.KeyProof) != ed25519.SignatureSize {
+		return errors.New("pending Machine key proof has an invalid size")
+	}
+	if pending.Fingerprint != machine.PublicKeyFingerprint(pending.PublicKeyDER) {
+		return errors.New("pending Machine fingerprint does not match its public key")
+	}
+	if pending.ExpiresAt.IsZero() {
+		return errors.New("pending Machine expiry is missing")
+	}
+	minimumInterval := int(machine.ConnectionInitialInterval / time.Second)
+	if pending.IntervalSeconds < minimumInterval {
+		return errors.New("pending Machine polling interval is too short")
+	}
+	maximumInterval := int(machine.ConnectionMaximumInterval / time.Second)
+	if pending.IntervalSeconds > maximumInterval {
+		return errors.New("pending Machine polling interval is too long")
 	}
 	publicKey, err := x509.ParsePKIXPublicKey(pending.PublicKeyDER)
 	if err != nil {
 		return errors.New("pending Machine public key is invalid")
 	}
 	key, ok := publicKey.(ed25519.PublicKey)
-	if !ok || !ed25519.Verify(key, machine.ConnectionKeyProofMessage(pending.ServerURL, pending.RequestID, pending.DisplayName, pending.PublicKeyDER, pending.UserCode, pending.PollSecret), pending.KeyProof) {
+	if !ok {
+		return errors.New("pending Machine public key is not Ed25519")
+	}
+	proofMessage := machine.ConnectionKeyProofMessage(
+		pending.ServerURL,
+		pending.RequestID,
+		pending.DisplayName,
+		pending.PublicKeyDER,
+		pending.UserCode,
+		pending.PollSecret,
+	)
+	if !ed25519.Verify(key, proofMessage, pending.KeyProof) {
 		return errors.New("pending Machine key proof is invalid")
 	}
 	proof, err := SignConnectionProof(pending.PrivateKeyPEM, pending.ServerURL, pending.RequestID, pending.DisplayName, pending.PublicKeyDER, pending.UserCode, pending.PollSecret)

@@ -205,6 +205,38 @@ test("reuses a pending key after remount without persisting the private draft", 
   expect(requestKeys[1]).toBe(requestKeys[0]);
 });
 
+test("requires explicit recovery before discarding a damaged request identity", async () => {
+  const storageKey = `carry.pending-conversation.v1:${encodeURIComponent(memberID)}:${encodeURIComponent(spaceID)}`;
+  window.sessionStorage.setItem(storageKey, "damaged");
+  let posts = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request =
+        input instanceof Request ? input : new Request(input, init);
+      if (request.method === "GET") return json({ messages: [] });
+      posts += 1;
+      return json({});
+    }),
+  );
+
+  renderPanel();
+  const composer = await screen.findByLabelText("Message Carry privately");
+  expect(composer).toBeDisabled();
+  expect(window.sessionStorage.getItem(storageKey)).toBe("damaged");
+  expect(posts).toBe(0);
+
+  await userEvent.setup().click(
+    screen.getByRole("button", {
+      name: "Discard damaged message identity",
+    }),
+  );
+
+  expect(window.sessionStorage.getItem(storageKey)).toBeNull();
+  expect(composer).toBeEnabled();
+  expect(posts).toBe(0);
+});
+
 test("does not send when a pending request key cannot be persisted", async () => {
   let posts = 0;
   vi.stubGlobal(

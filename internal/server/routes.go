@@ -56,7 +56,11 @@ func NewUserIdentityRoutes(
 			login: emailLogin, credentials: credentials, requestSources: requestSources, origin: externalOrigin,
 		},
 		external: externalLoginAPI{
-			login: externalLogin, sessions: sessions, credentials: credentials, origin: externalOrigin,
+			login:          externalLogin,
+			sessions:       sessions,
+			credentials:    credentials,
+			origin:         externalOrigin,
+			requestSources: requestSources,
 		},
 		methods:  identityMethodsAPI{methods: methods, credentials: credentials, origin: externalOrigin},
 		sessions: browserSessionAPI{sessions: sessions, credentials: credentials},

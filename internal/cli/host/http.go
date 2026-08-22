@@ -15,7 +15,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ApexReasoning/carry/internal/conversation"
 	hostdomain "github.com/ApexReasoning/carry/internal/host"
+	"github.com/ApexReasoning/carry/internal/run"
 )
 
 func parseServerURL(raw string) (string, error) {
@@ -78,11 +80,21 @@ func sendJSON(client *http.Client, request *http.Request, destination any) error
 		limited, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
 		return controlPlaneStatusError(request, response, strings.TrimSpace(string(limited)))
 	}
+	const maximumResponseBytes = 1 << 20
 	if destination == nil {
-		_, _ = io.Copy(io.Discard, response.Body)
+		body, err := io.ReadAll(io.LimitReader(response.Body, maximumResponseBytes+1))
+		if err != nil {
+			return fmt.Errorf("read %s response: %w", request.URL, err)
+		}
+		if len(body) > maximumResponseBytes {
+			return fmt.Errorf("read %s response: response exceeds its byte limit", request.URL)
+		}
+		if len(strings.TrimSpace(string(body))) != 0 {
+			return fmt.Errorf("read %s response: expected an empty response", request.URL)
+		}
 		return nil
 	}
-	if err := json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(destination); err != nil {
+	if err := decodeBoundedExactJSON(response.Body, maximumResponseBytes, destination); err != nil {
 		return fmt.Errorf("decode %s response: %w", request.URL, err)
 	}
 	return nil
@@ -134,6 +146,14 @@ func controlPlaneStatusError(request *http.Request, response *http.Response, det
 	}
 	if response.StatusCode == http.StatusTooManyRequests || response.StatusCode >= http.StatusInternalServerError {
 		return temporaryControlPlaneError(message, errors.New("temporary server response"))
+	}
+	if response.StatusCode == http.StatusConflict {
+		switch {
+		case strings.HasPrefix(request.URL.Path, "/v1/host/runs/"):
+			return fmt.Errorf("%w: %s", run.ErrStaleAttempt, message)
+		case strings.HasPrefix(request.URL.Path, "/v1/host/conversation-replies/"):
+			return fmt.Errorf("%w: %s", conversation.ErrStaleReplyClaim, message)
+		}
 	}
 	return errors.New(message)
 }

@@ -19,6 +19,7 @@ var (
 	ErrExternalLoginDenied      = errors.New("external sign-in was cancelled")
 	ErrExternalLoginUnavailable = errors.New("external sign-in could not be confirmed")
 	ErrExternalLoginRejected    = errors.New("sign-in method could not be changed")
+	ErrExternalLoginRateLimited = errors.New("external sign-in attempts are temporarily limited")
 )
 
 type ExternalLoginProvider string
@@ -98,28 +99,28 @@ type ExternalLoginStart struct {
 	ExpiresAt         time.Time
 }
 
-func (login *ExternalLogin) StartGoogle(ctx context.Context, invitationID string) (ExternalLoginStart, error) {
-	return login.start(ctx, GoogleLoginProvider, LoginPurpose, "", "", invitationID)
+func (login *ExternalLogin) StartGoogle(ctx context.Context, invitationID string, source string) (ExternalLoginStart, error) {
+	return login.start(ctx, GoogleLoginProvider, LoginPurpose, "", "", invitationID, source)
 }
 
 func (login *ExternalLogin) StartGoogleReauthentication(ctx context.Context, userID string, sessionID string) (ExternalLoginStart, error) {
-	return login.start(ctx, GoogleLoginProvider, ReauthenticatePurpose, userID, sessionID, "")
+	return login.start(ctx, GoogleLoginProvider, ReauthenticatePurpose, userID, sessionID, "", "")
 }
 
 func (login *ExternalLogin) StartGoogleLink(ctx context.Context, userID string, sessionID string) (ExternalLoginStart, error) {
-	return login.start(ctx, GoogleLoginProvider, LinkPurpose, userID, sessionID, "")
+	return login.start(ctx, GoogleLoginProvider, LinkPurpose, userID, sessionID, "", "")
 }
 
-func (login *ExternalLogin) StartGitHub(ctx context.Context, invitationID string) (ExternalLoginStart, error) {
-	return login.start(ctx, GitHubLoginProvider, LoginPurpose, "", "", invitationID)
+func (login *ExternalLogin) StartGitHub(ctx context.Context, invitationID string, source string) (ExternalLoginStart, error) {
+	return login.start(ctx, GitHubLoginProvider, LoginPurpose, "", "", invitationID, source)
 }
 
 func (login *ExternalLogin) StartGitHubReauthentication(ctx context.Context, userID string, sessionID string) (ExternalLoginStart, error) {
-	return login.start(ctx, GitHubLoginProvider, ReauthenticatePurpose, userID, sessionID, "")
+	return login.start(ctx, GitHubLoginProvider, ReauthenticatePurpose, userID, sessionID, "", "")
 }
 
 func (login *ExternalLogin) StartGitHubLink(ctx context.Context, userID string, sessionID string) (ExternalLoginStart, error) {
-	return login.start(ctx, GitHubLoginProvider, LinkPurpose, userID, sessionID, "")
+	return login.start(ctx, GitHubLoginProvider, LinkPurpose, userID, sessionID, "", "")
 }
 
 func (login *ExternalLogin) start(
@@ -129,11 +130,15 @@ func (login *ExternalLogin) start(
 	userID string,
 	sessionID string,
 	invitationID string,
+	source string,
 ) (ExternalLoginStart, error) {
 	if invitationID != "" && uuid.Validate(invitationID) != nil {
 		return ExternalLoginStart{}, ErrExternalLoginInvalid
 	}
 	if purpose != LoginPurpose && invitationID != "" {
+		return ExternalLoginStart{}, ErrExternalLoginInvalid
+	}
+	if purpose == LoginPurpose && strings.TrimSpace(source) == "" {
 		return ExternalLoginStart{}, ErrExternalLoginInvalid
 	}
 	transactionID := uuid.NewString()
@@ -144,6 +149,7 @@ func (login *ExternalLogin) start(
 		TargetUserID:        userID,
 		InitiatingSessionID: sessionID,
 		InvitationID:        invitationID,
+		SourceDigest:        login.credentials.externalLoginSourceDigest(source),
 	})
 	if err != nil {
 		return ExternalLoginStart{}, err
@@ -424,6 +430,10 @@ func (c Credentials) GoogleNonce(transactionID string) string {
 	return base64.RawURLEncoding.EncodeToString(digest[:])
 }
 
+func (c Credentials) externalLoginSourceDigest(source string) [sha256.Size]byte {
+	return c.mac("carry/external-login-source/v1", source)
+}
+
 func (c Credentials) PKCEVerifier(transactionID string, provider ExternalLoginProvider) string {
 	digest := c.mac("carry/external-login-pkce/v1", string(provider), transactionID)
 	return base64.RawURLEncoding.EncodeToString(digest[:])
@@ -445,6 +455,7 @@ type CreateExternalLoginCommand struct {
 	TargetUserID        string
 	InitiatingSessionID string
 	InvitationID        string
+	SourceDigest        [sha256.Size]byte
 }
 
 type ClaimExternalLoginCommand struct {

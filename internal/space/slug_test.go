@@ -161,6 +161,21 @@ func TestNormalizeSpaceNameRejectsUnsafeOrUnrecoverableSlug(t *testing.T) {
 			want:  ErrSpaceSlugMixedScripts,
 		},
 		{
+			name:  "Japanese Korean",
+			value: "Carry ひ한",
+			want:  ErrSpaceSlugMixedScripts,
+		},
+		{
+			name:  "Japanese Bopomofo",
+			value: "Carry ひㄅ",
+			want:  ErrSpaceSlugMixedScripts,
+		},
+		{
+			name:  "Korean Bopomofo",
+			value: "Carry 한ㄅ",
+			want:  ErrSpaceSlugMixedScripts,
+		},
+		{
 			name:  "slug too long",
 			value: strings.Repeat("界", 33),
 			want:  ErrSpaceSlugTooLong,

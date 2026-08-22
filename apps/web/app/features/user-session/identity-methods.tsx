@@ -12,12 +12,12 @@ import type { IdentityMethods } from "../../generated/types.gen";
 
 type Method = IdentityMethods["methods"][number];
 type EmailProof = {
-  purpose: "reauthenticate" | "link";
   challengeID: string;
   requestKey: string;
   verifyKey: string;
-  candidateEmail?: string;
-};
+} & (
+  { purpose: "reauthenticate" } | { purpose: "link"; candidateEmail: string }
+);
 type PendingUnlink = { method: Method; requestKey: string };
 
 const methodLabels: Record<Method, string> = {
@@ -103,22 +103,37 @@ export function IdentityMethodSettings({ onClose }: { onClose: () => void }) {
     event?.preventDefault();
     const proof =
       exactReplay ??
-      ({
-        purpose,
-        challengeID: crypto.randomUUID(),
-        requestKey: crypto.randomUUID(),
-        verifyKey: crypto.randomUUID(),
-        candidateEmail: purpose === "link" ? email : undefined,
-      } satisfies EmailProof);
+      (purpose === "link"
+        ? {
+            purpose,
+            challengeID: crypto.randomUUID(),
+            requestKey: crypto.randomUUID(),
+            verifyKey: crypto.randomUUID(),
+            candidateEmail: email,
+          }
+        : {
+            purpose,
+            challengeID: crypto.randomUUID(),
+            requestKey: crypto.randomUUID(),
+            verifyKey: crypto.randomUUID(),
+          });
     setEmailProof(proof);
     setBusy(true);
     setError(null);
     try {
       await requestIdentityEmailCode(
-        proof.purpose,
-        proof.challengeID,
-        proof.requestKey,
-        proof.candidateEmail,
+        proof.purpose === "link"
+          ? {
+              purpose: proof.purpose,
+              challengeID: proof.challengeID,
+              idempotencyKey: proof.requestKey,
+              email: proof.candidateEmail,
+            }
+          : {
+              purpose: proof.purpose,
+              challengeID: proof.challengeID,
+              idempotencyKey: proof.requestKey,
+            },
       );
       setCode("");
     } catch (caught) {

@@ -11,38 +11,21 @@ import type { InvitationInbox } from "../../generated/types.gen";
 import { IdentityMethodSettings } from "./identity-methods";
 import type { TargetedInvitationState } from "./use-user-session";
 
-export function InvitationInboxView({
-  initialInbox,
-  onSkip,
-}: {
-  initialInbox: InvitationInbox;
-  onSkip: () => void;
-}) {
-  const [inbox, setInbox] = useState(initialInbox);
-  const [challenge, setChallenge] = useState<{
-    id: string;
-    requestKey: string;
-    verifyKey: string;
-  } | null>(null);
+type InvitationEmailChallenge = {
+  id: string;
+  requestKey: string;
+  verifyKey: string;
+};
+
+function useInvitationEmailProof(onVerified: () => void | Promise<void>) {
+  const [challenge, setChallenge] = useState<InvitationEmailChallenge | null>(
+    null,
+  );
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [pendingAccept, setPendingAccept] = useState<{
-    invitationID: string;
-    key: string;
-  } | null>(null);
 
-  async function refresh() {
-    const loaded = await invitationInbox();
-    setInbox(loaded);
-    if (!loaded.reauthentication_required) setChallenge(null);
-  }
-
-  async function confirmEmail(retry?: {
-    id: string;
-    requestKey: string;
-    verifyKey: string;
-  }) {
+  async function request(retry?: InvitationEmailChallenge) {
     const next = retry ?? {
       id: crypto.randomUUID(),
       requestKey: crypto.randomUUID(),
@@ -52,16 +35,20 @@ export function InvitationInboxView({
     setBusy(true);
     setError(null);
     try {
-      await requestIdentityEmailCode(
-        "reauthenticate",
-        next.id,
-        next.requestKey,
-      );
+      await requestIdentityEmailCode({
+        purpose: "reauthenticate",
+        challengeID: next.id,
+        idempotencyKey: next.requestKey,
+      });
     } catch (caught) {
       setError(message(caught));
     } finally {
       setBusy(false);
     }
+  }
+
+  async function retry() {
+    if (challenge) await request(challenge);
   }
 
   async function verify(event: React.FormEvent) {
@@ -76,12 +63,46 @@ export function InvitationInboxView({
         code,
         challenge.verifyKey,
       );
-      await refresh();
+      setChallenge(null);
+      setCode("");
+      await onVerified();
     } catch (caught) {
       setError(message(caught));
     } finally {
       setBusy(false);
     }
+  }
+
+  return {
+    busy,
+    challenge,
+    code,
+    error,
+    request,
+    retry,
+    setCode,
+    verify,
+  };
+}
+
+export function InvitationInboxView({
+  initialInbox,
+  onSkip,
+}: {
+  initialInbox: InvitationInbox;
+  onSkip: () => void;
+}) {
+  const [inbox, setInbox] = useState(initialInbox);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [pendingAccept, setPendingAccept] = useState<{
+    invitationID: string;
+    key: string;
+  } | null>(null);
+  const proof = useInvitationEmailProof(refresh);
+
+  async function refresh() {
+    setInbox(await invitationInbox());
   }
 
   async function accept(
@@ -114,9 +135,9 @@ export function InvitationInboxView({
         Carry<span className="brand-dot">.</span>
       </p>
       <h1>Space invitations</h1>
-      {error ? (
+      {(error ?? proof.error) ? (
         <p className="alert" role="alert">
-          {error}
+          {error ?? proof.error}
         </p>
       ) : null}
       {inbox.invitations.length === 0 ? (
@@ -134,41 +155,51 @@ export function InvitationInboxView({
                 Confirm the invited Email before joining. Authentication alone
                 does not accept an invitation.
               </p>
-              {!challenge ? (
+              {!proof.challenge ? (
                 <button
                   className="secondary-button"
                   type="button"
-                  disabled={busy}
-                  onClick={() => void confirmEmail()}
+                  disabled={busy || proof.busy}
+                  onClick={() => void proof.request()}
                 >
                   Confirm with Email
                 </button>
               ) : (
-                <form onSubmit={(event) => void verify(event)}>
+                <form onSubmit={(event) => void proof.verify(event)}>
                   <label htmlFor="invitation-email-code">
                     Newest six-digit Email code
                   </label>
                   <input
                     id="invitation-email-code"
                     inputMode="numeric"
-                    value={code}
+                    value={proof.code}
                     onChange={(event) =>
-                      setCode(event.target.value.replace(/\D/g, "").slice(0, 6))
+                      proof.setCode(
+                        event.target.value.replace(/\D/g, "").slice(0, 6),
+                      )
                     }
                   />
                   <button
                     className="primary-button"
-                    disabled={busy || !/^\d{6}$/.test(code)}
+                    disabled={busy || proof.busy || !/^\d{6}$/.test(proof.code)}
                   >
                     Confirm Email
                   </button>
                   <button
                     className="ghost-button"
                     type="button"
-                    disabled={busy}
-                    onClick={() => void confirmEmail(challenge)}
+                    disabled={busy || proof.busy}
+                    onClick={() => void proof.retry()}
                   >
                     Retry exact code request
+                  </button>
+                  <button
+                    className="ghost-button"
+                    type="button"
+                    disabled={busy || proof.busy}
+                    onClick={() => void proof.request()}
+                  >
+                    Send a new code
                   </button>
                 </form>
               )}
@@ -223,63 +254,16 @@ export function TargetedInvitationView({
   onSignOut,
 }: {
   state: TargetedInvitationState;
-  onReload: () => void;
+  onReload: () => void | Promise<void>;
   onSkip: () => void;
   onSignOut: () => void;
 }) {
   const [showMethods, setShowMethods] = useState(false);
-  const [challenge, setChallenge] = useState<{
-    id: string;
-    requestKey: string;
-    verifyKey: string;
-  } | null>(null);
-  const [code, setCode] = useState("");
   const [acceptKey, setAcceptKey] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const proof = useInvitationEmailProof(onReload);
   const invitation = state.status === "owner" ? state.invitation : null;
-
-  async function confirmEmail() {
-    const next = challenge ?? {
-      id: crypto.randomUUID(),
-      requestKey: crypto.randomUUID(),
-      verifyKey: crypto.randomUUID(),
-    };
-    setChallenge(next);
-    setBusy(true);
-    setError(null);
-    try {
-      await requestIdentityEmailCode(
-        "reauthenticate",
-        next.id,
-        next.requestKey,
-      );
-    } catch (caught) {
-      setError(message(caught));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function verify(event: React.FormEvent) {
-    event.preventDefault();
-    if (!challenge || !/^\d{6}$/.test(code)) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await verifyIdentityEmailCode(
-        "reauthenticate",
-        challenge.id,
-        code,
-        challenge.verifyKey,
-      );
-      onReload();
-    } catch (caught) {
-      setError(message(caught));
-    } finally {
-      setBusy(false);
-    }
-  }
 
   async function accept() {
     if (!invitation) return;
@@ -320,9 +304,9 @@ export function TargetedInvitationView({
         Carry<span className="brand-dot">.</span>
       </p>
       <h1>Space invitation</h1>
-      {error ? (
+      {(error ?? proof.error) ? (
         <p className="alert" role="alert">
-          {error}
+          {error ?? proof.error}
         </p>
       ) : null}
       {state.status === "loading" ? (
@@ -339,8 +323,11 @@ export function TargetedInvitationView({
       ) : state.status === "unavailable" ? (
         state.hasEmail ? (
           <>
-            <p>This Carry User cannot review this invitation.</p>
-            <p>Sign out and continue as the Carry User that owns it.</p>
+            <p>This signed-in account cannot review this invitation.</p>
+            <p>
+              Sign out, then sign in with the email address that received this
+              invitation.
+            </p>
             <button
               className="secondary-button"
               type="button"
@@ -395,35 +382,53 @@ export function TargetedInvitationView({
             invitation.reauthentication_required ? (
               <section className="identity-confirmation">
                 <p>Confirm the invited Email before accepting.</p>
-                {!challenge ? (
+                {!proof.challenge ? (
                   <button
                     className="secondary-button"
                     type="button"
-                    disabled={busy}
-                    onClick={() => void confirmEmail()}
+                    disabled={busy || proof.busy}
+                    onClick={() => void proof.request()}
                   >
                     Confirm with Email
                   </button>
                 ) : (
-                  <form onSubmit={(event) => void verify(event)}>
+                  <form onSubmit={(event) => void proof.verify(event)}>
                     <label htmlFor="targeted-invitation-code">
                       Newest six-digit Email code
                     </label>
                     <input
                       id="targeted-invitation-code"
                       inputMode="numeric"
-                      value={code}
+                      value={proof.code}
                       onChange={(event) =>
-                        setCode(
+                        proof.setCode(
                           event.target.value.replace(/\D/g, "").slice(0, 6),
                         )
                       }
                     />
                     <button
                       className="primary-button"
-                      disabled={busy || !/^\d{6}$/.test(code)}
+                      disabled={
+                        busy || proof.busy || !/^\d{6}$/.test(proof.code)
+                      }
                     >
                       Confirm Email
+                    </button>
+                    <button
+                      className="ghost-button"
+                      type="button"
+                      disabled={busy || proof.busy}
+                      onClick={() => void proof.retry()}
+                    >
+                      Retry exact code request
+                    </button>
+                    <button
+                      className="ghost-button"
+                      type="button"
+                      disabled={busy || proof.busy}
+                      onClick={() => void proof.request()}
+                    >
+                      Send a new code
                     </button>
                   </form>
                 )}

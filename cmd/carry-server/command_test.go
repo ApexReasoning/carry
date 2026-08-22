@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -11,8 +12,23 @@ func TestInitializePKIWritesPrivateKeysOnce(t *testing.T) {
 	t.Parallel()
 
 	directory := filepath.Join(t.TempDir(), "pki")
+	if err := os.Mkdir(directory, 0o755); err != nil {
+		t.Fatalf("create permissive PKI directory: %v", err)
+	}
+	if err := os.Chmod(directory, 0o755); err != nil {
+		t.Fatalf("make PKI directory permissive: %v", err)
+	}
 	if err := initializePKI(pkiInitConfig{directory: directory, hosts: "localhost,127.0.0.1"}); err != nil {
 		t.Fatalf("initialize PKI: %v", err)
+	}
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(directory)
+		if err != nil {
+			t.Fatalf("stat PKI directory: %v", err)
+		}
+		if got := info.Mode().Perm(); got != 0o700 {
+			t.Fatalf("PKI directory mode = %o, want 700", got)
+		}
 	}
 	for _, name := range []string{"ca.pem", "ca-key.pem", "server.pem", "server-key.pem"} {
 		info, err := os.Stat(filepath.Join(directory, name))

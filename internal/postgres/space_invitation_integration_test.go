@@ -365,6 +365,35 @@ func TestSpaceInvitationRequiresExactRecentEmailProofAndReplaysAcceptance(t *tes
 	if err != nil || replayed != accepted {
 		t.Fatalf("accept replay = %#v, %v", replayed, err)
 	}
+	if _, err := pool.Exec(ctx, `update space_invitations set created_at=created_at-interval '8 days', expires_at=expires_at-interval '8 days' where invitation_id=$1`, issued.InvitationID); err != nil {
+		t.Fatalf("expire committed invitation: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `update browser_sessions set created_at=created_at-interval '11 minutes', identity_proved_at=identity_proved_at-interval '11 minutes' where session_id=$1`, emailSession); err != nil {
+		t.Fatalf("age committed acceptance proof: %v", err)
+	}
+	replayed, err = invitations.Accept(ctx, space.AcceptInvitationCommand{
+		InvitationID: issued.InvitationID, UserID: inviteeID, SessionID: emailSession,
+		IdempotencyKey: "accept-invitee",
+	})
+	if err != nil || replayed != accepted {
+		t.Fatalf("accepted replay after expiry and proof age = %#v, %v", replayed, err)
+	}
+	replayed, err = invitations.Accept(ctx, space.AcceptInvitationCommand{
+		InvitationID: issued.InvitationID, UserID: inviteeID, SessionID: googleSession,
+		IdempotencyKey: "accept-invitee",
+	})
+	if err != nil || replayed != accepted {
+		t.Fatalf("accepted replay from current non-Email session = %#v, %v", replayed, err)
+	}
+	if _, err := pool.Exec(ctx, `update browser_sessions set created_at=clock_timestamp()-interval '2 hours', expires_at=clock_timestamp()-interval '1 hour' where session_id=$1`, googleSession); err != nil {
+		t.Fatalf("expire replay Browser Session: %v", err)
+	}
+	if _, err := invitations.Accept(ctx, space.AcceptInvitationCommand{
+		InvitationID: issued.InvitationID, UserID: inviteeID, SessionID: googleSession,
+		IdempotencyKey: "accept-invitee",
+	}); !errors.Is(err, identity.ErrUnauthenticated) {
+		t.Fatalf("accepted replay with expired Browser Session = %v", err)
+	}
 	expectedName, err := identity.FallbackDisplayName(inviteeID)
 	if err != nil {
 		t.Fatal(err)
@@ -500,6 +529,15 @@ func TestInvitationResendCooldownReplayAndRevoke(t *testing.T) {
 	}
 	if err := invitations.Revoke(ctx, revoke); err != nil {
 		t.Fatalf("revoke replay: %v", err)
+	}
+	replayed, err = invitations.Resend(ctx, request)
+	if err != nil || replayed.Submission.SubmissionID != resent.Submission.SubmissionID || submitter.calls != 2 {
+		t.Fatalf("resend replay after terminal state = %#v, %v, calls = %d", replayed, err, submitter.calls)
+	}
+	freshAfterRevoke := request
+	freshAfterRevoke.IdempotencyKey = "resend-after-revoke"
+	if _, err := invitations.Resend(ctx, freshAfterRevoke); !errors.Is(err, space.ErrInvitationRevoked) {
+		t.Fatalf("fresh resend after revoke = %v", err)
 	}
 	userID, sessions := seedIdentityUser(t, ctx, store, "resend@example.com", 1)
 	inbox, err := invitations.ListForUser(ctx, userID, sessions[0])

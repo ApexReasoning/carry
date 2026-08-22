@@ -75,6 +75,10 @@ func (worker Worker) Serve(ctx context.Context) error {
 			if ctx.Err() != nil {
 				return nil
 			}
+			if errors.Is(err, run.ErrStaleAttempt) || errors.Is(err, conversation.ErrStaleReplyClaim) {
+				slog.Warn("Carry authority became stale; Host discarded the result and will continue", "error", err)
+				continue
+			}
 			if !errors.Is(err, ErrControlPlaneUnavailable) {
 				return err
 			}

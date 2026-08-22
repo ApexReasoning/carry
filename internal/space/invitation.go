@@ -154,7 +154,16 @@ type IssueInvitationRequest struct {
 
 func (invitations *Invitations) Issue(ctx context.Context, request IssueInvitationRequest) (IssuedInvitation, error) {
 	recipient, err := identity.CanonicalEmail(request.RecipientEmail)
-	if err != nil || uuid.Validate(request.SpaceID) != nil || uuid.Validate(request.ActorUserID) != nil || !validCommandKey(request.IdempotencyKey) {
+	if err != nil {
+		return IssuedInvitation{}, ErrInvalidInvitation
+	}
+	if uuid.Validate(request.SpaceID) != nil {
+		return IssuedInvitation{}, ErrInvalidInvitation
+	}
+	if uuid.Validate(request.ActorUserID) != nil {
+		return IssuedInvitation{}, ErrInvalidInvitation
+	}
+	if !validCommandKey(request.IdempotencyKey) {
 		return IssuedInvitation{}, ErrInvalidInvitation
 	}
 	requestDigest := digest(struct {
@@ -196,7 +205,16 @@ type ResendInvitationRequest struct {
 }
 
 func (invitations *Invitations) Resend(ctx context.Context, request ResendInvitationRequest) (IssuedInvitation, error) {
-	if uuid.Validate(request.SpaceID) != nil || uuid.Validate(request.InvitationID) != nil || uuid.Validate(request.ActorUserID) != nil || !validCommandKey(request.IdempotencyKey) {
+	if uuid.Validate(request.SpaceID) != nil {
+		return IssuedInvitation{}, ErrInvalidInvitation
+	}
+	if uuid.Validate(request.InvitationID) != nil {
+		return IssuedInvitation{}, ErrInvalidInvitation
+	}
+	if uuid.Validate(request.ActorUserID) != nil {
+		return IssuedInvitation{}, ErrInvalidInvitation
+	}
+	if !validCommandKey(request.IdempotencyKey) {
 		return IssuedInvitation{}, ErrInvalidInvitation
 	}
 	digestValue := digest(struct {

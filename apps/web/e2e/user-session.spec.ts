@@ -401,6 +401,21 @@ test("Unicode Space URLs remain explicit and invitation entry bypasses the choos
     invitedPage.getByRole("heading", { name: "Space invitation" }),
   ).toBeVisible();
   await expect(invitedPage.getByLabel("Your name")).toHaveCount(0);
+  await invitedPage.getByRole("button", { name: "Not now" }).click();
+  await expect(
+    invitedPage.getByRole("heading", { name: "Choose a Space" }),
+  ).toBeVisible();
+  await invitedPage.getByLabel("Space name").fill("Recipient Existing Space");
+  await invitedPage.getByRole("button", { name: "Create Space" }).click();
+  await expect(
+    invitedPage.getByRole("heading", {
+      name: "What should Carry keep moving?",
+    }),
+  ).toBeVisible();
+  await invitedPage.goto(`${origin}${exactPath}`);
+  await expect(
+    invitedPage.getByRole("heading", { name: "Space invitation" }),
+  ).toBeVisible();
   await invitedPage.route(
     `**/v1/invitations/${invitationID}/accept`,
     async (route) => {
@@ -448,7 +463,12 @@ test("Unicode Space URLs remain explicit and invitation entry bypasses the choos
     derivedEmail(loginEmail, "wrong-invitation-owner"),
   );
   await expect(
-    wrongPage.getByText("This Carry User cannot review this invitation."),
+    wrongPage.getByText(
+      "This signed-in account cannot review this invitation.",
+    ),
+  ).toBeVisible();
+  await expect(
+    wrongPage.getByText(/email address that received this invitation/),
   ).toBeVisible();
   await expect(wrongPage.getByText(maximumName)).toHaveCount(0);
   await wrongContext.close();

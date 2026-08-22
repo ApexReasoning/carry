@@ -2,6 +2,9 @@ import { closeBrowserSession, currentUser } from "../../carry-api";
 
 const pendingSignOutParameter = "carry-signing-out";
 const pendingSignOutStorageKey = "carry.pending-sign-out.v1";
+const deferredInvitationsStorageKey = "carry.deferred-invitations.v1";
+const uuidPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function hasPendingSignOut(): boolean {
   try {
@@ -37,6 +40,38 @@ export function markPendingSignOut(): void {
         { cause: storageError },
       );
     }
+  }
+}
+
+export function deferInvitations(userID: string): void {
+  window.sessionStorage.setItem(deferredInvitationsStorageKey, userID);
+  if (window.sessionStorage.getItem(deferredInvitationsStorageKey) !== userID) {
+    clearDeferredInvitations();
+    throw new Error("invitation deferral could not be confirmed");
+  }
+}
+
+export function invitationsDeferredFor(userID: string): boolean {
+  try {
+    const deferredUserID = window.sessionStorage.getItem(
+      deferredInvitationsStorageKey,
+    );
+    if (deferredUserID === null) return false;
+    if (!uuidPattern.test(deferredUserID)) {
+      window.sessionStorage.removeItem(deferredInvitationsStorageKey);
+      return false;
+    }
+    return deferredUserID === userID;
+  } catch {
+    return false;
+  }
+}
+
+export function clearDeferredInvitations(): void {
+  try {
+    window.sessionStorage.removeItem(deferredInvitationsStorageKey);
+  } catch {
+    // A retained marker cannot grant authority and explicit invitation routes ignore it.
   }
 }
 

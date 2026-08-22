@@ -451,6 +451,69 @@ func TestMachineCommitUsesHostRouteWithoutBearer(t *testing.T) {
 	}
 }
 
+func TestSendJSONRejectsUnboundedOrInexactSuccessResponses(t *testing.T) {
+	t.Parallel()
+
+	for name, body := range map[string]string{
+		"unknown field":   `{"value":"ok","extra":true}`,
+		"trailing JSON":   `{"value":"ok"}{}`,
+		"over byte limit": strings.Repeat(" ", (1<<20)+1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			request, err := newJSONRequest(context.Background(), http.MethodPost, "https://carry.example.com/v1/host/runs/id/attempts/id/renew", struct{}{})
+			if err != nil {
+				t.Fatalf("build request: %v", err)
+			}
+			client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+				return jsonResponse(http.StatusOK, body), nil
+			})}
+			var destination struct {
+				Value string `json:"value"`
+			}
+			if err := sendJSON(client, request, &destination); err == nil {
+				t.Fatal("inexact success response was accepted")
+			}
+		})
+	}
+
+	request, err := newJSONRequest(context.Background(), http.MethodPost, "https://carry.example.com/v1/host/runs/id/attempts/id/outcome", struct{}{})
+	if err != nil {
+		t.Fatalf("build empty-response request: %v", err)
+	}
+	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return jsonResponse(http.StatusNoContent, `{}`), nil
+	})}
+	if err := sendJSON(client, request, nil); err == nil {
+		t.Fatal("non-empty no-content response was accepted")
+	}
+}
+
+func TestMachineHTTPPreservesStaleAuthorityCategories(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name string
+		path string
+		want error
+	}{
+		{name: "Run Attempt", path: "/v1/host/runs/run/attempts/attempt/understanding", want: run.ErrStaleAttempt},
+		{name: "Conversation reply", path: "/v1/host/conversation-replies/message/commit", want: conversation.ErrStaleReplyClaim},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request, err := newJSONRequest(context.Background(), http.MethodPost, "https://carry.example.com"+test.path, struct{}{})
+			if err != nil {
+				t.Fatalf("build request: %v", err)
+			}
+			client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+				return jsonResponse(http.StatusConflict, `{"error":"stale"}`), nil
+			})}
+			if err := sendJSON(client, request, nil); !errors.Is(err, test.want) {
+				t.Fatalf("stale response = %v, want %v", err, test.want)
+			}
+		})
+	}
+}
+
 func jsonResponse(status int, body string) *http.Response {
 	return &http.Response{
 		StatusCode: status, Status: http.StatusText(status),

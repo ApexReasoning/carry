@@ -133,6 +133,118 @@ test("recipient accepts exact grants without a name prompt", async () => {
   expect(acceptedBody).toBe("");
 });
 
+test("generic Email proof also offers exact retry and a fresh code request", async () => {
+  const requests: Array<{ challengeID: string; key: string }> = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request =
+        input instanceof Request ? input : new Request(input, init);
+      const body = (await request.json()) as { challenge_id: string };
+      requests.push({
+        challengeID: body.challenge_id,
+        key: request.headers.get("Idempotency-Key") ?? "",
+      });
+      return json({
+        challenge_id: body.challenge_id,
+        expires_at: "2026-08-21T00:10:00Z",
+      });
+    }),
+  );
+  const user = userEvent.setup();
+  render(
+    <InvitationInboxView
+      initialInbox={{
+        reauthentication_required: true,
+        invitations: [
+          {
+            invitation_id: "10000000-0000-4000-8000-000000000001",
+            space_id: "20000000-0000-4000-8000-000000000001",
+            space_name: "Research",
+            inviter_display_name: "Manager",
+            can_manage_members: false,
+            can_enroll_machines: false,
+            created_at: "2026-08-21T00:00:00Z",
+            expires_at: "2026-08-28T00:00:00Z",
+          },
+        ],
+      }}
+      onSkip={() => undefined}
+    />,
+  );
+
+  await user.click(screen.getByRole("button", { name: "Confirm with Email" }));
+  await waitFor(() => expect(requests).toHaveLength(1));
+  await user.click(
+    screen.getByRole("button", { name: "Retry exact code request" }),
+  );
+  await waitFor(() => expect(requests).toHaveLength(2));
+  expect(requests[1]).toEqual(requests[0]);
+  await user.click(screen.getByRole("button", { name: "Send a new code" }));
+  await waitFor(() => expect(requests).toHaveLength(3));
+  expect(requests[2]?.challengeID).not.toBe(requests[0]?.challengeID);
+  expect(requests[2]?.key).not.toBe(requests[0]?.key);
+});
+
+test("targeted Email proof recovers with an exact retry or a fresh code request", async () => {
+  const requests: Array<{ challengeID: string; key: string }> = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request =
+        input instanceof Request ? input : new Request(input, init);
+      const body = (await request.json()) as { challenge_id: string };
+      requests.push({
+        challengeID: body.challenge_id,
+        key: request.headers.get("Idempotency-Key") ?? "",
+      });
+      if (requests.length === 1) throw new Error("lost response");
+      return json({
+        challenge_id: body.challenge_id,
+        expires_at: "2026-08-21T00:10:00Z",
+      });
+    }),
+  );
+  const user = userEvent.setup();
+  render(
+    <TargetedInvitationView
+      state={{
+        status: "owner",
+        invitation: {
+          invitation_id: "10000000-0000-4000-8000-000000000001",
+          space_id: "20000000-0000-4000-8000-000000000001",
+          space_name: "Research",
+          inviter_display_name: "Manager",
+          can_manage_members: true,
+          can_enroll_machines: false,
+          created_at: "2026-08-21T00:00:00Z",
+          expires_at: "2026-08-28T00:00:00Z",
+          state: "pending",
+          accept_result: "",
+          current_member: false,
+          reauthentication_required: true,
+        },
+      }}
+      onReload={() => undefined}
+      onSkip={() => undefined}
+      onSignOut={() => undefined}
+    />,
+  );
+
+  await user.click(screen.getByRole("button", { name: "Confirm with Email" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("lost response");
+  await user.click(
+    screen.getByRole("button", { name: "Retry exact code request" }),
+  );
+  await waitFor(() => expect(requests).toHaveLength(2));
+  expect(requests[1]).toEqual(requests[0]);
+
+  await user.click(screen.getByRole("button", { name: "Send a new code" }));
+  await waitFor(() => expect(requests).toHaveLength(3));
+  expect(requests[2]?.challengeID).not.toBe(requests[0]?.challengeID);
+  expect(requests[2]?.key).not.toBe(requests[0]?.key);
+});
+
 test("targeted invitation renders uniform recovery, proof gate, terminal truth, and Unknown", async () => {
   const signOut = vi.fn();
   const reload = vi.fn();
@@ -164,7 +276,10 @@ test("targeted invitation renders uniform recovery, proof gate, terminal truth, 
     />,
   );
   expect(
-    screen.getByText("This Carry User cannot review this invitation."),
+    screen.getByText("This signed-in account cannot review this invitation."),
+  ).toBeVisible();
+  expect(
+    screen.getByText(/email address that received this invitation/),
   ).toBeVisible();
   await user.click(screen.getByRole("button", { name: "Sign out" }));
   expect(signOut).toHaveBeenCalledOnce();

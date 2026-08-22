@@ -31,6 +31,39 @@ const user: User = {
   ],
 };
 
+test("requires explicit recovery before discarding damaged Work identities", async () => {
+  window.sessionStorage.clear();
+  window.sessionStorage.setItem("carry.pending-work-mutations.v1", "not JSON");
+  const requests: Array<Request> = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request =
+        input instanceof Request ? input : new Request(input, init);
+      requests.push(request);
+      return json({ works: [], has_earlier_works: false });
+    }),
+  );
+
+  const { result } = renderHook(() => useWorkBoard(user, spaceID));
+  await waitFor(() => expect(result.current.spaceID).toBe(spaceID));
+  await act(() => result.current.addWork("Do not duplicate unknown Work"));
+
+  expect(result.current.pendingIdentitiesCorrupt).toBe(true);
+  expect(requests.filter((request) => request.method === "POST")).toHaveLength(
+    0,
+  );
+  expect(window.sessionStorage.getItem("carry.pending-work-mutations.v1")).toBe(
+    "not JSON",
+  );
+
+  act(() => result.current.discardDamagedPendingIdentities());
+  expect(result.current.pendingIdentitiesCorrupt).toBe(false);
+  expect(
+    window.sessionStorage.getItem("carry.pending-work-mutations.v1"),
+  ).toBeNull();
+});
+
 test("loads bounded earlier Work and message pages without duplicates", async () => {
   const requestedURLs: Array<string> = [];
   vi.stubGlobal(

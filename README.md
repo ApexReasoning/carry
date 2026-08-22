@@ -6,7 +6,7 @@ People use the Web product; sign-in is GitHub, Google or Email. A Space holds me
 
 Every Work has exactly one human owner and exactly one Agent owner, and Work is always created through an Agent. Carry Server never pushes work: a record names its target Agent and the owning Host pulls and claims it through PostgreSQL. Host or Agent loss never deletes Work or silently chooses a replacement; the human owner explicitly transfers future responsibility, while old execution authority and provider-private state do not cross the handoff.
 
-The repository is in a post-Node-12 reset. Nodes 0–12 are technical evidence for an older contract; the old Node 13–19 route is void. The replacement route (Nodes 13–30), its research procedure and its three-review protocol live in [`docs/implementation.md`](docs/implementation.md). Until the reset closes, only the seven canonical files change.
+Nodes 0–12 are technical evidence for an older contract; the old Node 13–19 route is void. The roadmap reset is closed, and the active replacement route (Nodes 13–30), its research procedure and its three-review protocol live in [`docs/implementation.md`](docs/implementation.md).
 
 Start with [AGENTS.md](AGENTS.md), then the document that owns your change:
 

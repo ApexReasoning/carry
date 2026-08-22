@@ -76,7 +76,7 @@ func TestExternalLoginInvitationContinuationSurvivesSuccessDenialAndReplay(t *te
 		t.Fatal(err)
 	}
 	invitationID := "33333333-3333-4333-8333-333333333333"
-	start, err := login.StartGoogle(context.Background(), invitationID)
+	start, err := login.StartGoogle(context.Background(), invitationID, "198.51.100.10")
 	if err != nil || persistence.create.InvitationID != invitationID {
 		t.Fatalf("start continuation = %#v, %v", persistence.create, err)
 	}
@@ -100,7 +100,7 @@ func TestExternalLoginInvitationContinuationSurvivesSuccessDenialAndReplay(t *te
 
 	deniedPersistence := &externalLoginMemoryPersistence{}
 	deniedLogin, _ := NewExternalLogin(deniedPersistence, &recordingGoogleLogin{}, &recordingGitHubLogin{}, credentials)
-	deniedStart, _ := deniedLogin.StartGoogle(context.Background(), invitationID)
+	deniedStart, _ := deniedLogin.StartGoogle(context.Background(), invitationID, "198.51.100.10")
 	deniedState := queryParameter(t, deniedStart.AuthorizationURL, "state")
 	_, err = deniedLogin.CompleteGoogle(context.Background(), ExternalLoginCallback{
 		State:             deniedState,
@@ -111,7 +111,7 @@ func TestExternalLoginInvitationContinuationSurvivesSuccessDenialAndReplay(t *te
 	if !errors.Is(err, ErrExternalLoginDenied) || ExternalProofFailureInvitationID(err) != invitationID {
 		t.Fatalf("denied continuation = %q, %v", ExternalProofFailureInvitationID(err), err)
 	}
-	if _, err := login.StartGoogle(context.Background(), "not-a-uuid"); !errors.Is(err, ErrExternalLoginInvalid) {
+	if _, err := login.StartGoogle(context.Background(), "not-a-uuid", "198.51.100.10"); !errors.Is(err, ErrExternalLoginInvalid) {
 		t.Fatalf("malformed continuation = %v", err)
 	}
 }
@@ -126,7 +126,7 @@ func TestExternalLoginExactReplaySkipsProviderAndReturnsCommittedSession(t *test
 	if err != nil {
 		t.Fatalf("compose external login: %v", err)
 	}
-	start, err := login.StartGoogle(context.Background(), "")
+	start, err := login.StartGoogle(context.Background(), "", "198.51.100.10")
 	if err != nil {
 		t.Fatalf("start Google login: %v", err)
 	}
@@ -166,9 +166,9 @@ func TestExternalLoginCompletionResponseLossReconcilesCommittedSession(t *testin
 			}
 			var start ExternalLoginStart
 			if provider == GoogleLoginProvider {
-				start, err = login.StartGoogle(context.Background(), "")
+				start, err = login.StartGoogle(context.Background(), "", "198.51.100.10")
 			} else {
-				start, err = login.StartGitHub(context.Background(), "")
+				start, err = login.StartGitHub(context.Background(), "", "198.51.100.10")
 			}
 			if err != nil {
 				t.Fatalf("start %s login: %v", provider, err)
@@ -206,7 +206,7 @@ func TestExternalLoginUncommittedCompletionErrorConvergesToUnknown(t *testing.T)
 	if err != nil {
 		t.Fatalf("compose external login: %v", err)
 	}
-	start, err := login.StartGoogle(context.Background(), "")
+	start, err := login.StartGoogle(context.Background(), "", "198.51.100.10")
 	if err != nil {
 		t.Fatalf("start Google login: %v", err)
 	}
@@ -229,7 +229,7 @@ func TestExternalLoginProviderFailureBecomesUnknownWithoutCompletion(t *testing.
 	if err != nil {
 		t.Fatalf("compose external login: %v", err)
 	}
-	start, err := login.StartGoogle(context.Background(), "")
+	start, err := login.StartGoogle(context.Background(), "", "198.51.100.10")
 	if err != nil {
 		t.Fatalf("start Google login: %v", err)
 	}
@@ -337,9 +337,9 @@ func TestExternalLoginTwoTabsKeepSecondContinuationAndRejectDisplacedFirst(t *te
 	}
 	firstID := "11111111-1111-4111-8111-111111111111"
 	secondID := "22222222-2222-4222-8222-222222222222"
-	first, _ := login.StartGoogle(context.Background(), firstID)
+	first, _ := login.StartGoogle(context.Background(), firstID, "198.51.100.10")
 	firstState := queryParameter(t, first.AuthorizationURL, "state")
-	second, _ := login.StartGoogle(context.Background(), secondID)
+	second, _ := login.StartGoogle(context.Background(), secondID, "198.51.100.10")
 	secondState := queryParameter(t, second.AuthorizationURL, "state")
 	if _, err := login.CompleteGoogle(context.Background(), ExternalLoginCallback{
 		State:             firstState,
@@ -371,7 +371,7 @@ func TestExternalLoginRejectsWrongBrowserBindingBeforeProvider(t *testing.T) {
 	if err != nil {
 		t.Fatalf("compose external login: %v", err)
 	}
-	start, err := login.StartGoogle(context.Background(), "")
+	start, err := login.StartGoogle(context.Background(), "", "198.51.100.10")
 	if err != nil {
 		t.Fatalf("start Google login: %v", err)
 	}

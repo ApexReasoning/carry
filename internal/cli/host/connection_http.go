@@ -82,18 +82,45 @@ func (client *connectionClient) begin(ctx context.Context, pending machinefile.P
 		PublicKey   string `json:"public_key"`
 		KeyProof    string `json:"key_proof"`
 	}{
-		RequestID: pending.RequestID, DisplayName: pending.DisplayName, UserCode: pending.UserCode,
-		PollSecret: pending.PollSecret, PublicKey: base64.StdEncoding.EncodeToString(pending.PublicKeyDER),
-		KeyProof: base64.StdEncoding.EncodeToString(pending.KeyProof),
+		RequestID:   pending.RequestID,
+		DisplayName: pending.DisplayName,
+		UserCode:    pending.UserCode,
+		PollSecret:  pending.PollSecret,
+		PublicKey:   base64.StdEncoding.EncodeToString(pending.PublicKeyDER),
+		KeyProof:    base64.StdEncoding.EncodeToString(pending.KeyProof),
 	}
 	var result begunConnection
 	if err := client.send(ctx, "/v1/machine-connections", pending.IdempotencyKey, "", body, &result, true); err != nil {
 		return begunConnection{}, err
 	}
-	if result.RequestID != pending.RequestID || result.DisplayName != pending.DisplayName || result.UserCode != pending.UserCode ||
-		result.PollSecret != pending.PollSecret || result.Fingerprint != pending.Fingerprint || result.VerificationPath != "/machine-connect" ||
-		result.IntervalSeconds < int(machine.ConnectionInitialInterval/time.Second) || result.IntervalSeconds > int(machine.ConnectionMaximumInterval/time.Second) || result.ExpiresAt.IsZero() {
-		return begunConnection{}, errors.New("Carry server returned an invalid Machine connection ceremony")
+	if result.RequestID != pending.RequestID {
+		return begunConnection{}, errors.New("Carry server returned another Machine connection request")
+	}
+	if result.DisplayName != pending.DisplayName {
+		return begunConnection{}, errors.New("Carry server changed the Machine display name")
+	}
+	if result.UserCode != pending.UserCode {
+		return begunConnection{}, errors.New("Carry server changed the Machine connection code")
+	}
+	if result.PollSecret != pending.PollSecret {
+		return begunConnection{}, errors.New("Carry server changed the Machine poll secret")
+	}
+	if result.Fingerprint != pending.Fingerprint {
+		return begunConnection{}, errors.New("Carry server changed the Machine fingerprint")
+	}
+	if result.VerificationPath != "/machine-connect" {
+		return begunConnection{}, errors.New("Carry server returned an invalid Machine verification path")
+	}
+	minimumInterval := int(machine.ConnectionInitialInterval / time.Second)
+	if result.IntervalSeconds < minimumInterval {
+		return begunConnection{}, errors.New("Carry server returned a Machine polling interval below the minimum")
+	}
+	maximumInterval := int(machine.ConnectionMaximumInterval / time.Second)
+	if result.IntervalSeconds > maximumInterval {
+		return begunConnection{}, errors.New("Carry server returned a Machine polling interval above the maximum")
+	}
+	if result.ExpiresAt.IsZero() {
+		return begunConnection{}, errors.New("Carry server omitted the Machine connection expiry")
 	}
 	return result, nil
 }

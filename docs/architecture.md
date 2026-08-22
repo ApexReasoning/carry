@@ -33,12 +33,18 @@ browser ──member session──► Carry Server ──┐
 | Agent | Agent 身份：ID、所属 Space、Space 内唯一归一化名字、确定性头像（新身份的人类 owner 来自浏览器批准该 Host 的成员）、唯一 Host 绑定、Active/Removed、创建时间 | 进程在场、模型目录、Work 真相、发现内容改写身份 |
 | Conversation | 成员与一个确定 Agent 的消息及其准确受众、Web 表单形成的 target-Agent 结构化请求、Conversation 固定的 Agent（与可选模型） | provider 续接句柄、共享 Work 权威、Work 创建结果 |
 | Work | 责任、人类负责人、Agent 负责人及其交接事实、生命周期、有序计划项、产出项及其与计划项的关联、需要人的事项、未来与周期继续 | 进程 lease、provider 内部状态、Inbox 视图 |
-| Machine | Host 身份、浏览器批准的接入、证书谱系、它当前暴露哪些 Agent 进程及其在场 | 成员身份、Agent 身份、Work 成功 |
+| Machine | 逻辑 Host 身份、浏览器批准的接入与批准成员、证书谱系、Pi/Codex 的完整 present/absent 报告及其数据库时间 | 成员身份、Agent 身份、Work 成功、物理机器唯一性 |
 | Run | 一次有界 Agent 执行：目标 Agent、claim、attempt、lease、fence、用户可见输出、因果来源 | Work 关闭、人类接受 |
 
 派生而非存储：在线由 lease 推出，最近活跃由在场与 Run 事实推出，参与中的 Work 由查询推出；Inbox 查询 Work 的需要人事项，以及当前 Agent 负责人 Removed 或不再在场的 Open/Paused Work。owner unavailable 由已有 Work、Agent 与 Machine 事实直接推出，不要求失联 Agent 再写一项，也不获得 owner、表或字段。
 
-Agent 身份与 Agent 进程在场是两件事：Host 掉线只改变 Machine 拥有的在场事实，不改变 Agent 拥有的身份事实。新 Agent 的人类 owner 取自 Machine 已拥有的浏览器批准成员；重复发现只更新在场，永不改写已有 Agent 的 owner、名字或 Active/Removed。Pi 和 Codex 是具体进程 adapter，没有 provider/model/runtime registry；可选模型只在具体 Agent 能可靠报告当前取值时呈现，发现失败时使用 provider 默认值。
+Agent 身份与 Agent 进程在场是两件事：Host 掉线只改变 Machine 拥有的在场事实，不改变 Agent 拥有的身份事实。第一版一个逻辑 Machine 至多有一个默认 Pi occurrence 和一个默认 Codex occurrence；`(Machine, concrete kind)` 只用于调和这两个静态组合，不形成 slot、profile 或 registry。新 Agent 的人类 owner 只从锁内读取 Machine 已拥有的浏览器批准成员，并同时证明该 Membership 仍 Active；报告不接受 Space、owner、Agent ID、名字、头像或 lifecycle。重复发现只更新完整的 Pi/Codex present/absent 在场，永不改写已有 Agent 的 owner、名字或 Active/Removed。Online 是 `Active + latest complete report says present + database freshness` 的查询；明确 absent 立即离线，Last active 取数据库最近一次确认 present 的时间。
+
+PostgreSQL 在某 Machine 第一次产生 Agent 时分配一个不可变的 Space 内 Machine naming ordinal；两个具体 kind 共用它，形成 `Pi`/`Codex`、`Pi 2`/`Codex 2` 等固定名字。名字和归一化键由 Agent owner 生成，Host 无命名输入，也没有冲突建议协议；Removed 名字保持占用。Agent ID、名字、Machine binding 与人类 owner 是不同事实。
+
+复制完整 Machine 本地状态等同复制同一个逻辑 Host 权威：两个物理进程调和到同一对 Agent，最新提交的完整报告拥有当前在场，Carry 不声称物理 clone 检测。丢失本地状态或重装后重新批准会创建新 Machine 和新 Agent，永不按 hostname、显示名、Pi/Codex 本地 ID、配置路径或内容合并；旧、新 Host 均保留，旧 Host 由当前 Machine revoke 旅程显式撤销。Machine remote/self revoke 与它绑定的 Active Agent 在同一 PostgreSQL 裁决中转为 Removed；强制 Membership removal 同样先转移目标 Active Agent lifecycle，再撤销 Membership。Node 28/29 仍拥有完整 Work 交接、Run 后果与离场 UX，不延迟 Node 15 引入身份时必须成立的引用/lifecycle 不变量。
+
+Pi 和 Codex 是具体进程 adapter，没有 provider/model/runtime registry；可选模型只在具体 Agent 能可靠报告当前取值时呈现，发现失败时使用 provider 默认值。
 
 provider 侧的会话续接句柄是拥有该 Agent 的 Host 的本地私有状态，持久化在本机。没有公开 Session API，没有通用 Session owner 或表。句柄丢失时用有界的 Carry 侧历史新开一个 provider session：效率下降，Conversation 与 Work 真相不变。
 

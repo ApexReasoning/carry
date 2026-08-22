@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -44,12 +44,14 @@ func initializePKI(parsed pkiInitConfig) error {
 			serverNames = append(serverNames, name)
 		}
 	}
-	bundle, err := machine.CreateCertificateBundle(serverNames, time.Now().UTC())
+	root, err := openPrivatePKIDirectory(parsed.directory)
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(parsed.directory, 0o700); err != nil {
-		return fmt.Errorf("create PKI directory: %w", err)
+	defer root.Close()
+	bundle, err := machine.CreateCertificateBundle(serverNames, time.Now().UTC())
+	if err != nil {
+		return err
 	}
 
 	files := []struct {
@@ -64,38 +66,79 @@ func initializePKI(parsed pkiInitConfig) error {
 	}
 	created := make([]string, 0, len(files))
 	for _, file := range files {
-		path := filepath.Join(parsed.directory, file.name)
-		if err := writeExclusive(path, file.data, file.mode); err != nil {
-			for _, createdPath := range created {
-				_ = os.Remove(createdPath)
+		if err := writeExclusive(root, file.name, file.data, file.mode); err != nil {
+			for _, createdName := range created {
+				_ = root.Remove(createdName)
 			}
 			return err
 		}
-		created = append(created, path)
+		created = append(created, file.name)
+	}
+	directory, err := root.Open(".")
+	if err != nil {
+		return fmt.Errorf("open PKI directory for sync: %w", err)
+	}
+	defer directory.Close()
+	if err := directory.Sync(); err != nil {
+		return fmt.Errorf("sync PKI directory: %w", err)
 	}
 	return nil
 }
 
-func writeExclusive(path string, data []byte, mode os.FileMode) error {
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
+func openPrivatePKIDirectory(directory string) (*os.Root, error) {
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		return nil, fmt.Errorf("create PKI directory: %w", err)
+	}
+	pathInfo, err := os.Lstat(directory)
 	if err != nil {
-		return fmt.Errorf("create %s: %w", path, err)
+		return nil, fmt.Errorf("inspect PKI directory: %w", err)
+	}
+	if pathInfo.Mode()&os.ModeSymlink != 0 || !pathInfo.IsDir() {
+		return nil, errors.New("PKI directory is not a directory")
+	}
+
+	root, err := os.OpenRoot(directory)
+	if err != nil {
+		return nil, fmt.Errorf("open PKI directory: %w", err)
+	}
+	openedInfo, err := root.Stat(".")
+	if err != nil {
+		root.Close()
+		return nil, fmt.Errorf("inspect opened PKI directory: %w", err)
+	}
+	if !os.SameFile(pathInfo, openedInfo) || !openedInfo.IsDir() {
+		root.Close()
+		return nil, errors.New("PKI directory changed while opening")
+	}
+	if runtime.GOOS != "windows" && openedInfo.Mode().Perm()&0o077 != 0 {
+		if err := root.Chmod(".", 0o700); err != nil {
+			root.Close()
+			return nil, fmt.Errorf("protect PKI directory: %w", err)
+		}
+	}
+	return root, nil
+}
+
+func writeExclusive(root *os.Root, name string, data []byte, mode os.FileMode) error {
+	file, err := root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
+	if err != nil {
+		return fmt.Errorf("create %s: %w", name, err)
 	}
 	remove := true
 	defer func() {
 		_ = file.Close()
 		if remove {
-			_ = os.Remove(path)
+			_ = root.Remove(name)
 		}
 	}()
 	if _, err := file.Write(data); err != nil {
-		return fmt.Errorf("write %s: %w", path, err)
+		return fmt.Errorf("write %s: %w", name, err)
 	}
 	if err := file.Sync(); err != nil {
-		return fmt.Errorf("sync %s: %w", path, err)
+		return fmt.Errorf("sync %s: %w", name, err)
 	}
 	if err := file.Close(); err != nil {
-		return fmt.Errorf("close %s: %w", path, err)
+		return fmt.Errorf("close %s: %w", name, err)
 	}
 	remove = false
 	return nil

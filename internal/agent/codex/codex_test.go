@@ -273,6 +273,47 @@ sleep 10
 	}
 }
 
+func TestThreadIsolationReportsEachMissingGuarantee(t *testing.T) {
+	t.Parallel()
+
+	cwd := t.TempDir()
+	valid := func() threadStartResult {
+		var started threadStartResult
+		started.Thread.ID = "thread-isolated"
+		started.Thread.Ephemeral = true
+		started.Thread.CWD = cwd
+		started.RuntimeWorkspaceRoots = []string{cwd}
+		started.ApprovalPolicy = "never"
+		started.Sandbox.Type = "readOnly"
+		return started
+	}
+	for _, test := range []struct {
+		name   string
+		mutate func(*threadStartResult)
+		want   string
+	}{
+		{name: "identity", mutate: func(result *threadStartResult) { result.Thread.ID = "" }, want: "identity"},
+		{name: "ephemeral", mutate: func(result *threadStartResult) { result.Thread.Ephemeral = false }, want: "ephemeral"},
+		{name: "working directory", mutate: func(result *threadStartResult) { result.Thread.CWD = t.TempDir() }, want: "working directory"},
+		{name: "Git authority", mutate: func(result *threadStartResult) { result.Thread.GitInfo = struct{}{} }, want: "Git repository authority"},
+		{name: "workspace count", mutate: func(result *threadStartResult) { result.RuntimeWorkspaceRoots = nil }, want: "one isolated workspace root"},
+		{name: "workspace identity", mutate: func(result *threadStartResult) { result.RuntimeWorkspaceRoots[0] = t.TempDir() }, want: "workspace root differs"},
+		{name: "instructions", mutate: func(result *threadStartResult) { result.InstructionSources = []json.RawMessage{json.RawMessage(`{}`)} }, want: "instruction sources"},
+		{name: "approval", mutate: func(result *threadStartResult) { result.ApprovalPolicy = "on-request" }, want: "provider-side approval"},
+		{name: "sandbox", mutate: func(result *threadStartResult) { result.Sandbox.Type = "workspaceWrite" }, want: "not read-only"},
+		{name: "network", mutate: func(result *threadStartResult) { result.Sandbox.NetworkAccess = true }, want: "network access"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			started := valid()
+			test.mutate(&started)
+			err := started.validateIsolation(cwd)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("validate isolation = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
 func writeCodexFixture(t *testing.T, body string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "codex")

@@ -2,6 +2,8 @@ import { beforeEach, expect, test, vi } from "vitest";
 
 import {
   clearPendingIdentity,
+  CorruptPendingWorkIdentitiesError,
+  discardCorruptPendingWorkIdentities,
   pendingCreateIdentity,
   pendingMessageIdentity,
   pendingReviewIdentity,
@@ -101,8 +103,21 @@ test("fails closed on malformed pending identities", async () => {
     window.sessionStorage.setItem(storageKey, malformed);
     await expect(
       pendingCreateIdentity("member-1", "space-1", "Review renewals"),
-    ).rejects.toThrow("Pending Work identities are invalid");
+    ).rejects.toThrow(CorruptPendingWorkIdentitiesError);
   }
+});
+
+test("discards damaged identities only after explicit recovery", async () => {
+  window.sessionStorage.setItem(storageKey, "not JSON");
+
+  await expect(
+    pendingCreateIdentity("member-1", "space-1", "Review renewals"),
+  ).rejects.toThrow(CorruptPendingWorkIdentitiesError);
+  discardCorruptPendingWorkIdentities();
+  expect(window.sessionStorage.getItem(storageKey)).toBeNull();
+  await expect(
+    pendingCreateIdentity("member-1", "space-1", "Review renewals"),
+  ).resolves.toMatchObject({ idempotencyKey: expect.any(String) });
 });
 
 test("fails closed when a pending identity cannot be published", async () => {

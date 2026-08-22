@@ -54,6 +54,47 @@ func TestExternalLoginStartUsesCanonicalHostAndLaxBrowserBinding(t *testing.T) {
 	if response.Header().Get("Cache-Control") != "no-store" || response.Header().Get("Referrer-Policy") != "no-referrer" {
 		t.Fatalf("security headers = %#v", response.Header())
 	}
+	if login.source != "192.0.2.1" {
+		t.Fatalf("external login source = %q", login.source)
+	}
+}
+
+func TestExternalLoginStartBoundsFormAndMapsAdmissionLimit(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name        string
+		body        string
+		contentType string
+	}{
+		{name: "unknown field", body: "unexpected=value", contentType: "application/x-www-form-urlencoded"},
+		{name: "duplicate field", body: "invitation_id=&invitation_id=", contentType: "application/x-www-form-urlencoded"},
+		{name: "oversized command", body: "invitation_id=" + strings.Repeat("x", maxCommandBytes), contentType: "application/x-www-form-urlencoded"},
+		{name: "JSON body", body: `{"invitation_id":"40000000-0000-4000-8000-000000000001"}`, contentType: "application/json"},
+		{name: "oversized non-form body", body: strings.Repeat("x", maxCommandBytes+1), contentType: "application/octet-stream"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			login := &recordingExternalLogin{}
+			handler := externalLoginTestAPI(t, login, &recordingBrowserSessions{})
+			request := httptest.NewRequest(http.MethodPost, "https://carry.example/v1/auth/google/start", strings.NewReader(test.body))
+			request.Header.Set("Content-Type", test.contentType)
+			response := httptest.NewRecorder()
+
+			handler.ServeHTTP(response, request)
+
+			if response.Code != http.StatusBadRequest || login.started != "" {
+				t.Fatalf("status = %d, started = %q, body = %s", response.Code, login.started, response.Body.String())
+			}
+		})
+	}
+
+	login := &recordingExternalLogin{startErr: identity.ErrExternalLoginRateLimited}
+	handler := externalLoginTestAPI(t, login, &recordingBrowserSessions{})
+	request := httptest.NewRequest(http.MethodPost, "https://carry.example/v1/auth/github/start", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusTooManyRequests {
+		t.Fatalf("rate-limited status = %d, body = %s", response.Code, response.Body.String())
+	}
 }
 
 func TestExternalLoginStartAndCallbackPreserveOnlyInvitationContinuation(t *testing.T) {
@@ -298,19 +339,22 @@ type recordingExternalLogin struct {
 	start       identity.ExternalLoginStart
 	startErr    error
 	started     string
+	source      string
 	callback    identity.ExternalLoginCallback
 	session     identity.BrowserSession
 	completeErr error
 	completed   bool
 }
 
-func (login *recordingExternalLogin) StartGoogle(_ context.Context, invitationID string) (identity.ExternalLoginStart, error) {
+func (login *recordingExternalLogin) StartGoogle(_ context.Context, invitationID string, source string) (identity.ExternalLoginStart, error) {
 	login.started = "google:" + invitationID
+	login.source = source
 	return login.start, login.startErr
 }
 
-func (login *recordingExternalLogin) StartGitHub(_ context.Context, invitationID string) (identity.ExternalLoginStart, error) {
+func (login *recordingExternalLogin) StartGitHub(_ context.Context, invitationID string, source string) (identity.ExternalLoginStart, error) {
 	login.started = "github:" + invitationID
+	login.source = source
 	return login.start, login.startErr
 }
 

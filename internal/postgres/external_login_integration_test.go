@@ -13,6 +13,140 @@ import (
 	"github.com/google/uuid"
 )
 
+func TestExternalLoginAdmissionCapsConcurrentSourceAndReclaimsExpiry(t *testing.T) {
+	ctx := context.Background()
+	pool := openMigratedTestPool(t, ctx)
+	store := NewStore(pool)
+	var sourceDigest [32]byte
+	sourceDigest[0] = 1
+
+	const attempts = maxLiveExternalLoginsPerSource + 12
+	start := make(chan struct{})
+	results := make(chan error, attempts)
+	var group sync.WaitGroup
+	for range attempts {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			<-start
+			_, err := store.CreateExternalLogin(ctx, identity.CreateExternalLoginCommand{
+				TransactionID: uuid.NewString(),
+				Provider:      identity.GoogleLoginProvider,
+				Purpose:       identity.LoginPurpose,
+				SourceDigest:  sourceDigest,
+			})
+			results <- err
+		}()
+	}
+	close(start)
+	group.Wait()
+	close(results)
+
+	succeeded := 0
+	limited := 0
+	for err := range results {
+		switch {
+		case err == nil:
+			succeeded++
+		case errors.Is(err, identity.ErrExternalLoginRateLimited):
+			limited++
+		default:
+			t.Fatalf("external login admission: %v", err)
+		}
+	}
+	if succeeded != maxLiveExternalLoginsPerSource || limited != attempts-maxLiveExternalLoginsPerSource {
+		t.Fatalf("admission winners = %d, limited = %d", succeeded, limited)
+	}
+
+	if _, err := pool.Exec(ctx, `
+		UPDATE external_login_transactions
+		SET created_at = transaction_timestamp() - interval '2 seconds',
+		    expires_at = transaction_timestamp() - interval '1 second'
+	`); err != nil {
+		t.Fatalf("expire external logins: %v", err)
+	}
+	if _, err := store.CreateExternalLogin(ctx, identity.CreateExternalLoginCommand{
+		TransactionID: uuid.NewString(),
+		Provider:      identity.GitHubLoginProvider,
+		Purpose:       identity.LoginPurpose,
+		SourceDigest:  sourceDigest,
+	}); err != nil {
+		t.Fatalf("admit after expiry: %v", err)
+	}
+	var remaining int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM external_login_transactions`).Scan(&remaining); err != nil {
+		t.Fatalf("count external logins: %v", err)
+	}
+	if remaining != 1 {
+		t.Fatalf("remaining external logins = %d, want 1", remaining)
+	}
+}
+
+func TestExternalLoginGlobalAdmissionHasOneConcurrentWinner(t *testing.T) {
+	ctx := context.Background()
+	pool := openMigratedTestPool(t, ctx)
+	store := NewStore(pool)
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO external_login_transactions (
+			transaction_id,
+			provider,
+			purpose,
+			source_digest,
+			expires_at
+		)
+		SELECT
+			('00000000-0000-4000-8000-' || lpad(value::text, 12, '0'))::uuid,
+			'google',
+			'login',
+			decode(lpad(to_hex(value), 64, '0'), 'hex'),
+			transaction_timestamp() + interval '10 minutes'
+		FROM generate_series(1, $1::integer) AS value
+	`, maxLiveExternalLoginsGlobal-1); err != nil {
+		t.Fatalf("seed global external login admission: %v", err)
+	}
+
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	var firstSource [32]byte
+	firstSource[0] = 240
+	var secondSource [32]byte
+	secondSource[0] = 241
+	var group sync.WaitGroup
+	for _, sourceDigest := range [][32]byte{firstSource, secondSource} {
+		group.Add(1)
+		go func(sourceDigest [32]byte) {
+			defer group.Done()
+			<-start
+			_, err := store.CreateExternalLogin(ctx, identity.CreateExternalLoginCommand{
+				TransactionID: uuid.NewString(),
+				Provider:      identity.GitHubLoginProvider,
+				Purpose:       identity.LoginPurpose,
+				SourceDigest:  sourceDigest,
+			})
+			results <- err
+		}(sourceDigest)
+	}
+	close(start)
+	group.Wait()
+	close(results)
+
+	succeeded := 0
+	limited := 0
+	for err := range results {
+		switch {
+		case err == nil:
+			succeeded++
+		case errors.Is(err, identity.ErrExternalLoginRateLimited):
+			limited++
+		default:
+			t.Fatalf("global external login admission: %v", err)
+		}
+	}
+	if succeeded != 1 || limited != 1 {
+		t.Fatalf("global admission winners = %d, limited = %d", succeeded, limited)
+	}
+}
+
 func TestExternalLoginPersistsOpaqueInvitationContinuationAcrossOutcomeAndReplay(t *testing.T) {
 	ctx := context.Background()
 	pool := openMigratedTestPool(t, ctx)

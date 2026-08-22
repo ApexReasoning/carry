@@ -2,6 +2,8 @@ const storagePrefix = "carry.pending-conversation.v1";
 const requestIDPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+export class CorruptPendingConversationIdentityError extends Error {}
+
 export function loadPendingConversationRequestID(
   memberID: string,
   spaceID: string,
@@ -10,7 +12,9 @@ export function loadPendingConversationRequestID(
     pendingConversationStorageKey(memberID, spaceID),
   );
   if (requestID !== null && !requestIDPattern.test(requestID)) {
-    throw new Error("Pending private message identity is invalid");
+    throw new CorruptPendingConversationIdentityError(
+      "Pending private message identity is damaged",
+    );
   }
   return requestID;
 }
@@ -29,6 +33,19 @@ export function pendingConversationRequestID(
     throw new Error("Pending private message identity could not be saved");
   }
   return requestID;
+}
+
+export function discardCorruptPendingConversationIdentity(
+  memberID: string,
+  spaceID: string,
+): void {
+  const storageKey = pendingConversationStorageKey(memberID, spaceID);
+  const requestID = window.sessionStorage.getItem(storageKey);
+  if (requestID === null || requestIDPattern.test(requestID)) return;
+  window.sessionStorage.removeItem(storageKey);
+  if (window.sessionStorage.getItem(storageKey) !== null) {
+    throw new Error("Damaged private message identity could not be cleared");
+  }
 }
 
 export function clearPendingConversationRequestID(

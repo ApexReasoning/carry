@@ -18,7 +18,25 @@ import (
 var _ space.InvitationPersistence = (*Store)(nil)
 
 func (s *Store) PrepareInvitation(ctx context.Context, command space.PrepareInvitationCommand) (space.IssuedInvitation, error) {
-	if !validInvitationPreparation(command) {
+	if uuid.Validate(command.InvitationID) != nil {
+		return space.IssuedInvitation{}, space.ErrInvalidInvitation
+	}
+	if uuid.Validate(command.SubmissionID) != nil {
+		return space.IssuedInvitation{}, space.ErrInvalidInvitation
+	}
+	if uuid.Validate(command.SpaceID) != nil {
+		return space.IssuedInvitation{}, space.ErrInvalidInvitation
+	}
+	if uuid.Validate(command.ActorUserID) != nil {
+		return space.IssuedInvitation{}, space.ErrInvalidInvitation
+	}
+	if !validInvitationKey(command.IdempotencyKey) {
+		return space.IssuedInvitation{}, space.ErrInvalidInvitation
+	}
+	if !validInvitationKey(command.ProviderIdempotencyKey) {
+		return space.IssuedInvitation{}, space.ErrInvalidInvitation
+	}
+	if command.ExpiresIn != space.InvitationLifetime {
 		return space.IssuedInvitation{}, space.ErrInvalidInvitation
 	}
 	tx, err := s.pool.Begin(ctx)
@@ -38,7 +56,16 @@ func (s *Store) PrepareInvitation(ctx context.Context, command space.PrepareInvi
 		SpaceID: command.SpaceID, UserID: command.ActorUserID, IdempotencyKey: command.IdempotencyKey,
 	})
 	if err == nil {
-		if !bytes.Equal(replay.IssueRequestDigest, command.RequestDigest[:]) || replay.RecipientEmail != command.RecipientEmail || replay.CanManageMembers != command.CanManageMembers || replay.CanEnrollMachines != command.CanEnrollMachines {
+		if !bytes.Equal(replay.IssueRequestDigest, command.RequestDigest[:]) {
+			return space.IssuedInvitation{}, space.ErrIdempotencyConflict
+		}
+		if replay.RecipientEmail != command.RecipientEmail {
+			return space.IssuedInvitation{}, space.ErrIdempotencyConflict
+		}
+		if replay.CanManageMembers != command.CanManageMembers {
+			return space.IssuedInvitation{}, space.ErrIdempotencyConflict
+		}
+		if replay.CanEnrollMachines != command.CanEnrollMachines {
 			return space.IssuedInvitation{}, space.ErrIdempotencyConflict
 		}
 		if err := tx.Commit(ctx); err != nil {
@@ -108,25 +135,12 @@ func (s *Store) InvitationRecipient(ctx context.Context, spaceID, invitationID, 
 	if err != nil {
 		return "", fmt.Errorf("lock resend manager: %w", err)
 	}
-	invitation, err := q.LoadSpaceInvitationForUpdate(ctx, invitationID)
+	invitation, err := q.LoadSpaceInvitation(ctx, invitationID)
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && invitation.SpaceID != spaceID) {
 		return "", space.ErrInvitationUnavailable
 	}
 	if err != nil {
 		return "", fmt.Errorf("load invitation recipient: %w", err)
-	}
-	now, err := q.InvitationDatabaseTime(ctx)
-	if err != nil {
-		return "", fmt.Errorf("load invitation recipient time: %w", err)
-	}
-	if invitation.AcceptedAt.Valid {
-		return "", space.ErrInvitationAccepted
-	}
-	if invitation.RevokedAt.Valid {
-		return "", space.ErrInvitationRevoked
-	}
-	if !invitation.ExpiresAt.Time.After(now.Time) {
-		return "", space.ErrInvitationExpired
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return "", fmt.Errorf("commit invitation recipient lookup: %w", err)
@@ -135,7 +149,22 @@ func (s *Store) InvitationRecipient(ctx context.Context, spaceID, invitationID, 
 }
 
 func (s *Store) PrepareInvitationResend(ctx context.Context, command space.PrepareInvitationResendCommand) (space.IssuedInvitation, error) {
-	if uuid.Validate(command.SpaceID) != nil || uuid.Validate(command.InvitationID) != nil || uuid.Validate(command.ActorUserID) != nil || uuid.Validate(command.SubmissionID) != nil || !validInvitationKey(command.IdempotencyKey) || !validInvitationKey(command.ProviderIdempotencyKey) {
+	if uuid.Validate(command.SpaceID) != nil {
+		return space.IssuedInvitation{}, space.ErrInvalidInvitation
+	}
+	if uuid.Validate(command.InvitationID) != nil {
+		return space.IssuedInvitation{}, space.ErrInvalidInvitation
+	}
+	if uuid.Validate(command.ActorUserID) != nil {
+		return space.IssuedInvitation{}, space.ErrInvalidInvitation
+	}
+	if uuid.Validate(command.SubmissionID) != nil {
+		return space.IssuedInvitation{}, space.ErrInvalidInvitation
+	}
+	if !validInvitationKey(command.IdempotencyKey) {
+		return space.IssuedInvitation{}, space.ErrInvalidInvitation
+	}
+	if !validInvitationKey(command.ProviderIdempotencyKey) {
 		return space.IssuedInvitation{}, space.ErrInvalidInvitation
 	}
 	tx, err := s.pool.Begin(ctx)
@@ -499,9 +528,6 @@ func (s *Store) AcceptInvitation(ctx context.Context, command space.AcceptInvita
 	if err != nil {
 		return space.AcceptedInvitation{}, fmt.Errorf("load invited Email owner: %w", err)
 	}
-	if session.IdentityProofMethod != string(identity.EmailMethod) {
-		return space.AcceptedInvitation{}, space.ErrInvitationProofRequired
-	}
 	// Lock invitation identity and terminal truth only after exact owner authority.
 	invitation, err := q.LoadSpaceInvitationForUpdate(ctx, command.InvitationID)
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && invitation.RecipientEmail != observed.RecipientEmail) {
@@ -529,6 +555,9 @@ func (s *Store) AcceptInvitation(ctx context.Context, command space.AcceptInvita
 	}
 	if invitation.RevokedAt.Valid {
 		return space.AcceptedInvitation{}, space.ErrInvitationRevoked
+	}
+	if !replay && session.IdentityProofMethod != string(identity.EmailMethod) {
+		return space.AcceptedInvitation{}, space.ErrInvitationProofRequired
 	}
 	// The Membership lock or insert is the final operation allowed to wait.
 	membership, err := q.LoadMembershipForInvitation(ctx, dbsqlc.LoadMembershipForInvitationParams{SpaceID: invitation.SpaceID, UserID: command.UserID})
@@ -569,17 +598,17 @@ func (s *Store) AcceptInvitation(ctx context.Context, command space.AcceptInvita
 	if !session.ExpiresAt.Time.After(authorizationTime.Time) {
 		return space.AcceptedInvitation{}, identity.ErrUnauthenticated
 	}
-	if !session.IdentityProvedAt.Time.Add(identity.IdentityProofLifetime).After(authorizationTime.Time) {
-		return space.AcceptedInvitation{}, space.ErrInvitationProofRequired
-	}
-	if !invitation.ExpiresAt.Time.After(authorizationTime.Time) {
-		return space.AcceptedInvitation{}, space.ErrInvitationExpired
-	}
 	if replay {
 		if err := tx.Commit(ctx); err != nil {
 			return space.AcceptedInvitation{}, fmt.Errorf("commit invitation acceptance replay: %w", err)
 		}
 		return acceptedInvitation(invitation, spaceName, canManage, canEnroll, alreadyMember), nil
+	}
+	if !session.IdentityProvedAt.Time.Add(identity.IdentityProofLifetime).After(authorizationTime.Time) {
+		return space.AcceptedInvitation{}, space.ErrInvitationProofRequired
+	}
+	if !invitation.ExpiresAt.Time.After(authorizationTime.Time) {
+		return space.AcceptedInvitation{}, space.ErrInvitationExpired
 	}
 	userUUID, _ := postgresUUID(command.UserID)
 	key := command.IdempotencyKey
@@ -603,9 +632,6 @@ func (s *Store) AcceptInvitation(ctx context.Context, command space.AcceptInvita
 	return acceptedInvitation(invitation, spaceName, canManage, canEnroll, alreadyMember), nil
 }
 
-func validInvitationPreparation(command space.PrepareInvitationCommand) bool {
-	return uuid.Validate(command.InvitationID) == nil && uuid.Validate(command.SubmissionID) == nil && uuid.Validate(command.SpaceID) == nil && uuid.Validate(command.ActorUserID) == nil && validInvitationKey(command.IdempotencyKey) && validInvitationKey(command.ProviderIdempotencyKey) && command.ExpiresIn == space.InvitationLifetime
-}
 func validInvitationKey(value string) bool {
 	return strings.TrimSpace(value) != "" && len(value) <= 255
 }

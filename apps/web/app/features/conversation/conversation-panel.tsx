@@ -70,6 +70,22 @@ export function ConversationPanel({
           {conversation.error}
         </p>
       ) : null}
+      {conversation.identityCorrupt ? (
+        <section className="identity-confirmation">
+          <p>
+            Review the authoritative transcript above before discarding the
+            damaged local request identity. Discarding it allows a new private
+            message but cannot prove whether an earlier unknown send completed.
+          </p>
+          <button
+            className="secondary-button"
+            type="button"
+            onClick={conversation.discardCorruptIdentity}
+          >
+            Discard damaged message identity
+          </button>
+        </section>
+      ) : null}
 
       <div
         className="conversation-transcript"

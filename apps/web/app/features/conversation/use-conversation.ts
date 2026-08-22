@@ -13,6 +13,8 @@ import {
 } from "./conversation-page";
 import {
   clearPendingConversationRequestID,
+  CorruptPendingConversationIdentityError,
+  discardCorruptPendingConversationIdentity,
   loadPendingConversationRequestID,
   pendingConversationRequestID,
 } from "./conversation-pending";
@@ -27,6 +29,7 @@ export function useConversation(memberID: string, spaceID: string) {
   const [loadingEarlier, setLoadingEarlier] = useState(false);
   const [canLoadEarlier, setCanLoadEarlier] = useState(false);
   const [identityBlocked, setIdentityBlocked] = useState(false);
+  const [identityCorrupt, setIdentityCorrupt] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -41,6 +44,9 @@ export function useConversation(memberID: string, spaceID: string) {
           clearPendingIfAdmitted(memberID, spaceID, loaded);
         } catch (caught) {
           setIdentityBlocked(true);
+          setIdentityCorrupt(
+            caught instanceof CorruptPendingConversationIdentityError,
+          );
           setError(errorMessage(caught));
         }
       } catch (caught) {
@@ -98,6 +104,9 @@ export function useConversation(memberID: string, spaceID: string) {
       requestID = pendingConversationRequestID(memberID, spaceID);
     } catch (caught) {
       setIdentityBlocked(true);
+      setIdentityCorrupt(
+        caught instanceof CorruptPendingConversationIdentityError,
+      );
       setError(errorMessage(caught));
       setSending(false);
       return false;
@@ -168,6 +177,17 @@ export function useConversation(memberID: string, spaceID: string) {
     }
   }
 
+  function discardCorruptIdentity(): void {
+    try {
+      discardCorruptPendingConversationIdentity(memberID, spaceID);
+      setIdentityBlocked(false);
+      setIdentityCorrupt(false);
+      setError(null);
+    } catch (caught) {
+      setError(errorMessage(caught));
+    }
+  }
+
   function clearAdmittedIdentity(
     currentMemberID: string,
     currentSpaceID: string,
@@ -193,7 +213,9 @@ export function useConversation(memberID: string, spaceID: string) {
     canLoadEarlier,
     awaitingReply,
     identityBlocked,
+    identityCorrupt,
     error,
+    discardCorruptIdentity,
     send,
     loadEarlier,
   };

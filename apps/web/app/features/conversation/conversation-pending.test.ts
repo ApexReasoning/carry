@@ -2,6 +2,8 @@ import { beforeEach, expect, test, vi } from "vitest";
 
 import {
   clearPendingConversationRequestID,
+  CorruptPendingConversationIdentityError,
+  discardCorruptPendingConversationIdentity,
   loadPendingConversationRequestID,
   pendingConversationRequestID,
 } from "./conversation-pending";
@@ -78,7 +80,7 @@ test("fails closed on unreadable or invalid pending storage", () => {
   const storageKey = window.sessionStorage.key(0)!;
   window.sessionStorage.setItem(storageKey, "private-text-instead-of-an-id");
   expect(() => loadPendingConversationRequestID(memberID, spaceID)).toThrow(
-    "Pending private message identity is invalid",
+    CorruptPendingConversationIdentityError,
   );
 
   window.sessionStorage.setItem(storageKey, requestID);
@@ -91,4 +93,19 @@ test("fails closed on unreadable or invalid pending storage", () => {
     "storage unreadable",
   );
   read.mockRestore();
+});
+
+test("discards only an explicitly confirmed damaged request identity", () => {
+  pendingConversationRequestID(memberID, spaceID);
+  const storageKey = window.sessionStorage.key(0)!;
+  window.sessionStorage.setItem(storageKey, "damaged");
+
+  expect(() => loadPendingConversationRequestID(memberID, spaceID)).toThrow(
+    CorruptPendingConversationIdentityError,
+  );
+  discardCorruptPendingConversationIdentity(memberID, spaceID);
+  expect(loadPendingConversationRequestID(memberID, spaceID)).toBeNull();
+  expect(pendingConversationRequestID(memberID, spaceID)).toMatch(
+    /^[0-9a-f-]{36}$/,
+  );
 });

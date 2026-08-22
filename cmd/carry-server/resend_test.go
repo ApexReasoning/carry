@@ -55,7 +55,7 @@ func TestResendCodeSenderKeepsExactRecipientPayloadAndIdempotencyKey(t *testing.
 	}
 }
 
-func TestResendInvitationUsesFixedRouteWithoutAuthorityOrCredential(t *testing.T) {
+func TestResendInvitationUsesExactRouteWithoutAuthorityOrCredential(t *testing.T) {
 	t.Parallel()
 	var body struct {
 		To      []string `json:"to"`
@@ -75,8 +75,9 @@ func TestResendInvitationUsesFixedRouteWithoutAuthorityOrCredential(t *testing.T
 	if err != nil {
 		t.Fatalf("create sender: %v", err)
 	}
+	const invitationID = "d8d1da08-ebc1-4f48-a16f-b8f046a84d94"
 	message := space.InvitationMessage{
-		Recipient: "teammate@example.com", DestinationURL: "https://carry.example/invitations",
+		Recipient: "teammate@example.com", DestinationURL: "https://carry.example/invitations/" + invitationID,
 		IdempotencyKey: "space-invitation/one",
 	}
 	digest, err := sender.InvitationPayloadDigest(message)

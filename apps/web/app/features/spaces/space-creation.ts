@@ -8,6 +8,8 @@ const uuidPattern =
 
 type PendingIdentities = Record<string, string>;
 
+export class CorruptPendingSpaceCreationError extends Error {}
+
 type CreationIdentity = {
   digest: string;
   idempotencyKey: string;
@@ -66,6 +68,22 @@ export async function pendingSpaceCreationIdentity(
   return { digest, idempotencyKey };
 }
 
+export function discardCorruptPendingSpaceCreation(): void {
+  const encoded = window.sessionStorage.getItem(storageKey);
+  if (!encoded) return;
+  try {
+    if (isPendingIdentities(JSON.parse(encoded) as unknown)) return;
+  } catch {
+    // The explicit recovery below owns malformed JSON and invalid shapes alike.
+  }
+  window.sessionStorage.removeItem(storageKey);
+  if (window.sessionStorage.getItem(storageKey) !== null) {
+    throw new Error(
+      "Damaged pending Space creation identities could not be cleared",
+    );
+  }
+}
+
 function clearPendingSpaceCreation(identity: CreationIdentity): void {
   const pending = loadPending();
   if (pending[identity.digest] !== identity.idempotencyKey) return;
@@ -80,12 +98,15 @@ function loadPending(): PendingIdentities {
   try {
     value = JSON.parse(encoded);
   } catch (caught) {
-    throw new Error("Pending Space creation identities are invalid", {
-      cause: caught,
-    });
+    throw new CorruptPendingSpaceCreationError(
+      "Pending Space creation identities are damaged",
+      { cause: caught },
+    );
   }
   if (!isPendingIdentities(value)) {
-    throw new Error("Pending Space creation identities are invalid");
+    throw new CorruptPendingSpaceCreationError(
+      "Pending Space creation identities are damaged",
+    );
   }
   return value;
 }
