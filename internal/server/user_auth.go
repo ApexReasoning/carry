@@ -49,17 +49,17 @@ func (a userAuthenticator) requireUser(next http.Handler) http.Handler {
 func (a userAuthenticator) requireBrowserUser(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		if _, hasToken := bearerToken(request); hasToken {
-			writeAPIError(response, http.StatusUnauthorized, "Browser Session authentication is required")
+			writeUserSignInRequired(response)
 			return
 		}
 		cookie, err := request.Cookie(browserSessionCookie)
 		if err != nil || strings.TrimSpace(cookie.Value) == "" {
-			writeAPIError(response, http.StatusUnauthorized, "Browser Session authentication is required")
+			writeUserSignInRequired(response)
 			return
 		}
 		sessionID, ok := a.credentials.ParseBrowserSessionCredential(cookie.Value)
 		if !ok {
-			writeAPIError(response, http.StatusUnauthorized, "User authentication is invalid")
+			writeUserSignInRequired(response)
 			return
 		}
 		user, err := a.sessions.AuthenticateBrowserSession(request.Context(), sessionID)
@@ -80,13 +80,13 @@ func (a userAuthenticator) authenticate(
 	cookie, cookieErr := request.Cookie(browserSessionCookie)
 	hasSession := cookieErr == nil && strings.TrimSpace(cookie.Value) != ""
 	if hasToken && hasSession {
-		writeAPIError(response, http.StatusUnauthorized, "User authentication is ambiguous")
+		writeAPIError(response, http.StatusUnauthorized, "Use either this browser or one CLI sign-in, not both.")
 		return identity.AuthenticatedUser{}, false
 	}
 	if hasToken {
 		credentialID, valid := a.credentials.ParseCLICredential(token, a.origin.value)
 		if !valid {
-			writeAPIError(response, http.StatusUnauthorized, "User authentication is invalid")
+			writeUserSignInRequired(response)
 			return identity.AuthenticatedUser{}, false
 		}
 		user, err := a.cli.AuthenticateCLICredential(request.Context(), credentialID)
@@ -95,13 +95,13 @@ func (a userAuthenticator) authenticate(
 	if hasSession {
 		sessionID, ok := a.credentials.ParseBrowserSessionCredential(cookie.Value)
 		if !ok {
-			writeAPIError(response, http.StatusUnauthorized, "User authentication is invalid")
+			writeUserSignInRequired(response)
 			return identity.AuthenticatedUser{}, false
 		}
 		user, err := a.sessions.AuthenticateBrowserSession(request.Context(), sessionID)
 		return authenticatedUserResult(response, user, err)
 	}
-	writeAPIError(response, http.StatusUnauthorized, "User authentication is required")
+	writeUserSignInRequired(response)
 	return identity.AuthenticatedUser{}, false
 }
 
@@ -120,7 +120,7 @@ func authenticatedUserResult(
 	err error,
 ) (identity.AuthenticatedUser, bool) {
 	if errors.Is(err, identity.ErrUnauthenticated) {
-		writeAPIError(response, http.StatusUnauthorized, "User authentication is invalid")
+		writeUserSignInRequired(response)
 		return identity.AuthenticatedUser{}, false
 	}
 	if err != nil {

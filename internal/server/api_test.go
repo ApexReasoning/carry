@@ -143,6 +143,30 @@ func TestUserWireAndSpecializedErrorsUsePublicLanguage(t *testing.T) {
 	}
 	assertUserFacingResponse(t, missingRetry, http.StatusBadRequest, "This action needs saved retry information. Reload before trying again.")
 
+	signIn := httptest.NewRecorder()
+	writeUserSignInRequired(signIn)
+	assertUserFacingResponse(t, signIn, http.StatusUnauthorized, "Sign in to continue.")
+
+	unverified := httptest.NewRecorder()
+	writeUnverifiedUserRequest(unverified)
+	assertUserFacingResponse(t, unverified, http.StatusBadRequest, "Carry could not verify this request. Return to Carry and try again.")
+
+	unverifiedSource := httptest.NewRecorder()
+	writeUnverifiedRequestSource(unverifiedSource, "resolve request source", errors.New("proxy address is malformed"))
+	assertUserFacingResponse(t, unverifiedSource, http.StatusBadRequest, "Carry could not verify this request. Ask the person responsible for Carry for help.")
+	if strings.Contains(unverifiedSource.Body.String(), "proxy address") || strings.Contains(unverifiedSource.Body.String(), "resolve request source") {
+		t.Fatalf("private request-source diagnostics entered User response: %s", unverifiedSource.Body.String())
+	}
+
+	ambiguous := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
+	ambiguous.Header.Set("Authorization", "Bearer both")
+	ambiguous.AddCookie(&http.Cookie{Name: browserSessionCookie, Value: "also-present"})
+	ambiguousResponse := httptest.NewRecorder()
+	if _, ok := (userAuthenticator{}).authenticate(ambiguousResponse, ambiguous); ok {
+		t.Fatal("ambiguous User authentication accepted")
+	}
+	assertUserFacingResponse(t, ambiguousResponse, http.StatusUnauthorized, "Use either this browser or one CLI sign-in, not both.")
+
 	writers := map[string]struct {
 		write   func(http.ResponseWriter)
 		status  int

@@ -46,7 +46,7 @@ func (api emailLoginAPI) requestCode(response http.ResponseWriter, request *http
 	}
 	requestSource, err := api.requestSources.Resolve(request)
 	if err != nil {
-		writeAPIError(response, http.StatusBadRequest, "request source is invalid")
+		writeUnverifiedRequestSource(response, "resolve email sign-in request source", err)
 		return
 	}
 	challenge, err := api.login.RequestCode(request.Context(), identity.RequestEmailCodeCommand{
@@ -70,7 +70,7 @@ func (api emailLoginAPI) requestLinkCode(response http.ResponseWriter, request *
 
 func (api emailLoginAPI) requestMethodCode(response http.ResponseWriter, request *http.Request, link bool) {
 	if !api.origin.acceptsSensitivePOST(request) {
-		writeAPIError(response, http.StatusBadRequest, "request origin is invalid")
+		writeUnverifiedUserRequest(response)
 		return
 	}
 	user, ok := currentUser(response, request)
@@ -102,7 +102,7 @@ func (api emailLoginAPI) requestMethodCode(response http.ResponseWriter, request
 	}
 	requestSource, err := api.requestSources.Resolve(request)
 	if err != nil {
-		writeAPIError(response, http.StatusBadRequest, "request source is invalid")
+		writeUnverifiedRequestSource(response, "resolve sign-in method request source", err)
 		return
 	}
 	command := identity.RequestEmailMethodCodeCommand{
@@ -136,7 +136,7 @@ func (api emailLoginAPI) verifyLinkCode(response http.ResponseWriter, request *h
 
 func (api emailLoginAPI) verify(response http.ResponseWriter, request *http.Request, purpose identity.ProofPurpose) {
 	if purpose != identity.LoginPurpose && !api.origin.acceptsSensitivePOST(request) {
-		writeAPIError(response, http.StatusBadRequest, "request origin is invalid")
+		writeUnverifiedUserRequest(response)
 		return
 	}
 	challengeID, ok := pathUUID(response, request, "challenge_id")
@@ -158,7 +158,7 @@ func (api emailLoginAPI) verify(response http.ResponseWriter, request *http.Requ
 	}
 	if purpose != identity.LoginPurpose {
 		if request.Header.Get("Authorization") != "" {
-			writeAPIError(response, http.StatusUnauthorized, "Browser Session authentication is required")
+			writeUserSignInRequired(response)
 			return
 		}
 		sessionID, ok := (identityMethodsAPI{credentials: api.credentials}).browserSessionID(response, request)

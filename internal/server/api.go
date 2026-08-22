@@ -98,6 +98,20 @@ func writeUserInternalError(response http.ResponseWriter, recovery userFailureRe
 	writeAPIError(response, http.StatusInternalServerError, "Carry could not load this right now. Reload to try again.")
 }
 
+// Missing and invalid User proof intentionally share one recovery and do not reveal which proof failed.
+func writeUserSignInRequired(response http.ResponseWriter) {
+	writeAPIError(response, http.StatusUnauthorized, "Sign in to continue.")
+}
+
+func writeUnverifiedUserRequest(response http.ResponseWriter) {
+	writeAPIError(response, http.StatusBadRequest, "Carry could not verify this request. Return to Carry and try again.")
+}
+
+func writeUnverifiedRequestSource(response http.ResponseWriter, operation string, err error) {
+	slog.Error("user request source verification failed", "operation", operation, "error", err)
+	writeAPIError(response, http.StatusBadRequest, "Carry could not verify this request. Ask the person responsible for Carry for help.")
+}
+
 func writeAPIError(response http.ResponseWriter, status int, message string) {
 	writeJSON(response, status, struct {
 		Error string `json:"error"`

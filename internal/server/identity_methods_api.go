@@ -48,11 +48,11 @@ func (api identityMethodsAPI) list(response http.ResponseWriter, request *http.R
 
 func (api identityMethodsAPI) unlink(response http.ResponseWriter, request *http.Request) {
 	if !api.origin.acceptsSensitivePOST(request) {
-		writeAPIError(response, http.StatusBadRequest, "request origin is invalid")
+		writeUnverifiedUserRequest(response)
 		return
 	}
 	if strings.TrimSpace(request.Header.Get("Authorization")) != "" {
-		writeAPIError(response, http.StatusUnauthorized, "Browser Session authentication is required")
+		writeUserSignInRequired(response)
 		return
 	}
 	sessionID, ok := api.browserSessionID(response, request)
@@ -83,12 +83,12 @@ func (api identityMethodsAPI) unlink(response http.ResponseWriter, request *http
 func (api identityMethodsAPI) browserSessionID(response http.ResponseWriter, request *http.Request) (string, bool) {
 	cookie, err := request.Cookie(browserSessionCookie)
 	if err != nil || strings.TrimSpace(cookie.Value) == "" {
-		writeAPIError(response, http.StatusUnauthorized, "Browser Session authentication is required")
+		writeUserSignInRequired(response)
 		return "", false
 	}
 	sessionID, ok := api.credentials.ParseBrowserSessionCredential(cookie.Value)
 	if !ok {
-		writeAPIError(response, http.StatusUnauthorized, "Browser Session authentication is invalid")
+		writeUserSignInRequired(response)
 		return "", false
 	}
 	return sessionID, true
@@ -97,7 +97,7 @@ func (api identityMethodsAPI) browserSessionID(response http.ResponseWriter, req
 func writeIdentityMethodError(response http.ResponseWriter, err error, recovery userFailureRecovery, operation string) {
 	switch {
 	case errors.Is(err, identity.ErrUnauthenticated):
-		writeAPIError(response, http.StatusUnauthorized, "Browser Session authentication is invalid")
+		writeUserSignInRequired(response)
 	case errors.Is(err, identity.ErrRecentIdentityProofRequired):
 		writeAPIError(response, http.StatusPreconditionRequired, err.Error())
 	case errors.Is(err, identity.ErrIdempotencyConflict):

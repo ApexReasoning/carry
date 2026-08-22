@@ -137,7 +137,7 @@ func (api externalLoginAPI) start(
 ) {
 	response.Header().Set("Referrer-Policy", "no-referrer")
 	if !api.origin.matches(request) {
-		writeAPIError(response, http.StatusBadRequest, "request authority is invalid")
+		writeUnverifiedUserRequest(response)
 		return
 	}
 	authenticated, err := api.hasAuthenticatedPrincipal(request)
@@ -159,7 +159,7 @@ func (api externalLoginAPI) start(
 	}
 	source, err := api.requestSources.Resolve(request)
 	if err != nil {
-		writeAPIError(response, http.StatusBadRequest, "request source is invalid")
+		writeUnverifiedRequestSource(response, "resolve external sign-in request source", err)
 		return
 	}
 	result, err := start(request.Context(), invitationID, source)
@@ -176,7 +176,8 @@ func (api externalLoginAPI) start(
 		return
 	}
 	if err != nil {
-		writeAPIError(response, http.StatusServiceUnavailable, "start external sign-in")
+		slog.Error("user request failed", "operation", "start external sign-in", "error", err)
+		writeAPIError(response, http.StatusServiceUnavailable, "Carry could not start sign-in. Try again.")
 		return
 	}
 	setExternalLoginCookie(response, result.BrowserCredential, result.ExpiresAt)
@@ -212,11 +213,11 @@ func (api externalLoginAPI) startMethod(
 ) {
 	response.Header().Set("Referrer-Policy", "no-referrer")
 	if !api.origin.acceptsSensitivePOST(request) {
-		writeAPIError(response, http.StatusBadRequest, "request origin is invalid")
+		writeUnverifiedUserRequest(response)
 		return
 	}
 	if strings.TrimSpace(request.Header.Get("Authorization")) != "" {
-		writeAPIError(response, http.StatusUnauthorized, "Browser Session authentication is required")
+		writeUserSignInRequired(response)
 		return
 	}
 	user, ok := currentUser(response, request)
@@ -225,12 +226,12 @@ func (api externalLoginAPI) startMethod(
 	}
 	cookie, err := request.Cookie(browserSessionCookie)
 	if err != nil {
-		writeAPIError(response, http.StatusUnauthorized, "Browser Session authentication is required")
+		writeUserSignInRequired(response)
 		return
 	}
 	sessionID, ok := api.credentials.ParseBrowserSessionCredential(cookie.Value)
 	if !ok {
-		writeAPIError(response, http.StatusUnauthorized, "Browser Session authentication is invalid")
+		writeUserSignInRequired(response)
 		return
 	}
 	result, err := start(request.Context(), user.UserID, sessionID)
@@ -257,7 +258,7 @@ func (api externalLoginAPI) callback(
 ) {
 	response.Header().Set("Referrer-Policy", "no-referrer")
 	if !api.origin.matches(request) {
-		writeAPIError(response, http.StatusBadRequest, "request authority is invalid")
+		writeUnverifiedUserRequest(response)
 		return
 	}
 	callback, ok := parseExternalCallback(request)

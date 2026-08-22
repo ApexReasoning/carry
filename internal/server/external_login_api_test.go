@@ -130,6 +130,12 @@ func TestExternalLoginStartBoundsFormAndMapsAdmissionLimit(t *testing.T) {
 		strings.Contains(response.Body.String(), "source admission") {
 		t.Fatalf("rate-limited status = %d, body = %s", response.Code, response.Body.String())
 	}
+
+	login = &recordingExternalLogin{startErr: errors.New("database unavailable")}
+	handler = externalLoginTestAPI(t, login, &recordingBrowserSessions{})
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "https://carry.example/v1/auth/github/start", nil))
+	assertUserFacingResponse(t, response, http.StatusServiceUnavailable, "Carry could not start sign-in. Try again.")
 }
 
 func TestExternalLoginStartAndCallbackPreserveOnlyInvitationContinuation(t *testing.T) {

@@ -69,7 +69,7 @@ func (api spaceInvitationAPI) listMembers(response http.ResponseWriter, request 
 
 func (api spaceInvitationAPI) removeMember(response http.ResponseWriter, request *http.Request) {
 	if !api.origin.acceptsSensitivePOST(request) {
-		writeAPIError(response, http.StatusBadRequest, "request origin is invalid")
+		writeUnverifiedUserRequest(response)
 		return
 	}
 	user, ok := currentUser(response, request)
@@ -122,7 +122,7 @@ func (api spaceInvitationAPI) listManaged(response http.ResponseWriter, request 
 
 func (api spaceInvitationAPI) issue(response http.ResponseWriter, request *http.Request) {
 	if !api.origin.acceptsSensitivePOST(request) {
-		writeAPIError(response, http.StatusBadRequest, "request origin is invalid")
+		writeUnverifiedUserRequest(response)
 		return
 	}
 	user, ok := currentUser(response, request)
@@ -154,7 +154,7 @@ func (api spaceInvitationAPI) issue(response http.ResponseWriter, request *http.
 
 func (api spaceInvitationAPI) resend(response http.ResponseWriter, request *http.Request) {
 	if !api.origin.acceptsSensitivePOST(request) {
-		writeAPIError(response, http.StatusBadRequest, "request origin is invalid")
+		writeUnverifiedUserRequest(response)
 		return
 	}
 	user, ok := currentUser(response, request)
@@ -178,7 +178,7 @@ func (api spaceInvitationAPI) resend(response http.ResponseWriter, request *http
 
 func (api spaceInvitationAPI) revoke(response http.ResponseWriter, request *http.Request) {
 	if !api.origin.acceptsSensitivePOST(request) {
-		writeAPIError(response, http.StatusBadRequest, "request origin is invalid")
+		writeUnverifiedUserRequest(response)
 		return
 	}
 	user, ok := currentUser(response, request)
@@ -258,7 +258,7 @@ func (api spaceInvitationAPI) targeted(response http.ResponseWriter, request *ht
 
 func (api spaceInvitationAPI) accept(response http.ResponseWriter, request *http.Request) {
 	if !api.origin.acceptsSensitivePOST(request) {
-		writeAPIError(response, http.StatusBadRequest, "request origin is invalid")
+		writeUnverifiedUserRequest(response)
 		return
 	}
 	user, ok := currentUser(response, request)
@@ -286,17 +286,17 @@ func (api spaceInvitationAPI) accept(response http.ResponseWriter, request *http
 
 func (api spaceInvitationAPI) browserSessionID(response http.ResponseWriter, request *http.Request) (string, bool) {
 	if strings.TrimSpace(request.Header.Get("Authorization")) != "" {
-		writeAPIError(response, http.StatusUnauthorized, "Browser Session authentication is required")
+		writeUserSignInRequired(response)
 		return "", false
 	}
 	cookie, err := request.Cookie(browserSessionCookie)
 	if err != nil || strings.TrimSpace(cookie.Value) == "" {
-		writeAPIError(response, http.StatusUnauthorized, "Browser Session authentication is required")
+		writeUserSignInRequired(response)
 		return "", false
 	}
 	sessionID, ok := api.credentials.ParseBrowserSessionCredential(cookie.Value)
 	if !ok {
-		writeAPIError(response, http.StatusUnauthorized, "Browser Session authentication is invalid")
+		writeUserSignInRequired(response)
 		return "", false
 	}
 	return sessionID, true
@@ -383,7 +383,7 @@ func writeMemberError(response http.ResponseWriter, err error, recovery userFail
 func writeInvitationError(response http.ResponseWriter, err error, recovery userFailureRecovery, operation string) {
 	switch {
 	case errors.Is(err, identity.ErrUnauthenticated):
-		writeAPIError(response, http.StatusUnauthorized, "Browser Session authentication is invalid")
+		writeUserSignInRequired(response)
 	case errors.Is(err, space.ErrForbidden):
 		writeAPIError(response, http.StatusForbidden, "You do not have access to this Space.")
 	case errors.Is(err, space.ErrInvalidInvitationRecipient):

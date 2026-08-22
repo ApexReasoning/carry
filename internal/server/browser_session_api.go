@@ -22,12 +22,12 @@ type browserSessionAPI struct {
 func (api browserSessionAPI) revokeCurrent(response http.ResponseWriter, request *http.Request) {
 	cookie, err := request.Cookie(browserSessionCookie)
 	if err != nil {
-		writeAPIError(response, http.StatusUnauthorized, "browser session is required")
+		writeUserSignInRequired(response)
 		return
 	}
 	sessionID, ok := api.credentials.ParseBrowserSessionCredential(cookie.Value)
 	if !ok {
-		writeAPIError(response, http.StatusUnauthorized, "browser session is invalid")
+		writeUserSignInRequired(response)
 		return
 	}
 	if err := api.sessions.RevokeBrowserSession(request.Context(), sessionID); err != nil {
