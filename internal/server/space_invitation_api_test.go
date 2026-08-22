@@ -24,7 +24,7 @@ func TestInvitationRoutesRequireBrowserOriginAndNeverMutateOnGET(t *testing.T) {
 		t.Fatalf("origin: %v", err)
 	}
 	behavior := &invitationBehaviorStub{}
-	routes, err := NewUserSpaceRoutesWithInvitations(spaceCreationStub{}, behavior, behavior, credentials, origin)
+	routes, err := NewUserSpaceRoutesWithInvitations(spaceCreationStub{}, behavior, behavior, behavior, credentials, origin)
 	if err != nil {
 		t.Fatalf("routes: %v", err)
 	}
@@ -155,7 +155,7 @@ func TestRemoveMemberRouteRequiresOriginAndMapsRemovalOutcomes(t *testing.T) {
 		t.Fatalf("origin: %v", err)
 	}
 	behavior := &invitationBehaviorStub{}
-	routes, err := NewUserSpaceRoutesWithInvitations(spaceCreationStub{}, behavior, behavior, credentials, origin)
+	routes, err := NewUserSpaceRoutesWithInvitations(spaceCreationStub{}, behavior, behavior, behavior, credentials, origin)
 	if err != nil {
 		t.Fatalf("routes: %v", err)
 	}
@@ -251,13 +251,13 @@ func (stub *invitationBehaviorStub) RemoveSpaceMember(_ context.Context, command
 	stub.removalCommand = command
 	return stub.removalError
 }
-func (*invitationBehaviorStub) ListForSpace(context.Context, string, string) ([]space.ManagedInvitation, error) {
+func (*invitationBehaviorStub) ListSpaceInvitations(context.Context, string, string) ([]space.ManagedInvitation, error) {
 	return nil, nil
 }
-func (*invitationBehaviorStub) ListForUser(context.Context, string, string) (space.InvitationInbox, error) {
+func (*invitationBehaviorStub) ListUserInvitations(context.Context, string, string) (space.InvitationInbox, error) {
 	return space.InvitationInbox{}, nil
 }
-func (stub *invitationBehaviorStub) LoadForUser(context.Context, string, string, string) (space.RecipientInvitation, error) {
+func (stub *invitationBehaviorStub) LoadInvitationForUser(context.Context, string, string, string) (space.RecipientInvitation, error) {
 	stub.loads++
 	return stub.loaded, stub.loadError
 }

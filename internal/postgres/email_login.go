@@ -16,11 +16,6 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-const (
-	maxEmailChallengesPerHour  = 5
-	maxSourceChallengesPerHour = 20
-)
-
 func (s *Store) PrepareEmailChallenge(
 	ctx context.Context,
 	command identity.PrepareEmailChallengeCommand,
@@ -117,8 +112,14 @@ func (s *Store) PrepareEmailChallenge(
 	if latestErr != nil && !errors.Is(latestErr, pgx.ErrNoRows) {
 		return identity.EmailChallenge{}, fmt.Errorf("load latest email challenge: %w", latestErr)
 	}
-	if emailCount >= maxEmailChallengesPerHour || sourceCount >= maxSourceChallengesPerHour || tooSoon {
-		return identity.EmailChallenge{}, identity.ErrEmailRateLimited
+	if emailCount >= identity.EmailAddressChallengeLimitPerHour {
+		return identity.EmailChallenge{}, identity.ErrEmailAddressAdmissionLimited
+	}
+	if sourceCount >= identity.EmailSourceChallengeLimitPerHour {
+		return identity.EmailChallenge{}, identity.ErrEmailSourceAdmissionLimited
+	}
+	if tooSoon {
+		return identity.EmailChallenge{}, identity.ErrEmailResendDelayed
 	}
 	if err := queries.InvalidateCurrentEmailChallenges(ctx, command.CanonicalEmail); err != nil {
 		return identity.EmailChallenge{}, fmt.Errorf("invalidate previous email challenge: %w", err)

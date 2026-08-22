@@ -148,11 +148,12 @@ func ValidateMessage(value string) error {
 	return nil
 }
 
-func ValidateIdempotencyKey(value string) error {
-	if strings.TrimSpace(value) == "" || len(value) > MaxIdempotencyKeyBytes || !validText(value) {
-		return ErrInvalidIdempotency
+func NormalizeIdempotencyKey(value string) (string, error) {
+	key := strings.TrimSpace(value)
+	if key == "" || len(key) > MaxIdempotencyKeyBytes || !validText(key) {
+		return "", ErrInvalidIdempotency
 	}
-	return nil
+	return key, nil
 }
 
 func validText(value string) bool {

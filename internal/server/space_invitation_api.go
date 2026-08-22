@@ -12,15 +12,19 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// SpaceInvitations is the Space-owned member admission behavior consumed by HTTP.
-type SpaceInvitations interface {
+// SpaceInvitationCommands is the Space-owned admission behavior consumed by HTTP mutations.
+type SpaceInvitationCommands interface {
 	Issue(context.Context, space.IssueInvitationRequest) (space.IssuedInvitation, error)
 	Resend(context.Context, space.ResendInvitationRequest) (space.IssuedInvitation, error)
-	ListForSpace(context.Context, string, string) ([]space.ManagedInvitation, error)
-	ListForUser(context.Context, string, string) (space.InvitationInbox, error)
-	LoadForUser(context.Context, string, string, string) (space.RecipientInvitation, error)
 	Revoke(context.Context, space.RevokeInvitationCommand) error
 	Accept(context.Context, space.AcceptInvitationCommand) (space.AcceptedInvitation, error)
+}
+
+// SpaceInvitationQueries is the Space-owned invitation projection consumed by HTTP reads.
+type SpaceInvitationQueries interface {
+	ListSpaceInvitations(context.Context, string, string) ([]space.ManagedInvitation, error)
+	ListUserInvitations(context.Context, string, string) (space.InvitationInbox, error)
+	LoadInvitationForUser(context.Context, string, string, string) (space.RecipientInvitation, error)
 }
 
 // SpaceMembers is the complete Space-owned member list and removal use case consumed by HTTP.
@@ -30,10 +34,11 @@ type SpaceMembers interface {
 }
 
 type spaceInvitationAPI struct {
-	invitations SpaceInvitations
-	members     SpaceMembers
-	credentials identity.Credentials
-	origin      ExternalOrigin
+	invitations       SpaceInvitationCommands
+	invitationQueries SpaceInvitationQueries
+	members           SpaceMembers
+	credentials       identity.Credentials
+	origin            ExternalOrigin
 }
 
 func (api spaceInvitationAPI) listMembers(response http.ResponseWriter, request *http.Request) {
@@ -101,7 +106,7 @@ func (api spaceInvitationAPI) listManaged(response http.ResponseWriter, request 
 	if !ok {
 		return
 	}
-	items, err := api.invitations.ListForSpace(request.Context(), user.UserID, chi.URLParam(request, "space_id"))
+	items, err := api.invitationQueries.ListSpaceInvitations(request.Context(), user.UserID, chi.URLParam(request, "space_id"))
 	if err != nil {
 		writeInvitationError(response, err)
 		return
@@ -204,7 +209,7 @@ func (api spaceInvitationAPI) inbox(response http.ResponseWriter, request *http.
 	if !ok {
 		return
 	}
-	inbox, err := api.invitations.ListForUser(request.Context(), user.UserID, sessionID)
+	inbox, err := api.invitationQueries.ListUserInvitations(request.Context(), user.UserID, sessionID)
 	if err != nil {
 		writeInvitationError(response, err)
 		return
@@ -228,7 +233,7 @@ func (api spaceInvitationAPI) targeted(response http.ResponseWriter, request *ht
 	if !ok {
 		return
 	}
-	item, err := api.invitations.LoadForUser(
+	item, err := api.invitationQueries.LoadInvitationForUser(
 		request.Context(), chi.URLParam(request, "invitation_id"), user.UserID, sessionID,
 	)
 	if err != nil {

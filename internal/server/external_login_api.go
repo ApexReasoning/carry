@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"mime"
 	"net/http"
 	"net/url"
@@ -163,7 +164,15 @@ func (api externalLoginAPI) start(
 	}
 	result, err := start(request.Context(), invitationID, source)
 	if errors.Is(err, identity.ErrExternalLoginRateLimited) {
-		writeAPIError(response, http.StatusTooManyRequests, err.Error())
+		scope := "unspecified"
+		switch {
+		case errors.Is(err, identity.ErrExternalLoginSourceAdmissionLimited):
+			scope = "source"
+		case errors.Is(err, identity.ErrExternalLoginGlobalAdmissionLimited):
+			scope = "global"
+		}
+		slog.Warn("external sign-in admission limited", "scope", scope)
+		writeAPIError(response, http.StatusTooManyRequests, identity.ErrExternalLoginRateLimited.Error())
 		return
 	}
 	if err != nil {

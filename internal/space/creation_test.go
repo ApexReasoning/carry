@@ -17,7 +17,7 @@ func TestCreatorOwnsCanonicalSpaceFactsAndRequestDigest(t *testing.T) {
 	created, err := creator.Create(context.Background(), CreateSpaceRequest{
 		UserID:         "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
 		Name:           "  Research Team  ",
-		IdempotencyKey: "create-research",
+		IdempotencyKey: "  create-research  ",
 	})
 	if err != nil {
 		t.Fatalf("create Space: %v", err)

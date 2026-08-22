@@ -71,6 +71,28 @@ func TestEmailRequestMapsIdempotencyConflictToHTTP409(t *testing.T) {
 	}
 }
 
+func TestEmailRequestKeepsAdmissionCauseOutOfTheUserResponse(t *testing.T) {
+	t.Parallel()
+	store := &recordingEmailLoginStore{prepareErr: identity.ErrEmailSourceAdmissionLimited}
+	handler := emailTestAPI(t, store, &recordingEmailSender{}, unavailableSpaceCreation{})
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/auth/email/challenges",
+		strings.NewReader(`{"challenge_id":"`+testChallengeID+`","email":"person@example.com"}`),
+	)
+	request.RemoteAddr = "203.0.113.18:49152"
+	request.Header.Set("Idempotency-Key", "source-limited-request")
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusTooManyRequests ||
+		!strings.Contains(response.Body.String(), identity.ErrEmailRateLimited.Error()) ||
+		strings.Contains(response.Body.String(), "source admission") {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+}
+
 func TestEmailVerifySetsStableHostOnlyCookie(t *testing.T) {
 	t.Parallel()
 	store := &recordingEmailLoginStore{session: identity.BrowserSession{

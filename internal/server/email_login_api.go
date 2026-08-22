@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -209,7 +210,17 @@ func writeEmailRequestError(response http.ResponseWriter, err error, fallback st
 	case errors.Is(err, identity.ErrInvalidEmail):
 		writeAPIError(response, http.StatusBadRequest, err.Error())
 	case errors.Is(err, identity.ErrEmailRateLimited):
-		writeAPIError(response, http.StatusTooManyRequests, err.Error())
+		scope := "unspecified"
+		switch {
+		case errors.Is(err, identity.ErrEmailAddressAdmissionLimited):
+			scope = "address"
+		case errors.Is(err, identity.ErrEmailSourceAdmissionLimited):
+			scope = "source"
+		case errors.Is(err, identity.ErrEmailResendDelayed):
+			scope = "resend-delay"
+		}
+		slog.Warn("email challenge admission limited", "scope", scope)
+		writeAPIError(response, http.StatusTooManyRequests, identity.ErrEmailRateLimited.Error())
 	case errors.Is(err, identity.ErrIdempotencyConflict):
 		writeAPIError(response, http.StatusConflict, err.Error())
 	case errors.Is(err, identity.ErrEmailSubmissionRejected):

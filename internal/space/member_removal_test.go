@@ -11,13 +11,13 @@ func TestNewRemoveMemberCommandBindsExactRemovalFacts(t *testing.T) {
 	request := RemoveMemberRequest{
 		SpaceID: "10000000-0000-4000-8000-000000000001", ActorUserID: "20000000-0000-4000-8000-000000000001",
 		TargetUserID: "30000000-0000-4000-8000-000000000001", SuccessorUserID: "40000000-0000-4000-8000-000000000001",
-		IdempotencyKey: "remove-member-1",
+		IdempotencyKey: "  remove-member-1  ",
 	}
 	command, err := NewRemoveMemberCommand(request)
 	if err != nil {
 		t.Fatalf("new removal command: %v", err)
 	}
-	if command.SpaceID != request.SpaceID || command.ActorUserID != request.ActorUserID || command.TargetUserID != request.TargetUserID || command.SuccessorUserID != request.SuccessorUserID || command.IdempotencyKey != request.IdempotencyKey {
+	if command.SpaceID != request.SpaceID || command.ActorUserID != request.ActorUserID || command.TargetUserID != request.TargetUserID || command.SuccessorUserID != request.SuccessorUserID || command.IdempotencyKey != "remove-member-1" {
 		t.Fatalf("command = %#v", command)
 	}
 	changed := request

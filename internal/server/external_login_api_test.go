@@ -87,12 +87,14 @@ func TestExternalLoginStartBoundsFormAndMapsAdmissionLimit(t *testing.T) {
 		})
 	}
 
-	login := &recordingExternalLogin{startErr: identity.ErrExternalLoginRateLimited}
+	login := &recordingExternalLogin{startErr: identity.ErrExternalLoginSourceAdmissionLimited}
 	handler := externalLoginTestAPI(t, login, &recordingBrowserSessions{})
 	request := httptest.NewRequest(http.MethodPost, "https://carry.example/v1/auth/github/start", nil)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusTooManyRequests {
+	if response.Code != http.StatusTooManyRequests ||
+		!strings.Contains(response.Body.String(), identity.ErrExternalLoginRateLimited.Error()) ||
+		strings.Contains(response.Body.String(), "source admission") {
 		t.Fatalf("rate-limited status = %d, body = %s", response.Code, response.Body.String())
 	}
 }

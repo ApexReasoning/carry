@@ -88,7 +88,7 @@ func TestSpaceInvitationAuthorityReplayProjectionAndSubmission(t *testing.T) {
 	if _, err := invitations.Issue(ctx, request); !errors.Is(err, space.ErrIdempotencyConflict) {
 		t.Fatalf("changed issue replay = %v", err)
 	}
-	managed, err := invitations.ListForSpace(ctx, manager.UserID, manager.SpaceID)
+	managed, err := store.ListSpaceInvitations(ctx, manager.UserID, manager.SpaceID)
 	if err != nil {
 		t.Fatalf("list managed invitations: %v", err)
 	}
@@ -299,12 +299,12 @@ func TestSpaceInvitationRequiresExactRecentEmailProofAndReplaysAcceptance(t *tes
 	}
 	providerOnlyUserID, _ := seedIdentityUser(t, ctx, store, "", 0)
 	providerOnlySession := createIdentityTestSession(t, ctx, store, providerOnlyUserID, identity.GoogleMethod)
-	if providerInbox, err := invitations.ListForUser(ctx, providerOnlyUserID, providerOnlySession); err != nil || len(providerInbox.Invitations) != 0 {
+	if providerInbox, err := store.ListUserInvitations(ctx, providerOnlyUserID, providerOnlySession); err != nil || len(providerInbox.Invitations) != 0 {
 		t.Fatalf("provider-only inbox = %#v, %v", providerInbox, err)
 	}
 
 	wrongUserID, wrongSessions := seedIdentityUser(t, ctx, store, "wrong@example.com", 1)
-	if wrongInbox, err := invitations.ListForUser(ctx, wrongUserID, wrongSessions[0]); err != nil || len(wrongInbox.Invitations) != 0 {
+	if wrongInbox, err := store.ListUserInvitations(ctx, wrongUserID, wrongSessions[0]); err != nil || len(wrongInbox.Invitations) != 0 {
 		t.Fatalf("wrong-email inbox = %#v, %v", wrongInbox, err)
 	}
 	if _, err := invitations.Accept(ctx, space.AcceptInvitationCommand{
@@ -320,7 +320,7 @@ func TestSpaceInvitationRequiresExactRecentEmailProofAndReplaysAcceptance(t *tes
 
 	inviteeID, _ := seedIdentityUser(t, ctx, store, "invitee@example.com", 0)
 	googleSession := createIdentityTestSession(t, ctx, store, inviteeID, identity.GoogleMethod)
-	inbox, err := invitations.ListForUser(ctx, inviteeID, googleSession)
+	inbox, err := store.ListUserInvitations(ctx, inviteeID, googleSession)
 	if err != nil {
 		t.Fatalf("list Google inbox: %v", err)
 	}
@@ -443,7 +443,7 @@ func TestSpaceInvitationAlreadyMemberUnchangedAndDatabaseTimeExpiry(t *testing.T
 	if !accepted.AlreadyMember || accepted.CanManageMembers || accepted.CanEnrollMachines {
 		t.Fatalf("already member result = %#v", accepted)
 	}
-	alreadyMemberProjection, err := invitations.LoadForUser(ctx, issued.InvitationID, userID, sessions[0])
+	alreadyMemberProjection, err := store.LoadInvitationForUser(ctx, issued.InvitationID, userID, sessions[0])
 	if err != nil {
 		t.Fatalf("load already-member projection: %v", err)
 	}
@@ -540,7 +540,7 @@ func TestInvitationResendCooldownReplayAndRevoke(t *testing.T) {
 		t.Fatalf("fresh resend after revoke = %v", err)
 	}
 	userID, sessions := seedIdentityUser(t, ctx, store, "resend@example.com", 1)
-	inbox, err := invitations.ListForUser(ctx, userID, sessions[0])
+	inbox, err := store.ListUserInvitations(ctx, userID, sessions[0])
 	if err != nil || len(inbox.Invitations) != 0 {
 		t.Fatalf("revoked inbox = %#v, %v", inbox, err)
 	}
@@ -645,7 +645,7 @@ func TestTargetedInvitationProjectsOnlyExactOwnerAndTerminalTruth(t *testing.T) 
 	}
 	ownerID, _ := seedIdentityUser(t, ctx, store, "targeted@example.com", 0)
 	providerSession := createIdentityTestSession(t, ctx, store, ownerID, identity.GoogleMethod)
-	pending, err := invitations.LoadForUser(ctx, issued.InvitationID, ownerID, providerSession)
+	pending, err := store.LoadInvitationForUser(ctx, issued.InvitationID, ownerID, providerSession)
 	if err != nil {
 		t.Fatalf("load pending projection: %v", err)
 	}
@@ -660,7 +660,7 @@ func TestTargetedInvitationProjectsOnlyExactOwnerAndTerminalTruth(t *testing.T) 
 	}
 	wrongID, wrongSessions := seedIdentityUser(t, ctx, store, "other-targeted@example.com", 1)
 	for _, unavailableID := range []string{issued.InvitationID, uuid.NewString()} {
-		if _, err := invitations.LoadForUser(ctx, unavailableID, wrongID, wrongSessions[0]); !errors.Is(err, space.ErrInvitationUnavailable) {
+		if _, err := store.LoadInvitationForUser(ctx, unavailableID, wrongID, wrongSessions[0]); !errors.Is(err, space.ErrInvitationUnavailable) {
 			t.Fatalf("non-owner projection %s = %v", unavailableID, err)
 		}
 	}
@@ -683,7 +683,7 @@ func TestTargetedInvitationProjectsOnlyExactOwnerAndTerminalTruth(t *testing.T) 
 	`, acceptedByOther.InvitationID, manager.UserID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := invitations.LoadForUser(ctx, acceptedByOther.InvitationID, otherOwnerID, otherOwnerSessions[0]); !errors.Is(err, space.ErrInvitationUnavailable) {
+	if _, err := store.LoadInvitationForUser(ctx, acceptedByOther.InvitationID, otherOwnerID, otherOwnerSessions[0]); !errors.Is(err, space.ErrInvitationUnavailable) {
 		t.Fatalf("accepted-by-other owner projection = %v", err)
 	}
 	if _, err := invitations.Accept(ctx, space.AcceptInvitationCommand{
@@ -710,7 +710,7 @@ func TestTargetedInvitationProjectsOnlyExactOwnerAndTerminalTruth(t *testing.T) 
 	}); err != nil {
 		t.Fatal(err)
 	}
-	accepted, err := invitations.LoadForUser(ctx, issued.InvitationID, ownerID, emailSession)
+	accepted, err := store.LoadInvitationForUser(ctx, issued.InvitationID, ownerID, emailSession)
 	if err != nil {
 		t.Fatalf("load accepted projection: %v", err)
 	}
@@ -726,7 +726,7 @@ func TestTargetedInvitationProjectsOnlyExactOwnerAndTerminalTruth(t *testing.T) 
 	if _, err := pool.Exec(ctx, `update space_memberships set revoked_at=clock_timestamp() where space_id=$1 and user_id=$2`, manager.SpaceID, ownerID); err != nil {
 		t.Fatal(err)
 	}
-	former, err := invitations.LoadForUser(ctx, issued.InvitationID, ownerID, emailSession)
+	former, err := store.LoadInvitationForUser(ctx, issued.InvitationID, ownerID, emailSession)
 	if err != nil || former.CurrentMember {
 		t.Fatalf("former projection = %#v, %v", former, err)
 	}
@@ -756,7 +756,7 @@ func TestTargetedInvitationProjectsOnlyExactOwnerAndTerminalTruth(t *testing.T) 
 		} else if _, err := pool.Exec(ctx, `update space_invitations set created_at=created_at-interval '8 days', expires_at=expires_at-interval '8 days' where invitation_id=$1`, terminal.InvitationID); err != nil {
 			t.Fatal(err)
 		}
-		projected, err := invitations.LoadForUser(ctx, terminal.InvitationID, terminalOwner, terminalSession)
+		projected, err := store.LoadInvitationForUser(ctx, terminal.InvitationID, terminalOwner, terminalSession)
 		if err != nil || projected.State != state {
 			t.Fatalf("%s projection = %#v, %v", state, projected, err)
 		}

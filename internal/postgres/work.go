@@ -22,7 +22,8 @@ func (s *Store) CreateWork(ctx context.Context, command work.CreateCommand) (wor
 	if strings.TrimSpace(command.SpaceID) == "" || strings.TrimSpace(command.CreatorUserID) == "" {
 		return work.Work{}, errors.New("space and creator are required")
 	}
-	if err := work.ValidateIdempotencyKey(command.IdempotencyKey); err != nil {
+	idempotencyKey, err := work.NormalizeIdempotencyKey(command.IdempotencyKey)
+	if err != nil {
 		return work.Work{}, err
 	}
 	digest := work.CreateDigest(command.SpaceID, command.CreatorUserID, goal)
@@ -40,12 +41,12 @@ func (s *Store) CreateWork(ctx context.Context, command work.CreateCommand) (wor
 	row, err := queries.CreateWork(ctx, dbsqlc.CreateWorkParams{
 		WorkID: uuid.NewString(), SpaceID: command.SpaceID, Goal: goal,
 		OwnerUserID: command.CreatorUserID, CreatorUserID: command.CreatorUserID,
-		CreateIdempotencyKey: command.IdempotencyKey, CreateRequestDigest: digest[:],
+		CreateIdempotencyKey: idempotencyKey, CreateRequestDigest: digest[:],
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		existing, loadErr := queries.FindWorkByCreateIdempotency(ctx, dbsqlc.FindWorkByCreateIdempotencyParams{
 			SpaceID: command.SpaceID, CreatorUserID: command.CreatorUserID,
-			CreateIdempotencyKey: command.IdempotencyKey,
+			CreateIdempotencyKey: idempotencyKey,
 		})
 		if loadErr != nil {
 			return work.Work{}, fmt.Errorf("load idempotent work creation: %w", loadErr)
@@ -197,7 +198,8 @@ func (s *Store) AcceptWorkReview(ctx context.Context, command work.AcceptReviewC
 		strings.TrimSpace(command.ReviewID) == "" || strings.TrimSpace(command.AcceptedBy) == "" {
 		return errors.New("work, space, review, and accepting member are required")
 	}
-	if err := work.ValidateIdempotencyKey(command.IdempotencyKey); err != nil {
+	idempotencyKey, err := work.NormalizeIdempotencyKey(command.IdempotencyKey)
+	if err != nil {
 		return err
 	}
 	if _, err := uuid.Parse(command.ReviewID); err != nil {
@@ -219,7 +221,7 @@ func (s *Store) AcceptWorkReview(ctx context.Context, command work.AcceptReviewC
 		ctx,
 		dbsqlc.FindWorkReviewAcceptanceByIdempotencyParams{
 			WorkID: command.WorkID, SpaceID: command.SpaceID,
-			AcceptedByUserID: command.AcceptedBy, AcceptIdempotencyKey: command.IdempotencyKey,
+			AcceptedByUserID: command.AcceptedBy, AcceptIdempotencyKey: idempotencyKey,
 		},
 	)
 	if err == nil {
@@ -262,7 +264,7 @@ func (s *Store) AcceptWorkReview(ctx context.Context, command work.AcceptReviewC
 	}
 	if resultCheck.AcceptedAt.Valid {
 		if resultCheck.AcceptedByUserID == command.AcceptedBy &&
-			resultCheck.AcceptIdempotencyKey == command.IdempotencyKey &&
+			resultCheck.AcceptIdempotencyKey == idempotencyKey &&
 			bytes.Equal(resultCheck.AcceptRequestDigest, requestDigest[:]) {
 			if err := transaction.Commit(ctx); err != nil {
 				return fmt.Errorf("commit concurrent Work review acceptance replay: %w", err)
@@ -279,7 +281,7 @@ func (s *Store) AcceptWorkReview(ctx context.Context, command work.AcceptReviewC
 	}
 
 	rows, err := queries.AcceptWorkResultCheck(ctx, dbsqlc.AcceptWorkResultCheckParams{
-		AcceptedByUserID: command.AcceptedBy, AcceptIdempotencyKey: command.IdempotencyKey,
+		AcceptedByUserID: command.AcceptedBy, AcceptIdempotencyKey: idempotencyKey,
 		AcceptRequestDigest: requestDigest[:], WorkID: command.WorkID, ReviewID: command.ReviewID,
 	})
 	if err != nil {
@@ -302,7 +304,8 @@ func (s *Store) AppendWorkMessage(ctx context.Context, command work.AppendMessag
 	if err := work.ValidateMessage(command.Text); err != nil {
 		return work.Message{}, err
 	}
-	if err := work.ValidateIdempotencyKey(command.IdempotencyKey); err != nil {
+	idempotencyKey, err := work.NormalizeIdempotencyKey(command.IdempotencyKey)
+	if err != nil {
 		return work.Message{}, err
 	}
 	digest := work.MessageDigest(command.WorkID, command.AuthorUserID, command.Text)
@@ -326,7 +329,7 @@ func (s *Store) AppendWorkMessage(ctx context.Context, command work.AppendMessag
 
 	existing, err := queries.FindWorkMessageByIdempotency(ctx, dbsqlc.FindWorkMessageByIdempotencyParams{
 		WorkID: command.WorkID, AuthorUserID: command.AuthorUserID,
-		IdempotencyKey: command.IdempotencyKey,
+		IdempotencyKey: idempotencyKey,
 	})
 	if err == nil {
 		if !bytes.Equal(existing.RequestDigest, digest[:]) {
@@ -358,7 +361,7 @@ func (s *Store) AppendWorkMessage(ctx context.Context, command work.AppendMessag
 	row, err := queries.CreateWorkMessage(ctx, dbsqlc.CreateWorkMessageParams{
 		MessageID: uuid.NewString(), WorkID: command.WorkID,
 		AuthorUserID: command.AuthorUserID, Text: command.Text, InputSeq: inputSeq,
-		IdempotencyKey: command.IdempotencyKey, RequestDigest: digest[:],
+		IdempotencyKey: idempotencyKey, RequestDigest: digest[:],
 	})
 	if err != nil {
 		return work.Message{}, fmt.Errorf("insert work message: %w", err)

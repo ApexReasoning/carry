@@ -5,7 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
-	"strings"
+	"fmt"
 
 	"github.com/google/uuid"
 )
@@ -43,8 +43,8 @@ func (creator *Creator) Create(ctx context.Context, request CreateSpaceRequest) 
 	if uuid.Validate(request.UserID) != nil {
 		return CreatedSpace{}, ErrForbidden
 	}
-	key := strings.TrimSpace(request.IdempotencyKey)
-	if key == "" || len(key) > 255 {
+	key, validKey := normalizeCommandKey(request.IdempotencyKey)
+	if !validKey {
 		return CreatedSpace{}, ErrIdempotencyConflict
 	}
 	name, slug, err := NormalizeSpaceName(request.Name, request.Suffix)
@@ -125,7 +125,7 @@ func spaceCreationDigest(name string, suffix int) ([sha256.Size]byte, error) {
 		Suffix: suffix,
 	})
 	if err != nil {
-		return [sha256.Size]byte{}, err
+		return [sha256.Size]byte{}, fmt.Errorf("marshal Space creation digest: %w", err)
 	}
 	return sha256.Sum256(encoded), nil
 }

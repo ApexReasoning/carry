@@ -131,7 +131,7 @@ func parseTrustedProxyCIDRs(value string) ([]netip.Prefix, error) {
 	return prefixes, nil
 }
 
-func run(ctx context.Context, arguments []string, stdout io.Writer, stderr io.Writer) error {
+func run(ctx context.Context, arguments []string, _ io.Writer, stderr io.Writer) error {
 	if len(arguments) >= 2 && arguments[0] == "pki" && arguments[1] == "init" {
 		parsed, err := parsePKIInitConfig(arguments[2:], stderr)
 		if err != nil {
@@ -241,7 +241,14 @@ func run(ctx context.Context, arguments []string, stdout io.Writer, stderr io.Wr
 	if err != nil {
 		return fmt.Errorf("compose User identity routes: %w", err)
 	}
-	userSpaceRoutes, err := carryserver.NewUserSpaceRoutesWithInvitations(spaceCreator, spaceInvitations, store, credentials, parsed.externalOrigin)
+	userSpaceRoutes, err := carryserver.NewUserSpaceRoutesWithInvitations(
+		spaceCreator,
+		spaceInvitations,
+		store,
+		store,
+		credentials,
+		parsed.externalOrigin,
+	)
 	if err != nil {
 		return fmt.Errorf("compose User Space routes: %w", err)
 	}

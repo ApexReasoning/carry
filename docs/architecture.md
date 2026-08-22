@@ -136,6 +136,14 @@ Agent 与外部内容只能在当前 Work 合同允许的范围内提议改变�
 
 ## 7. 依赖方向与 package 标准
 
+下一次遇到新的 owner 行为时，按同一个决定落位：
+
+1. owner package 拥有产品词汇、恢复错误、纯归一化与 digest 规则、command 和 result；
+2. PostgreSQL adapter 实现所有依赖数据库事实的锁、数据库时间、重放、当前权限、winner 与状态转移；事实 ownership 不要求把物理事务搬进 owner package；
+3. interface 放在实际消费方，只列这个消费方当前调用的最小方法集；
+4. 只有一个行为需要组合多个 capability 或一次外部后果时，才建立 stateful owner behavior；
+5. 不为了让 owner 看起来拥有行为而保留纯转发方法。删除转发不得把 owner 规则推入 server 或 PostgreSQL；纯规则仍由 owner 的函数、构造或非转发行为拥有。
+
 ```text
 cmd/carry-server → internal/server → owner packages → internal/postgres
 cmd/carry        → internal/cli    → internal/host

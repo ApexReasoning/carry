@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -30,18 +31,22 @@ type RemoveMemberCommand struct {
 }
 
 func NewRemoveMemberCommand(request RemoveMemberRequest) (RemoveMemberCommand, error) {
+	idempotencyKey, validKey := normalizeCommandKey(request.IdempotencyKey)
 	if uuid.Validate(request.SpaceID) != nil || uuid.Validate(request.ActorUserID) != nil ||
 		uuid.Validate(request.TargetUserID) != nil ||
 		(request.SuccessorUserID != "" && uuid.Validate(request.SuccessorUserID) != nil) ||
-		!validCommandKey(request.IdempotencyKey) {
+		!validKey {
 		return RemoveMemberCommand{}, ErrInvalidMemberRemoval
 	}
-	encoded, _ := json.Marshal(struct {
+	encoded, err := json.Marshal(struct {
 		SpaceID, ActorUserID, TargetUserID, SuccessorUserID, IdempotencyKey string
-	}{request.SpaceID, request.ActorUserID, request.TargetUserID, request.SuccessorUserID, request.IdempotencyKey})
+	}{request.SpaceID, request.ActorUserID, request.TargetUserID, request.SuccessorUserID, idempotencyKey})
+	if err != nil {
+		return RemoveMemberCommand{}, fmt.Errorf("digest member removal: %w", err)
+	}
 	return RemoveMemberCommand{
 		SpaceID: request.SpaceID, ActorUserID: request.ActorUserID, TargetUserID: request.TargetUserID,
-		SuccessorUserID: request.SuccessorUserID, IdempotencyKey: request.IdempotencyKey,
+		SuccessorUserID: request.SuccessorUserID, IdempotencyKey: idempotencyKey,
 		RequestDigest: sha256.Sum256(encoded),
 	}, nil
 }

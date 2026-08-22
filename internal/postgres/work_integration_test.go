@@ -29,7 +29,7 @@ func TestConcurrentWorkCreationReturnsOneDurableWork(t *testing.T) {
 	}
 	command := work.CreateCommand{
 		SpaceID: bootstrap.SpaceID, CreatorUserID: bootstrap.UserID,
-		Goal: "Track supplier lead times", IdempotencyKey: "create-supplier-work",
+		Goal: "Track supplier lead times", IdempotencyKey: "  create-supplier-work  ",
 	}
 
 	const callers = 8
@@ -70,6 +70,16 @@ func TestConcurrentWorkCreationReturnsOneDurableWork(t *testing.T) {
 			t.Fatal("new Work did not report unapplied input")
 		}
 	}
+	canonicalReplay := command
+	canonicalReplay.IdempotencyKey = "create-supplier-work"
+	replayed, err := store.CreateWork(ctx, canonicalReplay)
+	if err != nil {
+		t.Fatalf("replay Work with canonical key: %v", err)
+	}
+	if replayed.WorkID != workID {
+		t.Fatalf("canonical replay Work ID = %s, want %s", replayed.WorkID, workID)
+	}
+
 	var count int
 	if err := pool.QueryRow(ctx, `select count(*) from works`).Scan(&count); err != nil {
 		t.Fatalf("count Works: %v", err)

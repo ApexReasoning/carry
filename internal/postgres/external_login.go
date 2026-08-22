@@ -47,9 +47,11 @@ func (s *Store) CreateExternalLogin(
 	if err != nil {
 		return time.Time{}, fmt.Errorf("count live external logins: %w", err)
 	}
-	if sourceCount >= identity.ExternalLoginSourceAdmissionLimit ||
-		globalCount >= identity.ExternalLoginGlobalAdmissionLimit {
-		return time.Time{}, identity.ErrExternalLoginRateLimited
+	if sourceCount >= identity.ExternalLoginSourceAdmissionLimit {
+		return time.Time{}, identity.ErrExternalLoginSourceAdmissionLimited
+	}
+	if globalCount >= identity.ExternalLoginGlobalAdmissionLimit {
+		return time.Time{}, identity.ErrExternalLoginGlobalAdmissionLimited
 	}
 	targetUserID, _ := nullablePostgresUUID("")
 	initiatingSessionID, _ := nullablePostgresUUID("")

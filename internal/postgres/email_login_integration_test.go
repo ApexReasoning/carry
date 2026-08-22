@@ -200,9 +200,9 @@ func TestConcurrentEmailChallengeRequestsEnforceSharedSourceLimitAcrossEmails(t 
 	sourceDigest := credentials.SourceDigest("198.51.100.27")
 
 	start := make(chan struct{})
-	results := make(chan error, maxSourceChallengesPerHour+12)
+	results := make(chan error, identity.EmailSourceChallengeLimitPerHour+12)
 	var wait sync.WaitGroup
-	for index := range maxSourceChallengesPerHour + 12 {
+	for index := range identity.EmailSourceChallengeLimitPerHour + 12 {
 		wait.Add(1)
 		go func() {
 			defer wait.Done()
@@ -233,21 +233,21 @@ func TestConcurrentEmailChallengeRequestsEnforceSharedSourceLimitAcrossEmails(t 
 		switch {
 		case err == nil:
 			succeeded++
-		case errors.Is(err, identity.ErrEmailRateLimited):
+		case errors.Is(err, identity.ErrEmailSourceAdmissionLimited):
 			limited++
 		default:
 			t.Fatalf("parallel source-limited request: %v", err)
 		}
 	}
-	if succeeded != maxSourceChallengesPerHour || limited != 12 {
+	if succeeded != identity.EmailSourceChallengeLimitPerHour || limited != 12 {
 		t.Fatalf("source outcomes = %d succeeded, %d limited", succeeded, limited)
 	}
 	var persisted int
 	if err := pool.QueryRow(ctx, `select count(*) from email_login_challenges where source_digest = $1`, sourceDigest[:]).Scan(&persisted); err != nil {
 		t.Fatalf("count source challenges: %v", err)
 	}
-	if persisted != maxSourceChallengesPerHour {
-		t.Fatalf("persisted source challenges = %d, want %d", persisted, maxSourceChallengesPerHour)
+	if persisted != identity.EmailSourceChallengeLimitPerHour {
+		t.Fatalf("persisted source challenges = %d, want %d", persisted, identity.EmailSourceChallengeLimitPerHour)
 	}
 }
 

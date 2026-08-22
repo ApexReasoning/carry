@@ -302,7 +302,8 @@ func (s *Store) RequestWorkRetry(ctx context.Context, command work.RetryCommand)
 		strings.TrimSpace(command.RequestedBy) == "" {
 		return errors.New("work, space, and requesting member are required")
 	}
-	if err := work.ValidateIdempotencyKey(command.IdempotencyKey); err != nil {
+	idempotencyKey, err := work.NormalizeIdempotencyKey(command.IdempotencyKey)
+	if err != nil {
 		return err
 	}
 	transaction, err := s.pool.Begin(ctx)
@@ -328,7 +329,7 @@ func (s *Store) RequestWorkRetry(ctx context.Context, command work.RetryCommand)
 	}
 
 	existingRequester, err := queries.FindRunRetryByIdempotency(ctx, dbsqlc.FindRunRetryByIdempotencyParams{
-		WorkID: command.WorkID, RetryIdempotencyKey: command.IdempotencyKey,
+		WorkID: command.WorkID, RetryIdempotencyKey: idempotencyKey,
 	})
 	if err == nil {
 		if existingRequester != command.RequestedBy {
@@ -351,7 +352,7 @@ func (s *Store) RequestWorkRetry(ctx context.Context, command work.RetryCommand)
 		return fmt.Errorf("lock retryable Run: %w", err)
 	}
 	rows, err := queries.RequestRunRetry(ctx, dbsqlc.RequestRunRetryParams{
-		RequestedByUserID: command.RequestedBy, RetryIdempotencyKey: command.IdempotencyKey,
+		RequestedByUserID: command.RequestedBy, RetryIdempotencyKey: idempotencyKey,
 		RunID: retryableRunID,
 	})
 	if err != nil {

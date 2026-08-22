@@ -21,16 +21,25 @@ const (
 	EmailCodeLifetime     = 5 * time.Minute
 	EmailCodeAttemptLimit = 5
 	EmailCodeResendDelay  = time.Minute
-	IdentityRootBytes     = 32
+	// EmailAddressChallengeLimitPerHour bounds accepted challenges for one canonical Email.
+	EmailAddressChallengeLimitPerHour = 5
+	// EmailSourceChallengeLimitPerHour bounds accepted challenges from one derived source.
+	EmailSourceChallengeLimitPerHour = 20
+	IdentityRootBytes                = 32
 )
 
 var (
-	ErrInvalidEmail            = errors.New("email address is invalid")
-	ErrInvalidCode             = errors.New("email code is invalid or expired")
-	ErrEmailRateLimited        = errors.New("email code requests are temporarily limited")
-	ErrEmailSubmissionRejected = errors.New("email code could not be submitted")
-	ErrEmailPayloadChanged     = errors.New("email submission payload changed")
-	ErrIdempotencyConflict     = errors.New("identity idempotency key was reused for a different request")
+	ErrInvalidEmail     = errors.New("email address is invalid")
+	ErrInvalidCode      = errors.New("email code is invalid or expired")
+	ErrEmailRateLimited = errors.New("email code requests are temporarily limited")
+	// These diagnostic causes preserve operator recovery while unwrapping to the
+	// one user recovery above. They never enter the public response body.
+	ErrEmailAddressAdmissionLimited = fmt.Errorf("email address admission limit: %w", ErrEmailRateLimited)
+	ErrEmailSourceAdmissionLimited  = fmt.Errorf("email source admission limit: %w", ErrEmailRateLimited)
+	ErrEmailResendDelayed           = fmt.Errorf("email resend delay: %w", ErrEmailRateLimited)
+	ErrEmailSubmissionRejected      = errors.New("email code could not be submitted")
+	ErrEmailPayloadChanged          = errors.New("email submission payload changed")
+	ErrIdempotencyConflict          = errors.New("identity idempotency key was reused for a different request")
 )
 
 type Credentials struct {
@@ -51,7 +60,11 @@ func ParseIdentityRoot(encoded string) (Credentials, error) {
 	if err != nil {
 		return Credentials{}, errors.New("identity root must be raw URL-safe base64")
 	}
-	return NewCredentials(root)
+	credentials, err := NewCredentials(root)
+	if err != nil {
+		return Credentials{}, fmt.Errorf("parse identity root: %w", err)
+	}
+	return credentials, nil
 }
 
 func CanonicalEmail(value string) (string, error) {

@@ -37,14 +37,18 @@ func TestValidateMessagePreservesAuthoredText(t *testing.T) {
 	}
 }
 
-func TestValidateIdempotencyKey(t *testing.T) {
+func TestNormalizeIdempotencyKeyReturnsTheOnlyReplayIdentity(t *testing.T) {
 	t.Parallel()
 
-	if err := ValidateIdempotencyKey("request-1"); err != nil {
-		t.Fatalf("validate idempotency key: %v", err)
+	key, err := NormalizeIdempotencyKey("  request-1  ")
+	if err != nil {
+		t.Fatalf("normalize idempotency key: %v", err)
+	}
+	if key != "request-1" {
+		t.Fatalf("normalized replay identity = %q, want request-1", key)
 	}
 	for _, invalid := range []string{"", "   ", "key\x00hidden", string([]byte{0xff}), strings.Repeat("x", MaxIdempotencyKeyBytes+1)} {
-		if err := ValidateIdempotencyKey(invalid); !errors.Is(err, ErrInvalidIdempotency) {
+		if _, err := NormalizeIdempotencyKey(invalid); !errors.Is(err, ErrInvalidIdempotency) {
 			t.Errorf("invalid idempotency key error = %v", err)
 		}
 	}

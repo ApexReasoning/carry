@@ -5,9 +5,11 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/url"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/ApexReasoning/carry/internal/identity"
 	"github.com/google/uuid"
@@ -61,9 +63,6 @@ type InvitationPersistence interface {
 	InvitationRecipient(context.Context, string, string, string) (string, error)
 	PrepareInvitationResend(context.Context, PrepareInvitationResendCommand) (IssuedInvitation, error)
 	RecordInvitationSubmission(context.Context, RecordInvitationSubmissionCommand) (InvitationSubmission, error)
-	ListSpaceInvitations(context.Context, string, string) ([]ManagedInvitation, error)
-	ListUserInvitations(context.Context, string, string) (InvitationInbox, error)
-	LoadInvitationForUser(context.Context, string, string, string) (RecipientInvitation, error)
 	RevokeInvitation(context.Context, RevokeInvitationCommand) error
 	AcceptInvitation(context.Context, AcceptInvitationCommand) (AcceptedInvitation, error)
 }
@@ -131,17 +130,17 @@ type IssueInvitationRequest struct {
 
 func (invitations *Invitations) Issue(ctx context.Context, request IssueInvitationRequest) (IssuedInvitation, error) {
 	recipient, err := identity.CanonicalEmail(request.RecipientEmail)
+	idempotencyKey, validKey := normalizeCommandKey(request.IdempotencyKey)
 	if err != nil ||
 		uuid.Validate(request.SpaceID) != nil ||
 		uuid.Validate(request.ActorUserID) != nil ||
-		!validCommandKey(request.IdempotencyKey) {
+		!validKey {
 		return IssuedInvitation{}, ErrInvalidInvitation
 	}
-	requestDigest := digest(struct {
-		RecipientEmail    string `json:"recipient_email"`
-		CanManageMembers  bool   `json:"can_manage_members"`
-		CanEnrollMachines bool   `json:"can_enroll_machines"`
-	}{recipient, request.CanManageMembers, request.CanEnrollMachines})
+	requestDigest, err := invitationIssueDigest(recipient, request.CanManageMembers, request.CanEnrollMachines)
+	if err != nil {
+		return IssuedInvitation{}, fmt.Errorf("digest invitation issue: %w", err)
+	}
 	invitationID, submissionID := uuid.NewString(), uuid.NewString()
 	providerKey := "space-invitation/" + submissionID
 	destinationURL, err := InvitationURL(invitations.origin, invitationID)
@@ -161,7 +160,7 @@ func (invitations *Invitations) Issue(ctx context.Context, request IssueInvitati
 		InvitationID: invitationID, SubmissionID: submissionID,
 		SpaceID: request.SpaceID, ActorUserID: request.ActorUserID, RecipientEmail: recipient,
 		CanManageMembers: request.CanManageMembers, CanEnrollMachines: request.CanEnrollMachines,
-		IdempotencyKey: request.IdempotencyKey, RequestDigest: requestDigest,
+		IdempotencyKey: idempotencyKey, RequestDigest: requestDigest,
 		ProviderIdempotencyKey: providerKey, PayloadDigest: payloadDigest,
 		ExpiresIn: InvitationLifetime,
 	})
@@ -176,15 +175,17 @@ type ResendInvitationRequest struct {
 }
 
 func (invitations *Invitations) Resend(ctx context.Context, request ResendInvitationRequest) (IssuedInvitation, error) {
+	idempotencyKey, validKey := normalizeCommandKey(request.IdempotencyKey)
 	if uuid.Validate(request.SpaceID) != nil ||
 		uuid.Validate(request.InvitationID) != nil ||
 		uuid.Validate(request.ActorUserID) != nil ||
-		!validCommandKey(request.IdempotencyKey) {
+		!validKey {
 		return IssuedInvitation{}, ErrInvalidInvitation
 	}
-	digestValue := digest(struct {
-		InvitationID string `json:"invitation_id"`
-	}{request.InvitationID})
+	digestValue, err := invitationResendDigest(request.InvitationID)
+	if err != nil {
+		return IssuedInvitation{}, fmt.Errorf("digest invitation resend: %w", err)
+	}
 	submissionID := uuid.NewString()
 	providerKey := "space-invitation/" + submissionID
 	recipient, err := invitations.persistence.InvitationRecipient(ctx, request.SpaceID, request.InvitationID, request.ActorUserID)
@@ -206,7 +207,7 @@ func (invitations *Invitations) Resend(ctx context.Context, request ResendInvita
 	}
 	issued, err := invitations.persistence.PrepareInvitationResend(ctx, PrepareInvitationResendCommand{
 		SpaceID: request.SpaceID, InvitationID: request.InvitationID, ActorUserID: request.ActorUserID,
-		SubmissionID: submissionID, IdempotencyKey: request.IdempotencyKey, RequestDigest: digestValue,
+		SubmissionID: submissionID, IdempotencyKey: idempotencyKey, RequestDigest: digestValue,
 		ProviderIdempotencyKey: providerKey, PayloadDigest: payloadDigest,
 	})
 	if err != nil {
@@ -246,25 +247,30 @@ func (invitations *Invitations) submit(ctx context.Context, issued IssuedInvitat
 	return issued, nil
 }
 
-func (invitations *Invitations) ListForSpace(ctx context.Context, userID, spaceID string) ([]ManagedInvitation, error) {
-	return invitations.persistence.ListSpaceInvitations(ctx, userID, spaceID)
-}
-func (invitations *Invitations) ListForUser(ctx context.Context, userID, sessionID string) (InvitationInbox, error) {
-	return invitations.persistence.ListUserInvitations(ctx, userID, sessionID)
-}
-func (invitations *Invitations) LoadForUser(ctx context.Context, invitationID, userID, sessionID string) (RecipientInvitation, error) {
-	return invitations.persistence.LoadInvitationForUser(ctx, invitationID, userID, sessionID)
-}
 func (invitations *Invitations) Revoke(ctx context.Context, command RevokeInvitationCommand) error {
-	command.RequestDigest = digest(struct {
-		InvitationID string `json:"invitation_id"`
-	}{command.InvitationID})
+	idempotencyKey, validKey := normalizeCommandKey(command.IdempotencyKey)
+	if !validKey {
+		return ErrInvalidInvitation
+	}
+	requestDigest, err := invitationRevokeDigest(command.InvitationID)
+	if err != nil {
+		return fmt.Errorf("digest invitation revoke: %w", err)
+	}
+	command.IdempotencyKey = idempotencyKey
+	command.RequestDigest = requestDigest
 	return invitations.persistence.RevokeInvitation(ctx, command)
 }
 func (invitations *Invitations) Accept(ctx context.Context, command AcceptInvitationCommand) (AcceptedInvitation, error) {
-	command.RequestDigest = digest(struct {
-		InvitationID string `json:"invitation_id"`
-	}{command.InvitationID})
+	idempotencyKey, validKey := normalizeCommandKey(command.IdempotencyKey)
+	if !validKey {
+		return AcceptedInvitation{}, ErrInvalidInvitation
+	}
+	requestDigest, err := invitationAcceptDigest(command.InvitationID)
+	if err != nil {
+		return AcceptedInvitation{}, fmt.Errorf("digest invitation acceptance: %w", err)
+	}
+	command.IdempotencyKey = idempotencyKey
+	command.RequestDigest = requestDigest
 	return invitations.persistence.AcceptInvitation(ctx, command)
 }
 
@@ -339,10 +345,49 @@ type AcceptedInvitation struct {
 	CanManageMembers, CanEnrollMachines, AlreadyMember bool
 }
 
-func digest(value any) [sha256.Size]byte {
-	encoded, _ := json.Marshal(value)
-	return sha256.Sum256(encoded)
+func invitationIssueDigest(recipientEmail string, canManageMembers, canEnrollMachines bool) ([sha256.Size]byte, error) {
+	encoded, err := json.Marshal(struct {
+		RecipientEmail    string `json:"recipient_email"`
+		CanManageMembers  bool   `json:"can_manage_members"`
+		CanEnrollMachines bool   `json:"can_enroll_machines"`
+	}{recipientEmail, canManageMembers, canEnrollMachines})
+	if err != nil {
+		return [sha256.Size]byte{}, fmt.Errorf("marshal invitation issue digest: %w", err)
+	}
+	return sha256.Sum256(encoded), nil
 }
-func validCommandKey(value string) bool {
-	return strings.TrimSpace(value) != "" && len(value) <= 255
+
+func invitationResendDigest(invitationID string) ([sha256.Size]byte, error) {
+	encoded, err := json.Marshal(struct {
+		InvitationID string `json:"invitation_id"`
+	}{invitationID})
+	if err != nil {
+		return [sha256.Size]byte{}, fmt.Errorf("marshal invitation resend digest: %w", err)
+	}
+	return sha256.Sum256(encoded), nil
+}
+
+func invitationRevokeDigest(invitationID string) ([sha256.Size]byte, error) {
+	encoded, err := json.Marshal(struct {
+		InvitationID string `json:"invitation_id"`
+	}{invitationID})
+	if err != nil {
+		return [sha256.Size]byte{}, fmt.Errorf("marshal invitation revoke digest: %w", err)
+	}
+	return sha256.Sum256(encoded), nil
+}
+
+func invitationAcceptDigest(invitationID string) ([sha256.Size]byte, error) {
+	encoded, err := json.Marshal(struct {
+		InvitationID string `json:"invitation_id"`
+	}{invitationID})
+	if err != nil {
+		return [sha256.Size]byte{}, fmt.Errorf("marshal invitation acceptance digest: %w", err)
+	}
+	return sha256.Sum256(encoded), nil
+}
+
+func normalizeCommandKey(value string) (string, bool) {
+	key := strings.TrimSpace(value)
+	return key, key != "" && len(key) <= 255 && utf8.ValidString(key) && !strings.ContainsRune(key, 0)
 }

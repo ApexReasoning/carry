@@ -47,7 +47,7 @@ func TestExternalLoginAdmissionCapsConcurrentSourceAndReclaimsExpiry(t *testing.
 		switch {
 		case err == nil:
 			succeeded++
-		case errors.Is(err, identity.ErrExternalLoginRateLimited):
+		case errors.Is(err, identity.ErrExternalLoginSourceAdmissionLimited):
 			limited++
 		default:
 			t.Fatalf("external login admission: %v", err)
@@ -144,7 +144,7 @@ func TestExternalLoginGlobalAdmissionHasOneConcurrentWinner(t *testing.T) {
 		switch {
 		case err == nil:
 			succeeded++
-		case errors.Is(err, identity.ErrExternalLoginRateLimited):
+		case errors.Is(err, identity.ErrExternalLoginGlobalAdmissionLimited):
 			limited++
 		default:
 			t.Fatalf("global external login admission: %v", err)

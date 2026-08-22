@@ -120,12 +120,25 @@ func NewUserSpaceRoutes(creator SpaceCreator) (*UserSpaceRoutes, error) {
 	return &UserSpaceRoutes{spaces: spaceCreationAPI{creator: creator}}, nil
 }
 
-func NewUserSpaceRoutesWithInvitations(creator SpaceCreator, invitations SpaceInvitations, members SpaceMembers, credentials identity.Credentials, origin ExternalOrigin) (*UserSpaceRoutes, error) {
+func NewUserSpaceRoutesWithInvitations(
+	creator SpaceCreator,
+	invitations SpaceInvitationCommands,
+	invitationQueries SpaceInvitationQueries,
+	members SpaceMembers,
+	credentials identity.Credentials,
+	origin ExternalOrigin,
+) (*UserSpaceRoutes, error) {
 	routes, err := NewUserSpaceRoutes(creator)
-	if err != nil || invitations == nil || members == nil || origin.value == "" {
+	if err != nil || invitations == nil || invitationQueries == nil || members == nil || origin.value == "" {
 		return nil, errors.New("User Space member route dependencies are required")
 	}
-	api := &spaceInvitationAPI{invitations: invitations, members: members, credentials: credentials, origin: origin}
+	api := &spaceInvitationAPI{
+		invitations:       invitations,
+		invitationQueries: invitationQueries,
+		members:           members,
+		credentials:       credentials,
+		origin:            origin,
+	}
 	routes.invitations = api
 	return routes, nil
 }

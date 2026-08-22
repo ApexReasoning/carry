@@ -857,7 +857,14 @@ func composeExternalLoginTestAPI(
 	if err != nil {
 		t.Fatalf("compose Space invitations: %v", err)
 	}
-	spaceRoutes, err := carryserver.NewUserSpaceRoutesWithInvitations(spaceCreator, spaceInvitations, store, credentials, origin)
+	spaceRoutes, err := carryserver.NewUserSpaceRoutesWithInvitations(
+		spaceCreator,
+		spaceInvitations,
+		store,
+		store,
+		credentials,
+		origin,
+	)
 	if err != nil {
 		t.Fatalf("compose User Space routes: %v", err)
 	}

@@ -1,6 +1,6 @@
 # Carry Agent Contract
 
-Current gate: **Issue #5 — pre-Node15 full-project review.** Node 14 is reopened for the corrective closure recorded in Issue #3; Node 15 research is paused, and no Node 15 production implementation may begin before this gate and its research/design audits pass.
+Current gate: **Issue #6 — non-Node pre-Node15 coherence corrective.** Issues #3/#5 and Node 14 are closed. Node 15 research and production remain paused until Issue #6 has one fresh coherence Gate, `make check`, one corrective commit, push, terminal CI, and closure; then Node 15 restarts from its simplified journey rather than the paused design.
 
 Carry is an AI teammate: a person hands a responsibility over in carry.ai Web, a named Agent owns keeping it moving, and the Work stays true across Conversations, Agent sessions, Hosts, channels and time.
 
@@ -55,7 +55,7 @@ Forbidden without a new user loss, identity, lifecycle and authority boundary: `
 
 Before a Node starts, open one GitHub Issue. That Issue is the durable owner of the Node's journey freeze, research, evidence rows, canaries, design freeze and exact file budget. The repository never gains plan, review, audit, handoff or evidence documents.
 
-Every Node runs these gates in order; skipping one is a blocker. The executable procedures live in `docs/implementation.md`.
+Every Node runs these gates in order; skipping one is a blocker. The executable procedures live in `docs/implementation.md`. The only lighter path is a non-Node coherence corrective that satisfies every condition in `docs/implementation.md` §1; it uses one Issue, one fresh coherence Gate, `make check`, one corrective commit, push and terminal CI, and cannot carry a product journey or architecture migration.
 
 1. **Journey freeze** — the ten-field block in `docs/implementation.md` §2, recorded in the Issue. A product reviewer may reject it before any research.
 2. **Question-led research** — `docs/implementation.md` §3: a frozen question plus a disconfirming question, sources chosen by the relevance matrix rather than popularity, an exact read-only archaeology target in `/Users/zane/Dev/loop`, the eight-column evidence rows, and a real or explicitly blocked canary.

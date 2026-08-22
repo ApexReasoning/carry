@@ -10,7 +10,7 @@
 
 | # | 阻断 | 修法 |
 | --- | --- | --- |
-| B1 | 不同恢复方式被合并成一个错误；同一恢复方式被拆成多个同错分支；或安全/隐私要求刻意统一却没有注释 | 按恢复方式分组：不同恢复用不同错误，同一恢复用一个谓词，刻意统一写明约束 |
+| B1 | 对同一行动者，不同恢复方式被合并成一个错误；同一恢复方式被拆成多个同错分支；安全/隐私要求刻意统一却没有注释；或用户恢复合并后把运维所需的非敏感原因一起丢失 | 按行动者的恢复方式分组：用户恢复相同就保留一个公开错误；运维恢复不同时另留结构化诊断原因；刻意统一写明约束 |
 | B2 | 一个长条件被藏在 helper、方法或 `isValid` 里 | 展开并拆开，或让该 helper 成为一条有自己错误的 owner 规则 |
 | B3 | 一个 command / struct 字面量携带接收方拥有或可推导的事实 | 删掉这些字段 |
 | B4 | struct 字面量一行写多个字段 | 一行一个字段 |
@@ -82,11 +82,12 @@ if uuid.Validate(spaceID) != nil ||
 }
 ```
 
-完整规则只有三种情况：
+恢复方式以**收到这份错误并能采取行动的人**为准，不把用户与运维混成一个行动者。完整规则只有四种情况：
 
-1. 不同失败会触发不同恢复：保留独立分支与独立错误；
-2. 安全或隐私要求刻意隐藏失败细节：统一错误，并在函数上用一行注释解释不能区分的约束；
-3. 其余失败只有同一种恢复：在同一判定阶段合并成一个谓词、一个错误。若解析或锁读的数据依赖要求分阶段，可以保留多个分支，但仍须注释为什么调用方只能看到统一错误。
+1. 对同一行动者，不同失败会触发不同恢复：保留独立分支与独立错误；
+2. 安全或隐私要求刻意隐藏失败细节：统一公开错误，并在函数上用一行注释解释不能区分的约束；
+3. 用户恢复相同、但运维诊断与处置不同：公开错误仍统一，同时在决定边界留下不含私人值的结构化原因并由 transport/worker 记录；不得为 telemetry 扩大用户探测面，也不得把 global/source、address/source/resend 之类运维原因丢掉；
+4. 其余失败只有同一种恢复：在同一判定阶段合并成一个谓词、一个错误。若解析或锁读的数据依赖要求分阶段，可以保留多个分支，但仍须注释为什么调用方只能看到统一错误。
 
 不要把长条件藏进 `isValid`、`ok`、`check` 或 `verifyAll`。只有当 helper 本身是一条由 owner 命名、拥有明确错误与恢复的规则时才抽取。一个区间、一次准确重放相等判断等不可分割谓词可以自然使用 `&&`。
 
@@ -110,6 +111,10 @@ command := ReportProgressCommand{
 ```
 
 幂等键不自动属于调用方。要把它放进 command，必须先回答：接收方（Host 或 PostgreSQL）能不能从它已经拥有的事实推导出同一个键？能推导就删掉这个字段（B3）。只有当"这两次调用是同一次意图"只有调用方知道时，幂等键才是调用方拥有的事实，并且要在 diff 里写明这个理由。
+
+需要接纳幂等键时，第一次 owner 边界只做一次规范化：去掉两端 Unicode whitespace，再拒绝空值、超长、非法 UTF-8 与 NUL；随后 lock、lookup、write、replay 和 command 全部使用返回的规范值。禁止用 trim 后的值判断有效，却把原值继续持久化。transport 提前 trim 只改善 wire 体验，不替代 owner 规则。不同 owner 在自己旁边保留准确命名的窄函数，不建立跨 owner idempotency helper package。
+
+重放 digest 是 owner 对一条准确语义命令的身份定义。函数名必须说明是哪一种重放，使用无歧义编码，编码错误必须返回；禁止 `digest(any)`、忽略 marshal 错误，或为了去重建立跨 owner digest utility。两个 owner 采用同一种 length-prefix 或 JSON 编码可以重复少量代码，因为它们保护的是不同事实。
 
 构造函数由校验或不变量赚得，不由"把十个参数抄进十个字段"赚得。不保留字段相同的 request / command / params / input / row 结构体家族。
 
@@ -163,7 +168,9 @@ func (m *WorkManager) Update(ctx context.Context, in UpdateInput) error {
 }
 ```
 
-删掉，直接调用 owner。Interface 放在消费方，只包含它真正使用的最小方法集，不为"将来可能有第二个实现"创建。流程中的一个角色仍然是角色；一次临时计算仍然是局部值；一个数据库投影不自动成为 owner。
+删掉，直接调用准确 capability。Interface 放在消费方，只包含它真正使用的最小方法集，不为"将来可能有第二个实现"创建。流程中的一个角色仍然是角色；一次临时计算仍然是局部值；一个数据库投影不自动成为 owner。
+
+下一次判断 owner / PostgreSQL / service 形状时依次问：词汇、恢复错误和纯规则是否留在 owner；依赖数据库事实的权威是否仍由 PostgreSQL 事务执行；interface 是否位于实际消费方且最小；这个 stateful owner behavior 是否真的组合多个 capability 或外部后果；删掉它是否只会少一次转发。最后一题答"是"就删；但若方法派生 owner-owned canonical command、digest 或恢复，它不是纯转发，不能把这条规则下推到 adapter。
 
 依赖要赚得：新依赖必须移除比它引入更多的项目自有复杂度，并且当前就有消费者。
 
@@ -225,7 +232,11 @@ Handler 只做认证、解码、线格式校验、调用一个 owner 操作、�
 
 ## 12. TypeScript 与 React
 
-严格 TypeScript；不用 `any`、宽泛断言或重复生成的协议类型。一个组件渲染一个产品概念；一个 hook 拥有一个远端行为；route 组合 feature，不变成 controller。UI 状态用显式 union，不用互相作用的布尔；loading、empty、unavailable、error 由同一个权威远端状态派生。不在乐观状态里镜像 Server 权威。可访问名称说明动作及其后果；危险操作说明范围和未来影响。大组件按可见的产品责任拆，不拆成 `Header`/`Body`/`Footer` 的属性中转。
+严格 TypeScript；不用 `any`、宽泛断言或重复生成的协议类型。一个组件渲染一个产品概念；一个 hook 拥有一个远端行为；route 组合 feature，不变成 controller。
+
+下一次增加或修改远端行为时，该 hook 返回一个以 `phase` / `status` 判别的 union；loading、success/empty、unavailable、recoverable error 与 Unknown/reconciling 是这一个远端事实的互斥 variant，不是独立 `busy` + `error` 布尔。事件只把一个 variant 转成另一个 variant；不得同时维护第二份 Server 权威镜像。输入展开、选择器开关等纯 presentation state 留在组件本地，不为它创建远端状态机。已有 hook 只有在节点实际改到对应行为时才机械迁移，不以拆文件本身作为完成。
+
+可访问名称说明动作及其后果；危险操作说明范围和未来影响。大组件按可见的产品责任拆，不拆成 `Header`/`Body`/`Footer` 的属性中转。
 
 ## 13. 测试
 

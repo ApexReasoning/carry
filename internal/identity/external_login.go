@@ -20,6 +20,10 @@ var (
 	ErrExternalLoginUnavailable = errors.New("external sign-in could not be confirmed")
 	ErrExternalLoginRejected    = errors.New("sign-in method could not be changed")
 	ErrExternalLoginRateLimited = errors.New("external sign-in attempts are temporarily limited")
+	// These diagnostic causes preserve operator recovery while unwrapping to the
+	// one user recovery above. They never enter the public response body.
+	ErrExternalLoginSourceAdmissionLimited = fmt.Errorf("external sign-in source admission limit: %w", ErrExternalLoginRateLimited)
+	ErrExternalLoginGlobalAdmissionLimited = fmt.Errorf("external sign-in global admission limit: %w", ErrExternalLoginRateLimited)
 )
 
 const (
