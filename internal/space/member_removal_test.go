@@ -29,6 +29,15 @@ func TestNewRemoveMemberCommandBindsExactRemovalFacts(t *testing.T) {
 	if bytes.Equal(command.RequestDigest[:], changedCommand.RequestDigest[:]) {
 		t.Fatal("changed successor did not change canonical digest")
 	}
+	changed = request
+	changed.IdempotencyKey = "remove-member-2"
+	changedCommand, err = NewRemoveMemberCommand(changed)
+	if err != nil {
+		t.Fatalf("new removal command with different idempotency key: %v", err)
+	}
+	if !bytes.Equal(command.RequestDigest[:], changedCommand.RequestDigest[:]) {
+		t.Fatal("idempotency lookup key changed canonical payload digest")
+	}
 }
 
 func TestNewRemoveMemberCommandRejectsInvalidFacts(t *testing.T) {

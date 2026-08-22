@@ -39,8 +39,8 @@ func NewRemoveMemberCommand(request RemoveMemberRequest) (RemoveMemberCommand, e
 		return RemoveMemberCommand{}, ErrInvalidMemberRemoval
 	}
 	encoded, err := json.Marshal(struct {
-		SpaceID, ActorUserID, TargetUserID, SuccessorUserID, IdempotencyKey string
-	}{request.SpaceID, request.ActorUserID, request.TargetUserID, request.SuccessorUserID, idempotencyKey})
+		SpaceID, ActorUserID, TargetUserID, SuccessorUserID string
+	}{request.SpaceID, request.ActorUserID, request.TargetUserID, request.SuccessorUserID})
 	if err != nil {
 		return RemoveMemberCommand{}, fmt.Errorf("digest member removal: %w", err)
 	}

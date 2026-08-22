@@ -119,7 +119,7 @@ func NewSlugConflictError(command CreateSpaceCommand) *SlugConflictError {
 func spaceCreationDigest(name string, suffix int) ([sha256.Size]byte, error) {
 	encoded, err := json.Marshal(struct {
 		Name   string `json:"name"`
-		Suffix int    `json:"suffix,omitempty"`
+		Suffix int    `json:"suffix,omitempty"` // Owner semantics make zero and absent equivalent: both mean no suffix.
 	}{
 		Name:   name,
 		Suffix: suffix,

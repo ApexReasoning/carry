@@ -357,6 +357,7 @@ func invitationIssueDigest(recipientEmail string, canManageMembers, canEnrollMac
 	return sha256.Sum256(encoded), nil
 }
 
+// Resend, revoke, and accept replay identities are separated by their dedicated storage columns, not by these equal digest bytes.
 func invitationResendDigest(invitationID string) ([sha256.Size]byte, error) {
 	encoded, err := json.Marshal(struct {
 		InvitationID string `json:"invitation_id"`
