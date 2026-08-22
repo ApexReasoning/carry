@@ -327,9 +327,9 @@ export function MemberSettings({
           <p>
             Future access to {spaceName} ends immediately. Authored history
             stays, and private Conversation rows remain private and retained.
-            Other sign-in access and Space Machines are not automatically
-            revoked. Pending invitations remain. Data already copied outside
-            Carry is not deleted.
+            Other sign-in access and Space Hosts are not automatically revoked.
+            Pending invitations remain. Data already copied outside Carry is not
+            deleted.
           </p>
           {removalTarget.open_work_count > 0 ? (
             <label>

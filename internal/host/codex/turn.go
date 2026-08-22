@@ -48,10 +48,12 @@ func startStructuredTurnProtocol(
 	outputSchema json.RawMessage,
 ) (string, error) {
 	params := turnStartParams{
-		ThreadID:     threadID,
-		Input:        []turnInput{{Type: "text", Text: prompt}},
+		ThreadID: threadID,
+		Input: []turnInput{{Type: "text",
+			Text: prompt}},
 		OutputSchema: outputSchema,
-		Sandbox:      sandboxPolicy{Type: "readOnly", NetworkAccess: false},
+		Sandbox: sandboxPolicy{Type: "readOnly",
+			NetworkAccess: false},
 	}
 	if err := client.sendRequest(startTurnRequestID, "turn/start", params); err != nil {
 		return "", fmt.Errorf("%w: %v", host.ErrAgentOutcomeLost, err)
@@ -75,7 +77,8 @@ type turnObservation struct {
 }
 
 func awaitTurnTextProtocol(client *appServerClient, ctx context.Context, threadID string, turnID string) ([]byte, error) {
-	observation := turnObservation{threadID: threadID, turnID: turnID}
+	observation := turnObservation{threadID: threadID,
+		turnID: turnID}
 	var reconciliationDeadline time.Time
 	reconciliationRequested := false
 	for {
@@ -115,7 +118,8 @@ func (client *appServerClient) requestReconciliation(threadID string) error {
 	return client.sendRequest(reconcileThreadRequestID, "thread/read", struct {
 		ThreadID     string `json:"threadId"`
 		IncludeTurns bool   `json:"includeTurns"`
-	}{ThreadID: threadID, IncludeTurns: true})
+	}{ThreadID: threadID,
+		IncludeTurns: true})
 }
 
 func (observation *turnObservation) recordDelta(raw json.RawMessage) {

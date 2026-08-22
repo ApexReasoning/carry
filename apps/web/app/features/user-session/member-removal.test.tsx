@@ -88,7 +88,7 @@ test("confirms exact removal consequences and requires one active Work successor
   expect(
     screen.getByText(/Future access to Research ends immediately/),
   ).toHaveTextContent(
-    "Other sign-in access and Space Machines are not automatically revoked",
+    "Other sign-in access and Space Hosts are not automatically revoked",
   );
   expect(
     screen.getByText(/Future access to Research ends immediately/),

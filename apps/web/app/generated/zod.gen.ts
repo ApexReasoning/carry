@@ -180,6 +180,17 @@ export const zConnectedMachine = z.object({
   replay_until: z.iso.datetime({ offset: true }),
 });
 
+export const zAgentRecord = z.object({
+  agent_id: z.uuid(),
+  name: z.string(),
+  avatar_index: z.int().gte(0).lte(7),
+  owner_user_id: z.uuid(),
+  owner_name: z.string(),
+  state: z.enum(["active", "removed"]),
+  online: z.boolean(),
+  last_active_at: z.iso.datetime({ offset: true }).nullable(),
+});
+
 export const zMachineRecord = z.object({
   machine_id: z.uuid(),
   space_id: z.uuid(),
@@ -195,6 +206,7 @@ export const zMachineRecord = z.object({
   revoked_by_name: z.string().optional(),
   revoked_at: z.iso.datetime({ offset: true }).optional(),
   can_revoke: z.boolean(),
+  agents: z.array(zAgentRecord).max(64),
 });
 
 export const zMachinePage = z.object({

@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ApexReasoning/carry/internal/agent"
 	"github.com/ApexReasoning/carry/internal/identity"
 	"github.com/ApexReasoning/carry/internal/machine"
 	carrypostgres "github.com/ApexReasoning/carry/internal/postgres"
@@ -29,6 +30,7 @@ type config struct {
 	pkiDirectory       string
 	identityRoot       string
 	externalOrigin     carryserver.ExternalOrigin
+	hostAPIOrigin      machine.HostAPIOrigin
 	googleClientID     string
 	googleClientSecret string
 	githubClientID     string
@@ -63,6 +65,11 @@ func parseConfig(arguments []string, stderr io.Writer) (config, error) {
 		return config{}, fmt.Errorf("configure CARRY_EXTERNAL_ORIGIN: %w", err)
 	}
 	parsed.externalOrigin = externalOrigin
+	hostAPIOrigin, err := machine.ParseHostAPIOrigin(os.Getenv("CARRY_HOST_API_ORIGIN"))
+	if err != nil {
+		return config{}, fmt.Errorf("configure CARRY_HOST_API_ORIGIN: %w", err)
+	}
+	parsed.hostAPIOrigin = hostAPIOrigin
 	parsed.googleClientID = os.Getenv("CARRY_GOOGLE_CLIENT_ID")
 	parsed.googleClientSecret = os.Getenv("CARRY_GOOGLE_CLIENT_SECRET")
 	parsed.githubClientID = os.Getenv("CARRY_GITHUB_CLIENT_ID")
@@ -214,9 +221,13 @@ func run(ctx context.Context, arguments []string, _ io.Writer, stderr io.Writer)
 	if err != nil {
 		return fmt.Errorf("compose Space invitations: %w", err)
 	}
-	machineConnections, err := machine.NewConnections(store, machineCredentials, authority, parsed.externalOrigin.String())
+	machineConnections, err := machine.NewConnections(store, machineCredentials, authority, parsed.externalOrigin.String(), parsed.hostAPIOrigin)
 	if err != nil {
 		return fmt.Errorf("compose Machine connections: %w", err)
+	}
+	agentPresence, err := machine.NewAgentPresence(store, agent.NativeVocabulary())
+	if err != nil {
+		return fmt.Errorf("compose Machine Agent presence: %w", err)
 	}
 	requestSources := carryserver.NewRequestSource(parsed.trustedProxyCIDRs)
 	userAuthentication, err := carryserver.NewUserAuthentication(store, store, credentials, parsed.externalOrigin)
@@ -271,7 +282,7 @@ func run(ctx context.Context, arguments []string, _ io.Writer, stderr io.Writer)
 	if err != nil {
 		return fmt.Errorf("compose User routes: %w", err)
 	}
-	machineRoutes, err := carryserver.NewMachineRoutes(store, store, machineConnections)
+	machineRoutes, err := carryserver.NewMachineRoutes(store, store, machineConnections, agentPresence)
 	if err != nil {
 		return fmt.Errorf("compose Machine routes: %w", err)
 	}

@@ -328,7 +328,7 @@ func workTestAPI(t *testing.T, commands WorkCommands, queries WorkQueries) http.
 	member.authentication = authentication
 	member.works = workRoutes
 	runStore := &recordingMachineRuns{}
-	machine, err := NewMachineRoutes(runStore, unavailableMachineConversations{}, unavailableMachineConnections{})
+	machine, err := NewMachineRoutes(runStore, unavailableMachineConversations{}, unavailableMachineConnections{}, unavailableMachineAgentReports{})
 	if err != nil {
 		t.Fatalf("compose Machine routes: %v", err)
 	}

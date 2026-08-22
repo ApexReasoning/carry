@@ -13,19 +13,146 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ApexReasoning/carry/internal/agent"
 	"github.com/ApexReasoning/carry/internal/conversation"
 	hostdomain "github.com/ApexReasoning/carry/internal/host"
+	"github.com/ApexReasoning/carry/internal/machine"
 	"github.com/ApexReasoning/carry/internal/machine/machinefile"
 	"github.com/ApexReasoning/carry/internal/run"
 	"github.com/ApexReasoning/carry/internal/work"
 	"github.com/google/uuid"
 )
 
-const maxRunClaimWireBytes = 2 << 20
+const (
+	maxRunClaimWireBytes    = 2 << 20
+	maxAgentReportWireBytes = 64 << 10
+)
 
 type machineHTTP struct {
 	client    *http.Client
 	serverURL string
+}
+
+type agentReportObservationWire struct {
+	AdapterKey    string `json:"adapter_key"`
+	OccurrenceKey string `json:"occurrence_key"`
+	Present       bool   `json:"present"`
+}
+
+type agentReportResultWire struct {
+	Revision                 int64     `json:"revision"`
+	UnsupportedAdapterKeys   *[]string `json:"unsupported_adapter_keys"`
+	SetupRequiredAdapterKeys *[]string `json:"setup_required_adapter_keys"`
+}
+
+type agentReportErrorWire struct {
+	Code            string `json:"code"`
+	CurrentRevision *int64 `json:"current_revision,omitempty"`
+}
+
+// ReportAgentPresence sends one exact complete Machine occurrence report.
+func (c *machineHTTP) ReportAgentPresence(
+	ctx context.Context,
+	reportID string,
+	baseRevision int64,
+	observations []machine.AgentObservation,
+) (machine.AgentReportResult, error) {
+	wireObservations := make([]agentReportObservationWire, 0, len(observations))
+	for _, observation := range observations {
+		wireObservations = append(wireObservations, agentReportObservationWire{
+			AdapterKey:    string(observation.AdapterKey),
+			OccurrenceKey: string(observation.OccurrenceKey),
+			Present:       observation.Present,
+		})
+	}
+	request, err := newJSONRequest(ctx, http.MethodPost, c.serverURL+"/v1/host/agents/observations", struct {
+		ReportID     string                       `json:"report_id"`
+		BaseRevision int64                        `json:"base_revision"`
+		Observations []agentReportObservationWire `json:"observations"`
+	}{
+		ReportID:     reportID,
+		BaseRevision: baseRevision,
+		Observations: wireObservations,
+	})
+	if err != nil {
+		return machine.AgentReportResult{}, err
+	}
+	response, err := c.client.Do(request)
+	if err != nil {
+		return machine.AgentReportResult{}, controlPlaneRequestError("report Agent presence", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode == http.StatusOK {
+		var wire agentReportResultWire
+		if err := decodeBoundedExactJSON(response.Body, maxAgentReportWireBytes, &wire); err != nil {
+			return machine.AgentReportResult{}, fmt.Errorf("decode Agent report response: %w", err)
+		}
+		if wire.Revision <= 0 || wire.UnsupportedAdapterKeys == nil || wire.SetupRequiredAdapterKeys == nil ||
+			!validAgentReportKeys(*wire.UnsupportedAdapterKeys) || !validAgentReportKeys(*wire.SetupRequiredAdapterKeys) {
+			return machine.AgentReportResult{}, errors.New("decode Agent report response: invalid authority")
+		}
+		return machine.AgentReportResult{
+			Revision:                 wire.Revision,
+			UnsupportedAdapterKeys:   stringAgentKeys(*wire.UnsupportedAdapterKeys),
+			SetupRequiredAdapterKeys: stringAgentKeys(*wire.SetupRequiredAdapterKeys),
+		}, nil
+	}
+	var failure agentReportErrorWire
+	decodeErr := decodeBoundedExactJSON(response.Body, maxAgentReportWireBytes, &failure)
+	if decodeErr == nil {
+		switch response.StatusCode {
+		case http.StatusBadRequest:
+			if failure.Code == "invalid_report" {
+				return machine.AgentReportResult{}, machine.ErrInvalidAgentReport
+			}
+		case http.StatusForbidden:
+			if failure.Code == "machine_revoked" {
+				return machine.AgentReportResult{}, machine.ErrMachineRevoked
+			}
+		case http.StatusNotFound:
+			if failure.Code == "machine_unavailable" {
+				return machine.AgentReportResult{}, machine.ErrMachineUnavailable
+			}
+		case http.StatusConflict:
+			if failure.Code == "report_conflict" && failure.CurrentRevision == nil {
+				return machine.AgentReportResult{}, machine.ErrAgentReportConflict
+			}
+			if failure.Code == "stale_report" && failure.CurrentRevision != nil && *failure.CurrentRevision >= 0 {
+				return machine.AgentReportResult{}, machine.AgentReportStaleError{CurrentRevision: *failure.CurrentRevision}
+			}
+		case http.StatusServiceUnavailable:
+			if failure.Code == "temporarily_unavailable" {
+				return machine.AgentReportResult{}, machine.ErrAgentReportTemporarilyUnavailable
+			}
+		}
+	}
+	if response.StatusCode >= http.StatusBadRequest && response.StatusCode < http.StatusInternalServerError {
+		return machine.AgentReportResult{}, hostdomain.AgentReportRejectedError{StatusCode: response.StatusCode}
+	}
+	if decodeErr != nil {
+		return machine.AgentReportResult{}, fmt.Errorf("decode Agent report failure: %w", decodeErr)
+	}
+	return machine.AgentReportResult{}, fmt.Errorf("Agent report outcome is unknown: %s", response.Status)
+}
+
+func validAgentReportKeys(keys []string) bool {
+	if len(keys) > 32 {
+		return false
+	}
+	for index, key := range keys {
+		if !agent.ValidAdapterKey(agent.AdapterKey(key)) || (index > 0 && keys[index-1] >= key) {
+			return false
+		}
+	}
+	return true
+}
+
+func stringAgentKeys(keys []string) []agent.AdapterKey {
+	result := make([]agent.AdapterKey, len(keys))
+	for index, key := range keys {
+		result[index] = agent.AdapterKey(key)
+	}
+	return result
 }
 
 type runMessageWire struct {
@@ -48,7 +175,7 @@ type runClaimWire struct {
 }
 
 func connectMachine(credential machinefile.Credential) (*machineHTTP, error) {
-	serverURL, err := parseServerURL(credential.ServerURL)
+	hostAPIOrigin, err := machine.ParseHostAPIOrigin(credential.HostAPIOrigin)
 	if err != nil {
 		return nil, err
 	}
@@ -60,7 +187,8 @@ func connectMachine(credential machinefile.Credential) (*machineHTTP, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &machineHTTP{client: client, serverURL: serverURL}, nil
+	return &machineHTTP{client: client,
+		serverURL: hostAPIOrigin.String()}, nil
 }
 
 func (c *machineHTTP) Claim(ctx context.Context) (run.Claim, error) {
@@ -338,5 +466,6 @@ func conversationReplyPath(claim conversation.ReplyClaim) string {
 	return "/v1/host/conversation-replies/" + url.PathEscape(claim.SourceMessageID)
 }
 
+var _ hostdomain.AgentReports = (*machineHTTP)(nil)
 var _ hostdomain.RunClient = (*machineHTTP)(nil)
 var _ hostdomain.ConversationClient = (*machineHTTP)(nil)

@@ -167,7 +167,7 @@ export async function machines(
     result.data,
     result.response,
     result.error,
-    "Machine inventory",
+    "Host and Agent inventory",
   );
 }
 

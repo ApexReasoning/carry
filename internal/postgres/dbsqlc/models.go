@@ -8,6 +8,25 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type Agent struct {
+	AgentID       string
+	SpaceID       string
+	MachineID     string
+	OwnerUserID   string
+	AdapterKey    string
+	OccurrenceKey string
+	Name          string
+	NameKey       string
+	CreatedAt     pgtype.Timestamptz
+	RemovedAt     pgtype.Timestamptz
+}
+
+type AgentPresence struct {
+	AgentID       string
+	Present       bool
+	LastPresentAt pgtype.Timestamptz
+}
+
 type BrowserSession struct {
 	UserID              string
 	CreatedAt           pgtype.Timestamptz
@@ -186,19 +205,25 @@ type IdentityMethodUnlink struct {
 }
 
 type Machine struct {
-	MachineID                string
-	SpaceID                  string
-	DisplayName              string
-	PublicKeyDer             []byte
-	CertificatePem           []byte
-	CertificateSerial        string
-	EnrolledByUserID         string
-	EnrolledAt               pgtype.Timestamptz
-	RevokedAt                pgtype.Timestamptz
-	RevocationActorKind      *string
-	RevokedByUserID          pgtype.UUID
-	RevocationIdempotencyKey *string
-	RevocationRequestDigest  []byte
+	MachineID                        string
+	SpaceID                          string
+	DisplayName                      string
+	PublicKeyDer                     []byte
+	CertificatePem                   []byte
+	CertificateSerial                string
+	EnrolledByUserID                 string
+	EnrolledAt                       pgtype.Timestamptz
+	RevokedAt                        pgtype.Timestamptz
+	RevocationActorKind              *string
+	RevokedByUserID                  pgtype.UUID
+	RevocationIdempotencyKey         *string
+	RevocationRequestDigest          []byte
+	AgentReportRevision              int64
+	AgentReportedAt                  pgtype.Timestamptz
+	LastAgentReportID                pgtype.UUID
+	LastAgentReportDigest            []byte
+	LastAgentReportUnsupportedKeys   []string
+	LastAgentReportSetupRequiredKeys []string
 }
 
 type MachineConnectionLookupFailure struct {

@@ -192,7 +192,7 @@ func conversationTestAPI(
 	}
 	member.authentication = authentication
 	member.conversations = conversationRoutes
-	machine, err := NewMachineRoutes(&recordingMachineRuns{}, unavailableMachineConversations{}, unavailableMachineConnections{})
+	machine, err := NewMachineRoutes(&recordingMachineRuns{}, unavailableMachineConversations{}, unavailableMachineConnections{}, unavailableMachineAgentReports{})
 	if err != nil {
 		t.Fatalf("compose Machine routes: %v", err)
 	}

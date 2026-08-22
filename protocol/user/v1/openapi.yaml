@@ -2248,6 +2248,43 @@ components:
         replay_until:
           type: string
           format: date-time
+    AgentRecord:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          agent_id,
+          name,
+          avatar_index,
+          owner_user_id,
+          owner_name,
+          state,
+          online,
+          last_active_at,
+        ]
+      properties:
+        agent_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        avatar_index:
+          type: integer
+          minimum: 0
+          maximum: 7
+        owner_user_id:
+          type: string
+          format: uuid
+        owner_name:
+          type: string
+        state:
+          type: string
+          enum: [active, removed]
+        online:
+          type: boolean
+        last_active_at:
+          type: [string, "null"]
+          format: date-time
     MachineRecord:
       type: object
       additionalProperties: false
@@ -2263,6 +2300,7 @@ components:
           enrolled_by_name,
           enrolled_at,
           can_revoke,
+          agents,
         ]
       properties:
         machine_id:
@@ -2300,6 +2338,11 @@ components:
           format: date-time
         can_revoke:
           type: boolean
+        agents:
+          type: array
+          maxItems: 64
+          items:
+            $ref: "#/components/schemas/AgentRecord"
     MachinePage:
       type: object
       additionalProperties: false

@@ -182,6 +182,18 @@ func (s *Store) RemoveSpaceMember(ctx context.Context, command space.RemoveMembe
 			return fmt.Errorf("transfer removed member Open Work: locked %d, updated %d", len(workIDs), updated)
 		}
 	}
+	if _, err := q.LockActiveAgentsForOwnerRemoval(ctx, dbsqlc.LockActiveAgentsForOwnerRemovalParams{
+		SpaceID:     command.SpaceID,
+		OwnerUserID: command.TargetUserID,
+	}); err != nil {
+		return fmt.Errorf("lock removed member Agents: %w", err)
+	}
+	if err := q.RemoveActiveAgentsForOwner(ctx, dbsqlc.RemoveActiveAgentsForOwnerParams{
+		SpaceID:     command.SpaceID,
+		OwnerUserID: command.TargetUserID,
+	}); err != nil {
+		return fmt.Errorf("remove member-owned Agents: %w", err)
+	}
 	successorUUID := pgtype.UUID{}
 	if command.SuccessorUserID != "" {
 		successorUUID, _ = postgresUUID(command.SuccessorUserID)

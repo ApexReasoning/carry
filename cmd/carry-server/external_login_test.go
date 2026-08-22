@@ -25,6 +25,12 @@ func TestProviderConfigurationRequiresCanonicalExternalOriginAndCredentials(t *t
 	}{
 		{name: "HTTP origin", key: "CARRY_EXTERNAL_ORIGIN", value: "http://carry.example"},
 		{name: "origin path", key: "CARRY_EXTERNAL_ORIGIN", value: "https://carry.example/path"},
+		{name: "missing Host API origin",
+			key:   "CARRY_HOST_API_ORIGIN",
+			value: ""},
+		{name: "Host API origin path",
+			key:   "CARRY_HOST_API_ORIGIN",
+			value: "https://api.carry.example/path"},
 		{name: "missing Google ID", key: "CARRY_GOOGLE_CLIENT_ID", value: ""},
 		{name: "missing Google secret", key: "CARRY_GOOGLE_CLIENT_SECRET", value: ""},
 		{name: "missing GitHub ID", key: "CARRY_GITHUB_CLIENT_ID", value: ""},
@@ -285,6 +291,7 @@ func setRequiredServerEnvironment(t *testing.T) {
 	t.Setenv("CARRY_PKI_DIR", "/tmp/carry-test-pki")
 	t.Setenv("CARRY_IDENTITY_ROOT", strings.Repeat("A", 43))
 	t.Setenv("CARRY_EXTERNAL_ORIGIN", "https://carry.example")
+	t.Setenv("CARRY_HOST_API_ORIGIN", "https://api.carry.example")
 	t.Setenv("CARRY_GOOGLE_CLIENT_ID", "google-client")
 	t.Setenv("CARRY_GOOGLE_CLIENT_SECRET", "google-secret")
 	t.Setenv("CARRY_GITHUB_CLIENT_ID", "github-client")

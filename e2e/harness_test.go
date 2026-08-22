@@ -247,11 +247,19 @@ type pendingMachineConnection struct {
 }
 
 func startCarryMachineConnection(t *testing.T, root, carry, configDirectory, serverURL, caCertificatePath, name string) pendingMachineConnection {
+	return startCarryMachineConnectionWithEnvironment(
+		t, root, carry, configDirectory, serverURL, caCertificatePath, name,
+		[]string{"PATH=" + t.TempDir()},
+	)
+}
+
+func startCarryMachineConnectionWithEnvironment(t *testing.T, root, carry, configDirectory, serverURL, caCertificatePath, name string, environment []string) pendingMachineConnection {
 	t.Helper()
 	log := &lockedBuffer{}
-	command := exec.CommandContext(t.Context(), carry, "host", "connect", "--server", serverURL, "--ca-cert", caCertificatePath, "--name", name)
+	command := exec.CommandContext(t.Context(), carry, "setup", "--server", serverURL, "--ca-cert", caCertificatePath, "--name", name)
 	command.Dir = root
-	command.Env = append(os.Environ(), "CARRY_CONFIG_DIR="+configDirectory)
+	command.Env = append(os.Environ(), environment...)
+	command.Env = append(command.Env, "CARRY_CONFIG_DIR="+configDirectory)
 	command.Stdout, command.Stderr = log, log
 	if err := command.Start(); err != nil {
 		t.Fatalf("start Machine connection: %v", err)
@@ -271,12 +279,12 @@ func startCarryMachineConnection(t *testing.T, root, carry, configDirectory, ser
 		}
 		select {
 		case err := <-done:
-			t.Fatalf("carry host connect stopped before showing a code: %v\n%s", err, log.String())
+			t.Fatalf("carry setup stopped before showing a code: %v\n%s", err, log.String())
 		default:
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatalf("carry host connect did not show a code\n%s", log.String())
+	t.Fatalf("carry setup did not show a code\n%s", log.String())
 	return pendingMachineConnection{}
 }
 
@@ -342,20 +350,26 @@ func approveCarryMachineHTTP(t *testing.T, databaseURL, serverURL, caCertificate
 
 func finishCarryMachineConnection(t *testing.T, pending pendingMachineConnection) string {
 	t.Helper()
-	select {
-	case err := <-pending.done:
-		if err != nil {
-			t.Fatalf("complete Machine connection: %v\n%s", err, pending.log.String())
+	deadline := time.Now().Add(35 * time.Second)
+	for time.Now().Before(deadline) {
+		output := pending.log.String()
+		if strings.Contains(output, " connected to Space ") && strings.Contains(output, "Started Carry Host ") {
+			if err := pending.command.Process.Kill(); err != nil {
+				t.Fatalf("stop foreground setup Host: %v", err)
+			}
+			<-pending.done
+			return output
 		}
-	case <-time.After(35 * time.Second):
-		_ = pending.command.Process.Kill()
-		t.Fatalf("Machine connection timed out\n%s", pending.log.String())
+		select {
+		case err := <-pending.done:
+			t.Fatalf("carry setup stopped before foreground Host start: %v\n%s", err, output)
+		default:
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
-	output := pending.log.String()
-	if !strings.Contains(output, " connected to Space ") {
-		t.Fatalf("Machine connection output = %q", output)
-	}
-	return output
+	_ = pending.command.Process.Kill()
+	t.Fatalf("carry setup did not enter foreground Host service\n%s", pending.log.String())
+	return ""
 }
 
 func connectCarryMachine(t *testing.T, root, carry, databaseURL, serverURL, caCertificatePath, configDirectory, userID, spaceID, name string) string {
@@ -399,6 +413,7 @@ func startServerWithOrigin(
 		"CARRY_PKI_DIR="+pkiDirectory,
 		"CARRY_IDENTITY_ROOT="+identityRoot,
 		"CARRY_EXTERNAL_ORIGIN="+externalOrigin,
+		"CARRY_HOST_API_ORIGIN=https://"+address,
 		"CARRY_GOOGLE_CLIENT_ID=test-google-client",
 		"CARRY_GOOGLE_CLIENT_SECRET=test-google-secret",
 		"CARRY_GITHUB_CLIENT_ID=test-github-client",
@@ -575,6 +590,8 @@ func resetProductJourneyFacts(t *testing.T, databaseURL string) {
 		"work_result_checks",
 		"work_messages",
 		"works",
+		"agent_presence",
+		"agents",
 		"machines",
 		"browser_sessions",
 	} {
@@ -679,6 +696,13 @@ func testHTTPClient(caCertificate []byte) (*http.Client, error) {
 		MinVersion: tls.VersionTLS13,
 		RootCAs:    roots,
 	}}}, nil
+}
+
+func writeFakeCodex(t *testing.T, path string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nprintf '%s\\n' 'codex-cli 0.148.0'\n"), 0o700); err != nil {
+		t.Fatalf("write fake Codex executable: %v", err)
+	}
 }
 
 func writeFakePi(t *testing.T, path string) {

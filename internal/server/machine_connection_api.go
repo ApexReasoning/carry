@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/ApexReasoning/carry/internal/agent"
 	"github.com/ApexReasoning/carry/internal/identity"
 	"github.com/ApexReasoning/carry/internal/machine"
 	"github.com/go-chi/chi/v5"
@@ -22,8 +23,8 @@ type MachineConnections interface {
 	Deny(context.Context, machine.DecideConnectionRequest) error
 	Poll(context.Context, string) (machine.ConnectedMachine, error)
 	Cancel(context.Context, string) error
-	List(context.Context, string, string, string) (machine.MachinePage, error)
-	RevokeFromBrowser(context.Context, string, string, string, string) (machine.MachineRecord, error)
+	List(context.Context, string, string, string) (machine.MachinePage, []agent.InventoryRecord, error)
+	RevokeFromBrowser(context.Context, string, string, string, string) (machine.MachineRecord, []agent.InventoryRecord, error)
 	RevokeFromHost(context.Context, string, string, string) (machine.MachineRecord, error)
 }
 
@@ -46,6 +47,17 @@ type machineConnectionPreviewWire struct {
 	ExpiresAt       time.Time `json:"expires_at"`
 }
 
+type agentRecordWire struct {
+	AgentID      string          `json:"agent_id"`
+	Name         string          `json:"name"`
+	AvatarIndex  int             `json:"avatar_index"`
+	OwnerUserID  string          `json:"owner_user_id"`
+	OwnerName    string          `json:"owner_name"`
+	State        agent.Lifecycle `json:"state"`
+	Online       bool            `json:"online"`
+	LastActiveAt *time.Time      `json:"last_active_at"`
+}
+
 type machineRecordWire struct {
 	MachineID        string     `json:"machine_id"`
 	SpaceID          string     `json:"space_id"`
@@ -61,6 +73,11 @@ type machineRecordWire struct {
 	RevokedByName    string     `json:"revoked_by_name,omitempty"`
 	RevokedAt        *time.Time `json:"revoked_at,omitempty"`
 	CanRevoke        bool       `json:"can_revoke"`
+}
+
+type machineInventoryRecordWire struct {
+	machineRecordWire
+	Agents []agentRecordWire `json:"agents"`
 }
 
 func (api machineConnectionAPI) begin(response http.ResponseWriter, request *http.Request) {
@@ -101,18 +118,21 @@ func (api machineConnectionAPI) begin(response http.ResponseWriter, request *htt
 	}
 	noStore(response)
 	writeJSON(response, http.StatusCreated, struct {
-		RequestID        string    `json:"request_id"`
-		DisplayName      string    `json:"display_name"`
-		UserCode         string    `json:"user_code"`
-		PollSecret       string    `json:"poll_secret"`
-		Fingerprint      string    `json:"fingerprint"`
-		VerificationPath string    `json:"verification_path"`
-		ExpiresAt        time.Time `json:"expires_at"`
-		IntervalSeconds  int       `json:"interval_seconds"`
+		RequestID       string    `json:"request_id"`
+		DisplayName     string    `json:"display_name"`
+		UserCode        string    `json:"user_code"`
+		PollSecret      string    `json:"poll_secret"`
+		Fingerprint     string    `json:"fingerprint"`
+		VerificationURL string    `json:"verification_url"`
+		ExpiresAt       time.Time `json:"expires_at"`
+		IntervalSeconds int       `json:"interval_seconds"`
 	}{
 		RequestID: begun.RequestID, DisplayName: begun.DisplayName, UserCode: begun.UserCode,
-		PollSecret: begun.PollSecret, Fingerprint: begun.Fingerprint, VerificationPath: begun.VerificationPath,
-		ExpiresAt: begun.ExpiresAt, IntervalSeconds: int(begun.PollInterval / time.Second),
+		PollSecret:      begun.PollSecret,
+		Fingerprint:     begun.Fingerprint,
+		VerificationURL: begun.VerificationURL,
+		ExpiresAt:       begun.ExpiresAt,
+		IntervalSeconds: int(begun.PollInterval / time.Second),
 	})
 }
 
@@ -209,12 +229,18 @@ func (api machineConnectionAPI) poll(response http.ResponseWriter, request *http
 		MachineID      string    `json:"machine_id"`
 		SpaceID        string    `json:"space_id"`
 		DisplayName    string    `json:"display_name"`
+		HostAPIOrigin  string    `json:"host_api_origin"`
 		CertificatePEM string    `json:"certificate_pem"`
 		RedeemedAt     time.Time `json:"redeemed_at"`
 		ReplayUntil    time.Time `json:"replay_until"`
 	}{
-		MachineID: connected.MachineID, SpaceID: connected.SpaceID, DisplayName: connected.DisplayName,
-		CertificatePEM: string(connected.CertificatePEM), RedeemedAt: connected.RedeemedAt, ReplayUntil: connected.ReplayUntil,
+		MachineID:      connected.MachineID,
+		SpaceID:        connected.SpaceID,
+		DisplayName:    connected.DisplayName,
+		HostAPIOrigin:  connected.HostAPIOrigin.String(),
+		CertificatePEM: string(connected.CertificatePEM),
+		RedeemedAt:     connected.RedeemedAt,
+		ReplayUntil:    connected.ReplayUntil,
 	})
 }
 
@@ -232,20 +258,27 @@ func (api machineConnectionAPI) list(response http.ResponseWriter, request *http
 	if !ok {
 		return
 	}
-	page, err := api.connections.List(request.Context(), sessionID, chi.URLParam(request, "space_id"), request.URL.Query().Get("after"))
+	page, agentRecords, err := api.connections.List(request.Context(), sessionID, chi.URLParam(request, "space_id"), request.URL.Query().Get("after"))
 	if err != nil {
 		writeMachineConnectionError(response, err)
 		return
 	}
-	items := make([]machineRecordWire, 0, len(page.Machines))
+	agentsByMachine := make(map[string][]agentRecordWire, len(page.Machines))
+	for _, record := range agentRecords {
+		agentsByMachine[record.MachineID] = append(agentsByMachine[record.MachineID], agentRecordResponse(record))
+	}
+	items := make([]machineInventoryRecordWire, 0, len(page.Machines))
 	for _, record := range page.Machines {
-		items = append(items, machineRecordResponse(record))
+		items = append(items, machineInventoryRecordResponse(record, agentsByMachine[record.MachineID]))
 	}
 	noStore(response)
 	writeJSON(response, http.StatusOK, struct {
-		Machines   []machineRecordWire `json:"machines"`
-		NextCursor string              `json:"next_cursor,omitempty"`
-	}{Machines: items, NextCursor: page.NextCursor})
+		Machines   []machineInventoryRecordWire `json:"machines"`
+		NextCursor string                       `json:"next_cursor,omitempty"`
+	}{
+		Machines:   items,
+		NextCursor: page.NextCursor,
+	})
 }
 
 func (api machineConnectionAPI) revokeFromBrowser(response http.ResponseWriter, request *http.Request) {
@@ -257,13 +290,13 @@ func (api machineConnectionAPI) revokeFromBrowser(response http.ResponseWriter, 
 	if !ok {
 		return
 	}
-	record, err := api.connections.RevokeFromBrowser(request.Context(), sessionID, chi.URLParam(request, "space_id"), chi.URLParam(request, "machine_id"), request.Header.Get("Idempotency-Key"))
+	record, agentRecords, err := api.connections.RevokeFromBrowser(request.Context(), sessionID, chi.URLParam(request, "space_id"), chi.URLParam(request, "machine_id"), request.Header.Get("Idempotency-Key"))
 	if err != nil {
 		writeMachineConnectionError(response, err)
 		return
 	}
 	noStore(response)
-	writeJSON(response, http.StatusOK, machineRecordResponse(record))
+	writeJSON(response, http.StatusOK, machineInventoryRecordResponse(record, agentRecordResponses(agentRecords)))
 }
 
 func (api machineConnectionAPI) revokeFromHost(response http.ResponseWriter, request *http.Request) {
@@ -294,6 +327,27 @@ func (api machineConnectionAPI) browserSessionID(response http.ResponseWriter, r
 	return sessionID, true
 }
 
+func agentRecordResponses(records []agent.InventoryRecord) []agentRecordWire {
+	result := make([]agentRecordWire, 0, len(records))
+	for _, record := range records {
+		result = append(result, agentRecordResponse(record))
+	}
+	return result
+}
+
+func agentRecordResponse(record agent.InventoryRecord) agentRecordWire {
+	return agentRecordWire{
+		AgentID:      record.AgentID,
+		Name:         record.Name,
+		AvatarIndex:  record.AvatarIndex,
+		OwnerUserID:  record.OwnerUserID,
+		OwnerName:    record.OwnerName,
+		State:        record.Lifecycle,
+		Online:       record.Online,
+		LastActiveAt: record.LastActiveAt,
+	}
+}
+
 func machineRecordResponse(record machine.MachineRecord) machineRecordWire {
 	actor := record.RevocationActor
 	if actor == "not_recorded" {
@@ -309,6 +363,13 @@ func machineRecordResponse(record machine.MachineRecord) machineRecordWire {
 		EnrolledByName: record.EnrolledByName, EnrolledAt: record.EnrolledAt,
 		RevocationActor: actor, RevokedByUserID: record.RevokedByUserID,
 		RevokedByName: record.RevokedByName, RevokedAt: record.RevokedAt, CanRevoke: record.CanRevoke,
+	}
+}
+
+func machineInventoryRecordResponse(record machine.MachineRecord, agents []agentRecordWire) machineInventoryRecordWire {
+	return machineInventoryRecordWire{
+		machineRecordWire: machineRecordResponse(record),
+		Agents:            append([]agentRecordWire(nil), agents...),
 	}
 }
 

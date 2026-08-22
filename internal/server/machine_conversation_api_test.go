@@ -241,7 +241,7 @@ func machineConversationTestAPI(
 ) http.Handler {
 	t.Helper()
 	member := testUserRoutes(t, authority)
-	machine, err := NewMachineRoutes(&recordingMachineRuns{}, conversations, unavailableMachineConnections{})
+	machine, err := NewMachineRoutes(&recordingMachineRuns{}, conversations, unavailableMachineConnections{}, unavailableMachineAgentReports{})
 	if err != nil {
 		t.Fatalf("compose Machine routes: %v", err)
 	}

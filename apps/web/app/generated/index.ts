@@ -69,6 +69,7 @@ export type {
   AcceptWorkReviewResponse,
   AcceptWorkReviewResponses,
   AfterConversationMessage,
+  AgentRecord,
   ApiError,
   AppendWorkMessageData,
   AppendWorkMessageError,

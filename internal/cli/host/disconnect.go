@@ -69,7 +69,7 @@ func revokeCurrentMachine(ctx context.Context, credential machinefile.Credential
 	if err != nil {
 		return err
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(credential.ServerURL, "/")+"/v1/host/machine/revoke", nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(credential.HostAPIOrigin, "/")+"/v1/host/machine/revoke", nil)
 	if err != nil {
 		return fmt.Errorf("build Machine disconnect request: %w", err)
 	}

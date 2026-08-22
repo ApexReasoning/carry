@@ -285,16 +285,18 @@ type MachineRoutes struct {
 	runs          machineAPI
 	conversations machineConversationAPI
 	connections   machineConnectionAPI
+	agents        machineAgentAPI
 }
 
-func NewMachineRoutes(runs MachineRuns, conversations MachineConversations, connections MachineConnections) (*MachineRoutes, error) {
-	if runs == nil || conversations == nil || connections == nil {
+func NewMachineRoutes(runs MachineRuns, conversations MachineConversations, connections MachineConnections, reports MachineAgentReports) (*MachineRoutes, error) {
+	if runs == nil || conversations == nil || connections == nil || reports == nil {
 		return nil, errors.New("Machine route dependencies are required")
 	}
 	return &MachineRoutes{
 		runs:          machineAPI{runs: runs},
 		conversations: machineConversationAPI{conversations: conversations},
 		connections:   machineConnectionAPI{connections: connections},
+		agents:        machineAgentAPI{reports: reports},
 	}, nil
 }
 
@@ -302,6 +304,7 @@ func (routes *MachineRoutes) mount(router chi.Router) {
 	router.Group(func(machine chi.Router) {
 		machine.Use(requireMachine)
 		machine.Post("/machine/revoke", routes.connections.revokeFromHost)
+		machine.Post("/agents/observations", routes.agents.report)
 		machine.Post("/runs/claim", routes.runs.claimRun)
 		machine.Post("/runs/{run_id}/attempts/{attempt_id}/renew", routes.runs.renewRun)
 		machine.Post("/runs/{run_id}/attempts/{attempt_id}/understanding", routes.runs.commitUnderstanding)

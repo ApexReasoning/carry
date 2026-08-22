@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ApexReasoning/carry/internal/agent"
 	"github.com/ApexReasoning/carry/internal/conversation"
 	"github.com/ApexReasoning/carry/internal/identity"
 	"github.com/ApexReasoning/carry/internal/machine"
@@ -432,7 +433,12 @@ func testAPI(
 	}
 	user.authentication = authentication
 	user.machines = userMachines
-	machine, err := NewMachineRoutes(runs, unavailableMachineConversations{}, machines)
+	machine, err := NewMachineRoutes(
+		runs,
+		unavailableMachineConversations{},
+		machines,
+		unavailableMachineAgentReports{},
+	)
 	if err != nil {
 		t.Fatalf("compose Machine routes: %v", err)
 	}
@@ -717,17 +723,23 @@ func (unavailableMachineConnections) Poll(context.Context, string) (machine.Conn
 func (unavailableMachineConnections) Cancel(context.Context, string) error {
 	return errors.New("not implemented")
 }
-func (unavailableMachineConnections) List(context.Context, string, string, string) (machine.MachinePage, error) {
-	return machine.MachinePage{}, errors.New("not implemented")
+func (unavailableMachineConnections) List(context.Context, string, string, string) (machine.MachinePage, []agent.InventoryRecord, error) {
+	return machine.MachinePage{}, nil, errors.New("not implemented")
 }
-func (unavailableMachineConnections) RevokeFromBrowser(context.Context, string, string, string, string) (machine.MachineRecord, error) {
-	return machine.MachineRecord{}, errors.New("not implemented")
+func (unavailableMachineConnections) RevokeFromBrowser(context.Context, string, string, string, string) (machine.MachineRecord, []agent.InventoryRecord, error) {
+	return machine.MachineRecord{}, nil, errors.New("not implemented")
 }
 func (unavailableMachineConnections) RevokeFromHost(context.Context, string, string, string) (machine.MachineRecord, error) {
 	return machine.MachineRecord{}, errors.New("not implemented")
 }
 
 type recordingMachineConnectionStub struct{ unavailableMachineConnections }
+
+type unavailableMachineAgentReports struct{}
+
+func (unavailableMachineAgentReports) Report(context.Context, machine.AgentReportRequest) (machine.AgentReportResult, error) {
+	return machine.AgentReportResult{}, errors.New("not implemented")
+}
 
 type recordingMachineRuns struct {
 	claimMachineID string

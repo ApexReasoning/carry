@@ -20,16 +20,16 @@ import (
 	"github.com/ApexReasoning/carry/internal/run"
 )
 
-func parseServerURL(raw string) (string, error) {
+func parseExternalOrigin(raw string) (string, error) {
 	parsed, err := url.Parse(raw)
 	if err != nil {
-		return "", fmt.Errorf("parse server URL: %w", err)
+		return "", fmt.Errorf("parse external origin: %w", err)
 	}
 	if parsed.Scheme != "https" || parsed.Hostname() == "" {
-		return "", errors.New("server URL must be an absolute HTTPS URL")
+		return "", errors.New("external origin must be an absolute HTTPS URL")
 	}
 	if parsed.User != nil || (parsed.Path != "" && parsed.Path != "/") || parsed.RawQuery != "" || parsed.Fragment != "" {
-		return "", errors.New("server URL must not contain credentials, a path, query, or fragment")
+		return "", errors.New("external origin must not contain credentials, a path, query, or fragment")
 	}
 	parsed.Path = ""
 	return strings.TrimRight(parsed.String(), "/"), nil

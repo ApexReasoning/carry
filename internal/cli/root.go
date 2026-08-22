@@ -19,17 +19,16 @@ type Streams struct {
 	ErrorOutput io.Writer
 }
 
-// Run builds a fresh command tree with explicitly supplied native executors and executes one Carry CLI invocation.
+// Run builds a fresh command tree with the explicitly composed native adapters and executes one Carry CLI invocation.
 func Run(
 	ctx context.Context,
 	arguments []string,
 	version string,
 	configDirectory string,
 	streams Streams,
-	piExecutor hostdomain.Executor,
-	codexExecutor hostdomain.Executor,
+	adapters hostdomain.AdapterSet,
 ) int {
-	root := newRoot(version, configDirectory, streams, piExecutor, codexExecutor)
+	root := newRoot(version, configDirectory, streams, adapters)
 	root.SetArgs(arguments)
 	if err := root.ExecuteContext(ctx); err != nil {
 		_, _ = fmt.Fprintf(streams.ErrorOutput, "Error: %v\n", err)
@@ -42,8 +41,7 @@ func newRoot(
 	version string,
 	configDirectory string,
 	streams Streams,
-	piExecutor hostdomain.Executor,
-	codexExecutor hostdomain.Executor,
+	adapters hostdomain.AdapterSet,
 ) *cobra.Command {
 	root := &cobra.Command{
 		Use:           "carry",
@@ -64,7 +62,8 @@ func newRoot(
 		login.NewCommand(configDirectory, streams.Output),
 		login.NewLogoutCommand(configDirectory, streams.Output),
 		workcmd.NewCommand(configDirectory, streams.Output),
-		hostcmd.NewCommand(configDirectory, streams.Output, piExecutor, codexExecutor),
+		hostcmd.NewSetupCommand(configDirectory, streams.Output, streams.ErrorOutput, adapters),
+		hostcmd.NewCommand(configDirectory, streams.Output, streams.ErrorOutput, adapters),
 	)
 	return root
 }

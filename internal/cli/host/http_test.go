@@ -15,8 +15,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ApexReasoning/carry/internal/agent"
 	"github.com/ApexReasoning/carry/internal/conversation"
 	hostdomain "github.com/ApexReasoning/carry/internal/host"
+	"github.com/ApexReasoning/carry/internal/machine"
 	"github.com/ApexReasoning/carry/internal/run"
 )
 
@@ -27,12 +29,12 @@ func TestMachineConnectionResponsesUseExactSnakeCaseWire(t *testing.T) {
 		Body: io.NopCloser(strings.NewReader(`{
 			"request_id":"11111111-1111-4111-8111-111111111111",
 			"display_name":"Desk Mac","user_code":"BCDF-GHJ-KLM","poll_secret":"poll",
-			"fingerprint":"SHA256:exact","verification_path":"/machine-connect",
+			"fingerprint":"SHA256:exact","verification_url":"https://carry.example/machine-connect",
 			"expires_at":"2026-08-21T00:15:00Z","interval_seconds":5
 		}`)),
 	}
 	var begun begunConnection
-	if err := decodeConnectionResponse(beginResponse, &begun); err != nil || begun.RequestID == "" || begun.VerificationPath != "/machine-connect" {
+	if err := decodeConnectionResponse(beginResponse, &begun); err != nil || begun.RequestID == "" || begun.VerificationURL != "https://carry.example/machine-connect" {
 		t.Fatalf("decode begin = %#v, %v", begun, err)
 	}
 	pollResponse := &http.Response{
@@ -40,7 +42,7 @@ func TestMachineConnectionResponsesUseExactSnakeCaseWire(t *testing.T) {
 		Body: io.NopCloser(strings.NewReader(`{
 			"machine_id":"22222222-2222-4222-8222-222222222222",
 			"space_id":"33333333-3333-4333-8333-333333333333","display_name":"Desk Mac",
-			"certificate_pem":"certificate","redeemed_at":"2026-08-21T00:05:00Z",
+			"host_api_origin":"https://api.carry.example","certificate_pem":"certificate","redeemed_at":"2026-08-21T00:05:00Z",
 			"replay_until":"2026-08-21T00:20:00Z"
 		}`)),
 	}
@@ -108,7 +110,7 @@ func TestMachineConnectionPollRetriesOnlyTransientTransportFailures(t *testing.T
 func TestParseServerURLRequiresHTTPSRoot(t *testing.T) {
 	t.Parallel()
 
-	if got, err := parseServerURL("https://carry.example.com/"); err != nil || got != "https://carry.example.com" {
+	if got, err := parseExternalOrigin("https://carry.example.com/"); err != nil || got != "https://carry.example.com" {
 		t.Fatalf("valid URL = %q, %v", got, err)
 	}
 	for _, invalid := range []string{
@@ -116,7 +118,7 @@ func TestParseServerURLRequiresHTTPSRoot(t *testing.T) {
 		"https://carry.example.com/v1",
 		"https://user@carry.example.com",
 	} {
-		if _, err := parseServerURL(invalid); err == nil {
+		if _, err := parseExternalOrigin(invalid); err == nil {
 			t.Errorf("invalid URL %q accepted", invalid)
 		}
 	}
@@ -509,6 +511,178 @@ func TestMachineHTTPPreservesStaleAuthorityCategories(t *testing.T) {
 			})}
 			if err := sendJSON(client, request, nil); !errors.Is(err, test.want) {
 				t.Fatalf("stale response = %v, want %v", err, test.want)
+			}
+		})
+	}
+}
+
+func TestMachineHTTPAgentReportUsesExactWireAndTypedRecoveries(t *testing.T) {
+	t.Parallel()
+	var requestBody string
+	client := &machineHTTP{serverURL: "https://carry.example",
+		client: &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+			body, err := io.ReadAll(request.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			requestBody = strings.TrimSpace(string(body))
+			return jsonResponse(http.StatusOK, `{"revision":4,"unsupported_adapter_keys":["future"],"setup_required_adapter_keys":[]}`), nil
+		})}}
+	result, err := client.ReportAgentPresence(context.Background(), "11111111-1111-4111-8111-111111111111", 3, []machine.AgentObservation{{
+		AdapterKey:    "pi",
+		OccurrenceKey: "default",
+		Present:       true,
+	}})
+	if err != nil || result.Revision != 4 || len(result.UnsupportedAdapterKeys) != 1 || result.UnsupportedAdapterKeys[0] != agent.AdapterKey("future") {
+		t.Fatalf("Agent report result = %#v, %v", result, err)
+	}
+	if requestBody != `{"report_id":"11111111-1111-4111-8111-111111111111","base_revision":3,"observations":[{"adapter_key":"pi","occurrence_key":"default","present":true}]}` {
+		t.Fatalf("Agent report request = %s", requestBody)
+	}
+
+	current := int64(9)
+	cases := []struct {
+		name   string
+		status int
+		body   string
+		want   error
+		stale  *int64
+	}{
+		{name: "invalid",
+			status: http.StatusBadRequest,
+			body:   `{"code":"invalid_report"}`,
+			want:   machine.ErrInvalidAgentReport},
+		{name: "revoked",
+			status: http.StatusForbidden,
+			body:   `{"code":"machine_revoked"}`,
+			want:   machine.ErrMachineRevoked},
+		{name: "unavailable",
+			status: http.StatusNotFound,
+			body:   `{"code":"machine_unavailable"}`,
+			want:   machine.ErrMachineUnavailable},
+		{name: "conflict",
+			status: http.StatusConflict,
+			body:   `{"code":"report_conflict"}`,
+			want:   machine.ErrAgentReportConflict},
+		{name: "stale",
+			status: http.StatusConflict,
+			body:   `{"code":"stale_report","current_revision":9}`,
+			stale:  &current},
+		{name: "known no write",
+			status: http.StatusServiceUnavailable,
+			body:   `{"code":"temporarily_unavailable"}`,
+			want:   machine.ErrAgentReportTemporarilyUnavailable},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			client := &machineHTTP{serverURL: "https://carry.example",
+				client: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+					return jsonResponse(testCase.status, testCase.body), nil
+				})}}
+			_, err := client.ReportAgentPresence(context.Background(), "11111111-1111-4111-8111-111111111111", 3, nil)
+			if testCase.stale != nil {
+				var stale machine.AgentReportStaleError
+				if !errors.As(err, &stale) || stale.CurrentRevision != *testCase.stale {
+					t.Fatalf("stale error = %v", err)
+				}
+			} else if !errors.Is(err, testCase.want) {
+				t.Fatalf("typed error = %v, want %v", err, testCase.want)
+			}
+		})
+	}
+	for _, testCase := range []struct {
+		name   string
+		status int
+		body   string
+	}{
+		{
+			name:   "generic unauthorized",
+			status: http.StatusUnauthorized,
+			body:   `{"error":"Machine certificate is required"}`,
+		},
+		{
+			name:   "malformed unprocessable entity",
+			status: http.StatusUnprocessableEntity,
+			body:   `{not-json`,
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			requests := 0
+			client := &machineHTTP{
+				serverURL: "https://carry.example",
+				client: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+					requests++
+					return jsonResponse(testCase.status, testCase.body), nil
+				})},
+			}
+			_, err := client.ReportAgentPresence(context.Background(), "11111111-1111-4111-8111-111111111111", 3, nil)
+			var rejected hostdomain.AgentReportRejectedError
+			if !errors.As(err, &rejected) || rejected.StatusCode != testCase.status || requests != 1 {
+				t.Fatalf("known rejection = %v, requests = %d", err, requests)
+			}
+		})
+	}
+
+	for _, testCase := range []struct {
+		name      string
+		transport http.RoundTripper
+	}{
+		{
+			name: "no response",
+			transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+				return nil, &net.OpError{Op: "read",
+					Net: "tcp",
+					Err: syscall.ECONNRESET}
+			}),
+		},
+		{
+			name: "internal server error",
+			transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+				return jsonResponse(http.StatusInternalServerError, `{"code":"unknown_outcome"}`), nil
+			}),
+		},
+		{
+			name: "bad gateway",
+			transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+				return jsonResponse(http.StatusBadGateway, `gateway failed`), nil
+			}),
+		},
+		{
+			name: "gateway timeout",
+			transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+				return jsonResponse(http.StatusGatewayTimeout, `gateway timed out`), nil
+			}),
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			client := &machineHTTP{
+				serverURL: "https://carry.example",
+				client:    &http.Client{Transport: testCase.transport},
+			}
+			_, err := client.ReportAgentPresence(context.Background(), "11111111-1111-4111-8111-111111111111", 3, nil)
+			var rejected hostdomain.AgentReportRejectedError
+			if err == nil || errors.As(err, &rejected) || errors.Is(err, machine.ErrAgentReportTemporarilyUnavailable) {
+				t.Fatalf("Unknown outcome = %v", err)
+			}
+		})
+	}
+}
+
+func TestMachineHTTPAgentReportRejectsMalformedSuccessfulAuthority(t *testing.T) {
+	t.Parallel()
+	for name, body := range map[string]string{
+		"missing arrays":   `{"revision":1}`,
+		"unsorted keys":    `{"revision":1,"unsupported_adapter_keys":["z","a"],"setup_required_adapter_keys":[]}`,
+		"invalid revision": `{"revision":0,"unsupported_adapter_keys":[],"setup_required_adapter_keys":[]}`,
+		"extra field":      `{"revision":1,"unsupported_adapter_keys":[],"setup_required_adapter_keys":[],"extra":true}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			client := &machineHTTP{serverURL: "https://carry.example",
+				client: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+					return jsonResponse(http.StatusOK, body), nil
+				})}}
+			if _, err := client.ReportAgentPresence(context.Background(), "11111111-1111-4111-8111-111111111111", 0, nil); err == nil {
+				t.Fatal("malformed Agent authority was accepted")
 			}
 		})
 	}

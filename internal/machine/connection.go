@@ -10,10 +10,12 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"net/url"
 	"strings"
 	"time"
 	"unicode/utf8"
 
+	"github.com/ApexReasoning/carry/internal/agent"
 	"github.com/google/uuid"
 )
 
@@ -96,25 +98,50 @@ type ConnectionPersistence interface {
 	DecideMachineConnection(context.Context, DecideConnectionCommand) (ConnectionRequest, error)
 	PollMachineConnection(context.Context, PollConnectionCommand, CertificateIssuer) (ConnectedMachine, error)
 	CancelMachineConnection(context.Context, CancelConnectionCommand) error
-	ListMachines(context.Context, ListMachinesCommand) (MachinePage, error)
-	RevokeMachineFromBrowser(context.Context, RevokeMachineCommand) (MachineRecord, error)
+	ListMachines(context.Context, ListMachinesCommand) (MachinePage, []agent.InventoryRecord, error)
+	RevokeMachineFromBrowser(context.Context, RevokeMachineCommand) (MachineRecord, []agent.InventoryRecord, error)
 	RevokeMachineFromHost(context.Context, SelfRevokeMachineCommand) (MachineRecord, error)
 }
 
 type CertificateIssuer func(machineID string, publicKeyDER []byte, approvedAt time.Time) (IssuedMachineCertificate, error)
 
-type Connections struct {
-	persistence ConnectionPersistence
-	credentials ConnectionCredentials
-	authority   *CertificateAuthority
-	origin      string
+// HostAPIOrigin is the canonical HTTPS authority used only by Machine mTLS traffic.
+type HostAPIOrigin struct{ value string }
+
+func ParseHostAPIOrigin(value string) (HostAPIOrigin, error) {
+	if strings.TrimSpace(value) != value || value == "" {
+		return HostAPIOrigin{}, errors.New("Host API origin must be a canonical HTTPS origin")
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.Hostname() == "" ||
+		parsed.User != nil || parsed.Path != "" || parsed.RawPath != "" || parsed.RawQuery != "" || parsed.Fragment != "" ||
+		parsed.Opaque != "" || parsed.Host != strings.ToLower(parsed.Host) || value != "https://"+parsed.Host {
+		return HostAPIOrigin{}, errors.New("Host API origin must be a canonical HTTPS origin")
+	}
+	return HostAPIOrigin{value: value}, nil
 }
 
-func NewConnections(persistence ConnectionPersistence, credentials ConnectionCredentials, authority *CertificateAuthority, origin string) (*Connections, error) {
-	if persistence == nil || authority == nil || !validOrigin(origin) {
+func (origin HostAPIOrigin) String() string { return origin.value }
+
+type Connections struct {
+	persistence    ConnectionPersistence
+	credentials    ConnectionCredentials
+	authority      *CertificateAuthority
+	externalOrigin string
+	hostAPIOrigin  HostAPIOrigin
+}
+
+func NewConnections(persistence ConnectionPersistence, credentials ConnectionCredentials, authority *CertificateAuthority, externalOrigin string, hostAPIOrigin HostAPIOrigin) (*Connections, error) {
+	if persistence == nil || authority == nil || !validOrigin(externalOrigin) || hostAPIOrigin.value == "" {
 		return nil, errors.New("Machine connection dependencies are required")
 	}
-	return &Connections{persistence: persistence, credentials: credentials, authority: authority, origin: origin}, nil
+	return &Connections{
+		persistence:    persistence,
+		credentials:    credentials,
+		authority:      authority,
+		externalOrigin: externalOrigin,
+		hostAPIOrigin:  hostAPIOrigin,
+	}, nil
 }
 
 type BeginConnectionRequest struct {
@@ -139,9 +166,9 @@ type ConnectionRequest struct {
 }
 
 type BegunConnection struct {
-	RequestID, DisplayName, UserCode, PollSecret, Fingerprint, VerificationPath string
-	ExpiresAt                                                                   time.Time
-	PollInterval                                                                time.Duration
+	RequestID, DisplayName, UserCode, PollSecret, Fingerprint, VerificationURL string
+	ExpiresAt                                                                  time.Time
+	PollInterval                                                               time.Duration
 }
 
 // Begin deliberately reports every malformed request as ErrInvalidConnection: an unauthenticated caller can only discard it and restart setup, while field-level errors would enlarge the probing surface.
@@ -173,7 +200,7 @@ func (connections *Connections) Begin(ctx context.Context, request BeginConnecti
 	if !utf8.ValidString(name) {
 		return BegunConnection{}, ErrInvalidConnection
 	}
-	if request.Origin != connections.origin {
+	if request.Origin != connections.externalOrigin {
 		return BegunConnection{}, ErrInvalidConnection
 	}
 	if strings.TrimSpace(request.Source) == "" {
@@ -221,14 +248,14 @@ func (connections *Connections) Begin(ctx context.Context, request BeginConnecti
 		return BegunConnection{}, err
 	}
 	return BegunConnection{
-		RequestID:        created.RequestID,
-		DisplayName:      created.DisplayName,
-		UserCode:         code,
-		PollSecret:       request.PollSecret,
-		Fingerprint:      PublicKeyFingerprint(created.PublicKeyDER),
-		VerificationPath: "/machine-connect",
-		ExpiresAt:        created.ExpiresAt,
-		PollInterval:     created.PollInterval,
+		RequestID:       created.RequestID,
+		DisplayName:     created.DisplayName,
+		UserCode:        code,
+		PollSecret:      request.PollSecret,
+		Fingerprint:     PublicKeyFingerprint(created.PublicKeyDER),
+		VerificationURL: connections.externalOrigin + "/machine-connect",
+		ExpiresAt:       created.ExpiresAt,
+		PollInterval:    created.PollInterval,
 	}, nil
 }
 
@@ -258,9 +285,12 @@ func (connections *Connections) Lookup(ctx context.Context, request LookupConnec
 	}
 	return ConnectionPreview{
 		RequestID: found.RequestID, UserCode: code, DisplayName: found.DisplayName,
-		Fingerprint: PublicKeyFingerprint(found.PublicKeyDER), Server: connections.origin,
-		Decision: found.Decision, ApprovedSpaceID: found.ApprovedSpaceID,
-		CreatedAt: found.CreatedAt, ExpiresAt: found.ExpiresAt,
+		Fingerprint:     PublicKeyFingerprint(found.PublicKeyDER),
+		Server:          connections.externalOrigin,
+		Decision:        found.Decision,
+		ApprovedSpaceID: found.ApprovedSpaceID,
+		CreatedAt:       found.CreatedAt,
+		ExpiresAt:       found.ExpiresAt,
 	}, nil
 }
 
@@ -307,6 +337,7 @@ type PollConnectionCommand struct {
 
 type ConnectedMachine struct {
 	MachineID, SpaceID, DisplayName string
+	HostAPIOrigin                   HostAPIOrigin
 	CertificatePEM                  []byte
 	RedeemedAt, ReplayUntil         time.Time
 }
@@ -316,9 +347,15 @@ func (connections *Connections) Poll(ctx context.Context, pollSecret string) (Co
 	if !ok {
 		return ConnectedMachine{}, ErrMachineUnavailable
 	}
-	return connections.persistence.PollMachineConnection(ctx, PollConnectionCommand{
-		RequestID: requestID, PollDigest: connections.credentials.PollDigest(pollSecret),
+	connected, err := connections.persistence.PollMachineConnection(ctx, PollConnectionCommand{
+		RequestID:  requestID,
+		PollDigest: connections.credentials.PollDigest(pollSecret),
 	}, connections.authority.IssueMachineCertificate)
+	if err != nil {
+		return ConnectedMachine{}, err
+	}
+	connected.HostAPIOrigin = connections.hostAPIOrigin
+	return connected, nil
 }
 
 type CancelConnectionCommand struct {
@@ -352,9 +389,9 @@ type MachinePage struct {
 	NextCursor string
 }
 
-func (connections *Connections) List(ctx context.Context, browserSessionID, spaceID, after string) (MachinePage, error) {
+func (connections *Connections) List(ctx context.Context, browserSessionID, spaceID, after string) (MachinePage, []agent.InventoryRecord, error) {
 	if uuid.Validate(browserSessionID) != nil || uuid.Validate(spaceID) != nil || (after != "" && uuid.Validate(after) != nil) {
-		return MachinePage{}, ErrInvalidConnection
+		return MachinePage{}, nil, ErrInvalidConnection
 	}
 	return connections.persistence.ListMachines(ctx, ListMachinesCommand{BrowserSessionID: browserSessionID, SpaceID: spaceID, After: after})
 }
@@ -364,9 +401,9 @@ type RevokeMachineCommand struct {
 	RequestDigest                                        [sha256.Size]byte
 }
 
-func (connections *Connections) RevokeFromBrowser(ctx context.Context, browserSessionID, spaceID, machineID, idempotencyKey string) (MachineRecord, error) {
+func (connections *Connections) RevokeFromBrowser(ctx context.Context, browserSessionID, spaceID, machineID, idempotencyKey string) (MachineRecord, []agent.InventoryRecord, error) {
 	if uuid.Validate(browserSessionID) != nil || uuid.Validate(spaceID) != nil || uuid.Validate(machineID) != nil || !validIdempotencyKey(idempotencyKey) {
-		return MachineRecord{}, ErrInvalidConnection
+		return MachineRecord{}, nil, ErrInvalidConnection
 	}
 	return connections.persistence.RevokeMachineFromBrowser(ctx, RevokeMachineCommand{
 		BrowserSessionID: browserSessionID, SpaceID: spaceID, MachineID: machineID, IdempotencyKey: idempotencyKey,
@@ -384,8 +421,10 @@ func (connections *Connections) RevokeFromHost(ctx context.Context, machineID, c
 		return MachineRecord{}, ErrInvalidConnection
 	}
 	return connections.persistence.RevokeMachineFromHost(ctx, SelfRevokeMachineCommand{
-		MachineID: machineID, CertificateSerial: certificateSerial, IdempotencyKey: idempotencyKey,
-		RequestDigest: connectionDigest(machineID, certificateSerial, "self-revoke"),
+		MachineID:         machineID,
+		CertificateSerial: certificateSerial,
+		IdempotencyKey:    idempotencyKey,
+		RequestDigest:     connectionDigest(machineID, certificateSerial, "self-revoke"),
 	})
 }
 

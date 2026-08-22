@@ -14,11 +14,11 @@ done < <(find internal -type d -mindepth 1 2>/dev/null)
 
 while IFS='|' read -r package imports; do
   case "$package" in
-    "$module_path"/internal/server*|"$module_path"/internal/postgres*|"$module_path"/internal/agent*|"$module_path"/internal/connector*|"$module_path"/internal/cli*|"$module_path"/internal/host*)
+    "$module_path"/internal/server*|"$module_path"/internal/postgres*|"$module_path"/internal/connector*|"$module_path"/internal/cli*|"$module_path"/internal/host*)
       continue
       ;;
     "$module_path"/internal/*)
-      if [[ ",$imports," =~ ,$module_path/internal/(server|postgres|agent|connector|cli|host)(/[^,]*)?, ]]; then
+      if [[ ",$imports," =~ ,$module_path/internal/(server|postgres|connector|cli|host)(/[^,]*)?, ]]; then
         printf 'domain package %s imports an adapter package\n' "$package" >&2
         exit 1
       fi
@@ -26,8 +26,8 @@ while IFS='|' read -r package imports; do
   esac
 done < <(go list -f '{{.ImportPath}}|{{join .Imports ","}}' ./internal/...)
 
-if go list -deps ./cmd/carry-server | grep -q "^$module_path/internal/agent/"; then
-  echo 'carry-server must not import local Agent process implementations' >&2
+if go list -deps ./cmd/carry-server | grep -Eq "^$module_path/internal/host/(pi|codex)$"; then
+  echo 'carry-server must not import concrete Host Agent process implementations' >&2
   exit 1
 fi
 

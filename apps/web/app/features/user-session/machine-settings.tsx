@@ -1,7 +1,33 @@
 import { useEffect, useState } from "react";
 
 import { machines, revokeMachine } from "../../carry-api";
-import type { MachineRecord } from "../../generated/types.gen";
+import type { AgentRecord, MachineRecord } from "../../generated/types.gen";
+
+type InventoryState =
+  | {
+      phase: "loading";
+      items: Array<MachineRecord>;
+      nextCursor: string | null;
+      action: "initial" | "load-more" | "revoke";
+    }
+  | {
+      phase: "loaded";
+      items: Array<MachineRecord>;
+      nextCursor: string | null;
+    }
+  | {
+      phase: "recoverable-error";
+      items: Array<MachineRecord>;
+      nextCursor: string | null;
+      message: string;
+    };
+
+const initialInventory: InventoryState = {
+  phase: "loading",
+  items: [],
+  nextCursor: null,
+  action: "initial",
+};
 
 export function MachineSettings({
   spaceID,
@@ -14,135 +40,181 @@ export function MachineSettings({
   canEnroll: boolean;
   onClose: () => void;
 }) {
-  const [items, setItems] = useState<Array<MachineRecord>>([]);
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [inventory, setInventory] = useState<InventoryState>(initialInventory);
   const [selected, setSelected] = useState<MachineRecord | null>(null);
   const [commandKey, setCommandKey] = useState("");
-  const [busy, setBusy] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
     machines(spaceID)
       .then((page) => {
         if (active) {
-          setItems(page.machines);
-          setNextCursor(page.next_cursor ?? null);
+          setInventory({
+            phase: "loaded",
+            items: page.machines,
+            nextCursor: page.next_cursor ?? null,
+          });
         }
       })
-      .catch((caught: unknown) => {
-        if (active) setError(message(caught));
-      })
-      .finally(() => {
-        if (active) setBusy(false);
+      .catch(() => {
+        if (active) {
+          setInventory({
+            phase: "recoverable-error",
+            items: [],
+            nextCursor: null,
+            message: "Host and Agent inventory failed.",
+          });
+        }
       });
     return () => {
       active = false;
     };
   }, [spaceID]);
 
+  const busy = inventory.phase === "loading";
+
   async function revoke() {
-    if (!selected) return;
+    if (!selected || busy) return;
     const key = commandKey || crypto.randomUUID();
     setCommandKey(key);
-    setBusy(true);
-    setError(null);
+    const previous = inventory;
+    setInventory({
+      phase: "loading",
+      items: previous.items,
+      nextCursor: previous.nextCursor,
+      action: "revoke",
+    });
     try {
       await revokeMachine(spaceID, selected.machine_id, key);
       const page = await machines(spaceID);
-      setItems(page.machines);
-      setNextCursor(page.next_cursor ?? null);
+      setInventory({
+        phase: "loaded",
+        items: page.machines,
+        nextCursor: page.next_cursor ?? null,
+      });
       setSelected(null);
       setCommandKey("");
     } catch (caught) {
-      setError(message(caught));
-    } finally {
-      setBusy(false);
+      setInventory({
+        phase: "recoverable-error",
+        items: previous.items,
+        nextCursor: previous.nextCursor,
+        message: message(caught, "Host revocation failed."),
+      });
     }
   }
 
   async function loadMore() {
-    if (!nextCursor) return;
-    setBusy(true);
-    setError(null);
+    if (!inventory.nextCursor || busy) return;
+    const previous = inventory;
+    setInventory({
+      phase: "loading",
+      items: previous.items,
+      nextCursor: previous.nextCursor,
+      action: "load-more",
+    });
     try {
-      const page = await machines(spaceID, nextCursor);
-      setItems((current) => [...current, ...page.machines]);
-      setNextCursor(page.next_cursor ?? null);
-    } catch (caught) {
-      setError(message(caught));
-    } finally {
-      setBusy(false);
+      const page = await machines(spaceID, previous.nextCursor ?? undefined);
+      setInventory({
+        phase: "loaded",
+        items: [...previous.items, ...page.machines],
+        nextCursor: page.next_cursor ?? null,
+      });
+    } catch {
+      setInventory({
+        phase: "recoverable-error",
+        items: previous.items,
+        nextCursor: previous.nextCursor,
+        message: "Host and Agent inventory failed.",
+      });
     }
   }
 
   return (
-    <section className="settings-card" aria-labelledby="machine-settings-title">
+    <section className="settings-card" aria-labelledby="host-settings-title">
       <div className="settings-heading">
         <div>
           <p className="eyebrow">{spaceName}</p>
-          <h2 id="machine-settings-title">Machines</h2>
+          <h2 id="host-settings-title">Hosts and Agents</h2>
         </div>
         <button className="ghost-button" type="button" onClick={onClose}>
           Close
         </button>
       </div>
       <p>
-        Active means Carry has not revoked this Machine. It does not mean the
-        computer or Host process is online.
+        A Host keeps durable Agent identities online while its foreground Carry
+        process is running.
       </p>
-      {busy && items.length === 0 ? <p>Loading Machines…</p> : null}
-      {items.length === 0 && !busy ? (
-        <p>No Machines have been connected to this Space.</p>
+      {canEnroll ? (
+        <a className="primary-button" href="/machine-connect">
+          Add Host
+        </a>
       ) : null}
-      <ul className="settings-list machine-list">
-        {items.map((item) => (
-          <li key={item.machine_id}>
-            <div>
-              <strong>{item.display_name}</strong> — {item.state}
-              <p>Space: {item.space_name}</p>
-              <p>
-                Enrolled by {item.enrolled_by_name} ·{" "}
-                {new Date(item.enrolled_at).toLocaleString()}
-              </p>
-              {item.state === "Revoked" ? (
+      {inventory.phase === "loading" && inventory.items.length === 0 ? (
+        <p>Loading Hosts and Agents…</p>
+      ) : null}
+      {inventory.phase === "loaded" && inventory.items.length === 0 ? (
+        <p>No Hosts have been connected to this Space.</p>
+      ) : null}
+      <ul className="host-list">
+        {inventory.items.map((item) => (
+          <li className="host-card" key={item.machine_id}>
+            <div className="host-heading">
+              <div>
+                <strong>{item.display_name}</strong> — {item.state}
                 <p>
-                  Revoked by {item.revocation_actor ?? "Not recorded"}
-                  {item.revoked_at
-                    ? ` · ${new Date(item.revoked_at).toLocaleString()}`
-                    : ""}
+                  Connected by {item.enrolled_by_name} ·{" "}
+                  {new Date(item.enrolled_at).toLocaleString()}
                 </p>
+                {item.state === "Revoked" ? (
+                  <p>
+                    Revoked by {item.revocation_actor ?? "Not recorded"}
+                    {item.revoked_at
+                      ? ` · ${new Date(item.revoked_at).toLocaleString()}`
+                      : ""}
+                  </p>
+                ) : null}
+              </div>
+              {item.state === "Active" && canEnroll && item.can_revoke ? (
+                <button
+                  className="danger-button"
+                  type="button"
+                  disabled={busy}
+                  onClick={() => setSelected(item)}
+                >
+                  Revoke Host
+                </button>
               ) : null}
             </div>
-            {item.state === "Active" && canEnroll && item.can_revoke ? (
-              <button
-                className="danger-button"
-                type="button"
-                disabled={busy}
-                onClick={() => setSelected(item)}
+            {item.agents.length === 0 ? (
+              <p>No supported Agents have been discovered on this Host.</p>
+            ) : (
+              <ul
+                className="agent-list"
+                aria-label={`${item.display_name} Agents`}
               >
-                Revoke
-              </button>
-            ) : null}
+                {item.agents.map((agent) => (
+                  <AgentRow key={agent.agent_id} agent={agent} />
+                ))}
+              </ul>
+            )}
           </li>
         ))}
       </ul>
-      {nextCursor ? (
+      {inventory.nextCursor ? (
         <button
           className="ghost-button"
           type="button"
           disabled={busy}
           onClick={() => void loadMore()}
         >
-          {busy ? "Loading…" : "Load more Machines"}
+          {inventory.phase === "loading" && inventory.action === "load-more"
+            ? "Loading…"
+            : "Load more Hosts"}
         </button>
       ) : null}
       {selected ? (
-        <div
-          className="confirm-panel"
-          role="dialog"
-          aria-label="Revoke Machine"
-        >
+        <div className="confirm-panel" role="dialog" aria-label="Revoke Host">
           <h3>Revoke {selected.display_name}?</h3>
           <p>Space: {selected.space_name}</p>
           {selected.fingerprint ? (
@@ -151,9 +223,13 @@ export function MachineSettings({
             </p>
           ) : null}
           <p>
-            Carry will reject future claims, renewals, commits, and finishes
-            from this Machine certificate. This does not prove a process
-            stopped, delete files from that computer, or erase copied data.
+            Every Active Agent on this Host becomes Removed. Their identities
+            and history remain, unavailable Work is not reassigned, and this
+            certificate can no longer report presence or execute Work.
+          </p>
+          <p>
+            This does not prove a process stopped, delete files from that
+            computer, or erase copied data.
           </p>
           <div className="settings-actions">
             <button
@@ -162,7 +238,7 @@ export function MachineSettings({
               disabled={busy}
               onClick={() => setSelected(null)}
             >
-              Keep Machine
+              Keep Host
             </button>
             <button
               className="danger-button"
@@ -170,20 +246,52 @@ export function MachineSettings({
               disabled={busy}
               onClick={() => void revoke()}
             >
-              {busy ? "Revoking…" : "Revoke Machine"}
+              {inventory.phase === "loading" && inventory.action === "revoke"
+                ? "Revoking…"
+                : "Revoke Host"}
             </button>
           </div>
         </div>
       ) : null}
-      {error ? (
+      {inventory.phase === "recoverable-error" ? (
         <p className="alert" role="alert">
-          {error}
+          {inventory.message}
         </p>
       ) : null}
     </section>
   );
 }
 
-function message(value: unknown) {
-  return value instanceof Error ? value.message : "Machine inventory failed";
+function AgentRow({ agent }: { agent: AgentRecord }) {
+  const initials = agent.name
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part.slice(0, 1))
+    .join("")
+    .toUpperCase();
+  return (
+    <li className="agent-row">
+      <span
+        className={`agent-avatar agent-avatar-${agent.avatar_index}`}
+        aria-hidden="true"
+      >
+        {initials}
+      </span>
+      <div>
+        <strong>{agent.name}</strong>
+        <p>Owned by {agent.owner_name}</p>
+        <p>
+          {agent.state === "active" ? "Active" : "Removed"} ·{" "}
+          {agent.online ? "Online" : "Offline"} ·{" "}
+          {agent.last_active_at
+            ? `Last active ${new Date(agent.last_active_at).toLocaleString()}`
+            : "Never active"}
+        </p>
+      </div>
+    </li>
+  );
+}
+
+function message(value: unknown, fallback: string) {
+  return value instanceof Error ? value.message : fallback;
 }

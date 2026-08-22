@@ -6,10 +6,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/ApexReasoning/carry/internal/agent/codex"
-	"github.com/ApexReasoning/carry/internal/agent/pi"
 	"github.com/ApexReasoning/carry/internal/conversation"
 	"github.com/ApexReasoning/carry/internal/host"
+	"github.com/ApexReasoning/carry/internal/host/codex"
+	"github.com/ApexReasoning/carry/internal/host/pi"
 	"github.com/ApexReasoning/carry/internal/run"
 )
 

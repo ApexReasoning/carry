@@ -114,7 +114,7 @@ INSERT INTO machines (
     $4, $5, $6,
     $7
 )
-RETURNING machine_id, space_id, display_name, public_key_der, certificate_pem, certificate_serial, enrolled_by_user_id, enrolled_at, revoked_at, revocation_actor_kind, revoked_by_user_id, revocation_idempotency_key, revocation_request_digest
+RETURNING machine_id, space_id, display_name, public_key_der, certificate_pem, certificate_serial, enrolled_by_user_id, enrolled_at, revoked_at, revocation_actor_kind, revoked_by_user_id, revocation_idempotency_key, revocation_request_digest, agent_report_revision, agent_reported_at, last_agent_report_id, last_agent_report_digest, last_agent_report_unsupported_keys, last_agent_report_setup_required_keys
 `
 
 type CreateConnectedMachineParams struct {
@@ -152,6 +152,12 @@ func (q *Queries) CreateConnectedMachine(ctx context.Context, arg CreateConnecte
 		&i.RevokedByUserID,
 		&i.RevocationIdempotencyKey,
 		&i.RevocationRequestDigest,
+		&i.AgentReportRevision,
+		&i.AgentReportedAt,
+		&i.LastAgentReportID,
+		&i.LastAgentReportDigest,
+		&i.LastAgentReportUnsupportedKeys,
+		&i.LastAgentReportSetupRequiredKeys,
 	)
 	return i, err
 }
@@ -396,7 +402,7 @@ func (q *Queries) ListSpaceMachines(ctx context.Context, arg ListSpaceMachinesPa
 }
 
 const loadMachine = `-- name: LoadMachine :one
-SELECT machine_id, space_id, display_name, public_key_der, certificate_pem, certificate_serial, enrolled_by_user_id, enrolled_at, revoked_at, revocation_actor_kind, revoked_by_user_id, revocation_idempotency_key, revocation_request_digest FROM machines WHERE machine_id = $1
+SELECT machine_id, space_id, display_name, public_key_der, certificate_pem, certificate_serial, enrolled_by_user_id, enrolled_at, revoked_at, revocation_actor_kind, revoked_by_user_id, revocation_idempotency_key, revocation_request_digest, agent_report_revision, agent_reported_at, last_agent_report_id, last_agent_report_digest, last_agent_report_unsupported_keys, last_agent_report_setup_required_keys FROM machines WHERE machine_id = $1
 `
 
 func (q *Queries) LoadMachine(ctx context.Context, machineID string) (Machine, error) {
@@ -416,6 +422,12 @@ func (q *Queries) LoadMachine(ctx context.Context, machineID string) (Machine, e
 		&i.RevokedByUserID,
 		&i.RevocationIdempotencyKey,
 		&i.RevocationRequestDigest,
+		&i.AgentReportRevision,
+		&i.AgentReportedAt,
+		&i.LastAgentReportID,
+		&i.LastAgentReportDigest,
+		&i.LastAgentReportUnsupportedKeys,
+		&i.LastAgentReportSetupRequiredKeys,
 	)
 	return i, err
 }
@@ -506,7 +518,7 @@ func (q *Queries) LockBrowserSessionForMachineConnection(ctx context.Context, se
 }
 
 const lockMachineByIDForSelfRevocation = `-- name: LockMachineByIDForSelfRevocation :one
-SELECT machine_id, space_id, display_name, public_key_der, certificate_pem, certificate_serial, enrolled_by_user_id, enrolled_at, revoked_at, revocation_actor_kind, revoked_by_user_id, revocation_idempotency_key, revocation_request_digest FROM machines WHERE machine_id = $1 FOR UPDATE
+SELECT machine_id, space_id, display_name, public_key_der, certificate_pem, certificate_serial, enrolled_by_user_id, enrolled_at, revoked_at, revocation_actor_kind, revoked_by_user_id, revocation_idempotency_key, revocation_request_digest, agent_report_revision, agent_reported_at, last_agent_report_id, last_agent_report_digest, last_agent_report_unsupported_keys, last_agent_report_setup_required_keys FROM machines WHERE machine_id = $1 FOR UPDATE
 `
 
 func (q *Queries) LockMachineByIDForSelfRevocation(ctx context.Context, machineID string) (Machine, error) {
@@ -526,6 +538,12 @@ func (q *Queries) LockMachineByIDForSelfRevocation(ctx context.Context, machineI
 		&i.RevokedByUserID,
 		&i.RevocationIdempotencyKey,
 		&i.RevocationRequestDigest,
+		&i.AgentReportRevision,
+		&i.AgentReportedAt,
+		&i.LastAgentReportID,
+		&i.LastAgentReportDigest,
+		&i.LastAgentReportUnsupportedKeys,
+		&i.LastAgentReportSetupRequiredKeys,
 	)
 	return i, err
 }
@@ -611,7 +629,7 @@ func (q *Queries) LockMachineEnrollmentMembership(ctx context.Context, arg LockM
 }
 
 const lockMachineForRevocation = `-- name: LockMachineForRevocation :one
-SELECT machine_id, space_id, display_name, public_key_der, certificate_pem, certificate_serial, enrolled_by_user_id, enrolled_at, revoked_at, revocation_actor_kind, revoked_by_user_id, revocation_idempotency_key, revocation_request_digest FROM machines
+SELECT machine_id, space_id, display_name, public_key_der, certificate_pem, certificate_serial, enrolled_by_user_id, enrolled_at, revoked_at, revocation_actor_kind, revoked_by_user_id, revocation_idempotency_key, revocation_request_digest, agent_report_revision, agent_reported_at, last_agent_report_id, last_agent_report_digest, last_agent_report_unsupported_keys, last_agent_report_setup_required_keys FROM machines
 WHERE machine_id = $1 AND space_id = $2
 FOR UPDATE
 `
@@ -638,6 +656,12 @@ func (q *Queries) LockMachineForRevocation(ctx context.Context, arg LockMachineF
 		&i.RevokedByUserID,
 		&i.RevocationIdempotencyKey,
 		&i.RevocationRequestDigest,
+		&i.AgentReportRevision,
+		&i.AgentReportedAt,
+		&i.LastAgentReportID,
+		&i.LastAgentReportDigest,
+		&i.LastAgentReportUnsupportedKeys,
+		&i.LastAgentReportSetupRequiredKeys,
 	)
 	return i, err
 }
@@ -774,7 +798,7 @@ SET revoked_at = transaction_timestamp(),
     revocation_idempotency_key = $1,
     revocation_request_digest = $2
 WHERE machine_id = $3 AND revoked_at IS NULL
-RETURNING machine_id, space_id, display_name, public_key_der, certificate_pem, certificate_serial, enrolled_by_user_id, enrolled_at, revoked_at, revocation_actor_kind, revoked_by_user_id, revocation_idempotency_key, revocation_request_digest
+RETURNING machine_id, space_id, display_name, public_key_der, certificate_pem, certificate_serial, enrolled_by_user_id, enrolled_at, revoked_at, revocation_actor_kind, revoked_by_user_id, revocation_idempotency_key, revocation_request_digest, agent_report_revision, agent_reported_at, last_agent_report_id, last_agent_report_digest, last_agent_report_unsupported_keys, last_agent_report_setup_required_keys
 `
 
 type RevokeMachineBySelfParams struct {
@@ -800,6 +824,12 @@ func (q *Queries) RevokeMachineBySelf(ctx context.Context, arg RevokeMachineBySe
 		&i.RevokedByUserID,
 		&i.RevocationIdempotencyKey,
 		&i.RevocationRequestDigest,
+		&i.AgentReportRevision,
+		&i.AgentReportedAt,
+		&i.LastAgentReportID,
+		&i.LastAgentReportDigest,
+		&i.LastAgentReportUnsupportedKeys,
+		&i.LastAgentReportSetupRequiredKeys,
 	)
 	return i, err
 }
@@ -812,7 +842,7 @@ SET revoked_at = transaction_timestamp(),
     revocation_idempotency_key = $2,
     revocation_request_digest = $3
 WHERE machine_id = $4 AND revoked_at IS NULL
-RETURNING machine_id, space_id, display_name, public_key_der, certificate_pem, certificate_serial, enrolled_by_user_id, enrolled_at, revoked_at, revocation_actor_kind, revoked_by_user_id, revocation_idempotency_key, revocation_request_digest
+RETURNING machine_id, space_id, display_name, public_key_der, certificate_pem, certificate_serial, enrolled_by_user_id, enrolled_at, revoked_at, revocation_actor_kind, revoked_by_user_id, revocation_idempotency_key, revocation_request_digest, agent_report_revision, agent_reported_at, last_agent_report_id, last_agent_report_digest, last_agent_report_unsupported_keys, last_agent_report_setup_required_keys
 `
 
 type RevokeMachineByUserParams struct {
@@ -844,6 +874,12 @@ func (q *Queries) RevokeMachineByUser(ctx context.Context, arg RevokeMachineByUs
 		&i.RevokedByUserID,
 		&i.RevocationIdempotencyKey,
 		&i.RevocationRequestDigest,
+		&i.AgentReportRevision,
+		&i.AgentReportedAt,
+		&i.LastAgentReportID,
+		&i.LastAgentReportDigest,
+		&i.LastAgentReportUnsupportedKeys,
+		&i.LastAgentReportSetupRequiredKeys,
 	)
 	return i, err
 }

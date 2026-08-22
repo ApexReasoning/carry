@@ -1,79 +1,39 @@
 package host
 
 import (
-	"context"
+	"bytes"
 	"errors"
+	"strings"
 	"testing"
 
-	"github.com/ApexReasoning/carry/internal/conversation"
-	hostdomain "github.com/ApexReasoning/carry/internal/host"
+	"github.com/ApexReasoning/carry/internal/agent"
+	"github.com/ApexReasoning/carry/internal/machine"
 )
 
-func TestSelectExecutorChoosesOneBeforeClaimingWork(t *testing.T) {
-	pi := &diagnosticExecutor{}
-	codex := &diagnosticExecutor{}
-	selected, label, err := selectExecutor(context.Background(), pi, codex)
-	if err != nil {
-		t.Fatalf("select executor: %v", err)
-	}
-	if selected != pi || label != "Pi" || pi.diagnoses != 1 || codex.diagnoses != 0 {
-		t.Fatalf("selection = %s, Pi diagnoses = %d, Codex diagnoses = %d", label, pi.diagnoses, codex.diagnoses)
-	}
-}
-
-func TestSelectExecutorUsesCodexWhenPiIsUnavailable(t *testing.T) {
-	pi := &diagnosticExecutor{diagnoseErr: hostdomain.ErrAgentUnavailable}
-	codex := &diagnosticExecutor{}
-	selected, label, err := selectExecutor(context.Background(), pi, codex)
-	if err != nil {
-		t.Fatalf("select executor: %v", err)
-	}
-	if selected != codex || label != "Codex" || pi.diagnoses != 1 || codex.diagnoses != 1 {
-		t.Fatalf("selection = %s, Pi diagnoses = %d, Codex diagnoses = %d", label, pi.diagnoses, codex.diagnoses)
+func TestAgentReportWarningsNameExactOperatorRecoveries(t *testing.T) {
+	t.Parallel()
+	var output bytes.Buffer
+	writeAgentReportWarnings(&output, machine.AgentReportResult{
+		UnsupportedAdapterKeys:   []agent.AdapterKey{"future"},
+		SetupRequiredAdapterKeys: []agent.AdapterKey{"codex"},
+	})
+	got := output.String()
+	if !strings.Contains(got, `Adapter "future" is not supported by this carry-server. Update carry-server.`) ||
+		!strings.Contains(got, `Carry cannot add "codex" on this Host because its approving member is no longer active. Revoke this Host and run carry setup again.`) {
+		t.Fatalf("warnings = %q", got)
 	}
 }
 
-func TestMachineWorkerCompositionUsesBothNarrowClientsAndOneExecutor(t *testing.T) {
-	connection := &machineHTTP{}
-	executor := &diagnosticExecutor{}
-	worker := newMachineWorker(connection, executor)
-	if worker.Runs != connection || worker.Conversations != connection || worker.Executor != executor {
-		t.Fatalf("Machine worker composition = %#v", worker)
+func TestAgentReportTerminalRecoveryRequiresSetup(t *testing.T) {
+	t.Parallel()
+	if got := agentReportTerminalError(machine.ErrMachineUnavailable).Error(); !strings.Contains(got, "run carry setup again") {
+		t.Fatalf("unavailable recovery = %q", got)
 	}
-	if worker.PollInterval <= 0 || worker.RenewInterval <= 0 {
-		t.Fatalf("Machine worker intervals = %s/%s", worker.PollInterval, worker.RenewInterval)
+	if got := agentReportTerminalError(machine.ErrMachineRevoked).Error(); !strings.Contains(got, "run carry setup") {
+		t.Fatalf("revoked recovery = %q", got)
 	}
-}
-
-func TestSelectExecutorReturnsBothDiagnostics(t *testing.T) {
-	piFailure := errors.New("Pi installation is incomplete")
-	codexFailure := errors.New("Codex installation is incomplete")
-	_, _, err := selectExecutor(
-		context.Background(),
-		&diagnosticExecutor{diagnoseErr: piFailure},
-		&diagnosticExecutor{diagnoseErr: codexFailure},
-	)
-	if !errors.Is(err, piFailure) || !errors.Is(err, codexFailure) {
-		t.Fatalf("selection error = %v", err)
+	unexpected := errors.New("wire broke")
+	if !errors.Is(agentReportTerminalError(unexpected), unexpected) {
+		t.Fatal("unexpected report failure lost its cause")
 	}
 }
-
-type diagnosticExecutor struct {
-	diagnoseErr error
-	diagnoses   int
-}
-
-func (executor *diagnosticExecutor) Diagnose(context.Context) error {
-	executor.diagnoses++
-	return executor.diagnoseErr
-}
-
-func (*diagnosticExecutor) Execute(context.Context, hostdomain.ExecutionRequest) (hostdomain.UnderstandingUpdate, error) {
-	return hostdomain.UnderstandingUpdate{}, errors.New("not implemented")
-}
-
-func (*diagnosticExecutor) Reply(context.Context, hostdomain.ConversationReplyRequest) (conversation.ReplyCandidate, error) {
-	return conversation.ReplyCandidate{}, errors.New("not implemented")
-}
-
-var _ hostdomain.Executor = (*diagnosticExecutor)(nil)

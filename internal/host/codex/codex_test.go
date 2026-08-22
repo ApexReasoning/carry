@@ -14,6 +14,44 @@ import (
 	"github.com/ApexReasoning/carry/internal/host"
 )
 
+func TestAdapterObservesOnlyDiscoveredCodexDefault(t *testing.T) {
+	adapter := New()
+	if adapter.Key() != "codex" {
+		t.Fatalf("Codex adapter key = %q", adapter.Key())
+	}
+
+	t.Setenv("PATH", t.TempDir())
+	occurrences, err := adapter.Observe(context.Background())
+	if err != nil || len(occurrences) != 0 {
+		t.Fatalf("uninstalled Codex observation = %#v, error = %v", occurrences, err)
+	}
+
+	unhealthy := writeCodexFixture(t, `
+if [ "${1:-}" = "--version" ]; then
+  printf '%s\n' 'codex-cli 0.147.0'
+  exit 0
+fi
+`)
+	t.Setenv("PATH", filepath.Dir(unhealthy))
+	occurrences, err = adapter.Observe(context.Background())
+	if err != nil || len(occurrences) != 1 || occurrences[0].Key != "default" ||
+		occurrences[0].Present || occurrences[0].Executor != nil {
+		t.Fatalf("unhealthy Codex observation = %#v, error = %v", occurrences, err)
+	}
+
+	healthy := writeCodexFixture(t, `
+if [ "${1:-}" = "--version" ]; then
+  printf '%s\n' 'codex-cli 0.148.0'
+  exit 0
+fi
+`)
+	t.Setenv("PATH", filepath.Dir(healthy))
+	occurrences, err = adapter.Observe(context.Background())
+	if err != nil || len(occurrences) != 1 || !occurrences[0].Present || occurrences[0].Executor != adapter {
+		t.Fatalf("healthy Codex observation = %#v, error = %v", occurrences, err)
+	}
+}
+
 func TestTurnStartWriteFailureKeepsOutcomeUnknown(t *testing.T) {
 	t.Parallel()
 
@@ -97,7 +135,8 @@ printf '%s\n' \
 `)
 	useCodexFixture(t, binary)
 	candidate, err := New().Reply(context.Background(), host.ConversationReplyRequest{
-		Messages: []conversation.ContextMessage{{Author: conversation.AuthorMember, Text: "What are my options?"}},
+		Messages: []conversation.ContextMessage{{Author: conversation.AuthorMember,
+			Text: "What are my options?"}},
 	})
 	if err != nil {
 		t.Fatalf("reply through Codex app-server: %v", err)
@@ -133,7 +172,8 @@ printf '%s\n' 'PRIVATE CONVERSATION MUST NOT LEAK' >&2
 `)
 	useCodexFixture(t, binary)
 	_, err := New().Reply(context.Background(), host.ConversationReplyRequest{
-		Messages: []conversation.ContextMessage{{Author: conversation.AuthorMember, Text: "Private question"}},
+		Messages: []conversation.ContextMessage{{Author: conversation.AuthorMember,
+			Text: "Private question"}},
 	})
 	if err == nil || strings.Contains(err.Error(), "PRIVATE CONVERSATION MUST NOT LEAK") {
 		t.Fatalf("Codex private failure exposed stderr: %v", err)
@@ -153,7 +193,8 @@ printf '%s\n' '{"id":3,"error":{"code":-1,"message":"PRIVATE CODEX PROTOCOL ERRO
 `)
 	useCodexFixture(t, binary)
 	_, err := New().Reply(context.Background(), host.ConversationReplyRequest{
-		Messages: []conversation.ContextMessage{{Author: conversation.AuthorMember, Text: "Private question"}},
+		Messages: []conversation.ContextMessage{{Author: conversation.AuthorMember,
+			Text: "Private question"}},
 	})
 	if !errors.Is(err, host.ErrAgentFailed) {
 		t.Fatalf("Codex private protocol error category = %v", err)
@@ -193,10 +234,14 @@ func TestAdapterClassifiesReconciledCodexTurnStatuses(t *testing.T) {
 		status    string
 		wantError error
 	}{
-		{status: "inProgress", wantError: host.ErrAgentOutcomeLost},
-		{status: "futureStatus", wantError: host.ErrAgentOutcomeLost},
-		{status: "failed", wantError: host.ErrAgentFailed},
-		{status: "interrupted", wantError: host.ErrAgentFailed},
+		{status: "inProgress",
+			wantError: host.ErrAgentOutcomeLost},
+		{status: "futureStatus",
+			wantError: host.ErrAgentOutcomeLost},
+		{status: "failed",
+			wantError: host.ErrAgentFailed},
+		{status: "interrupted",
+			wantError: host.ErrAgentFailed},
 	}
 	for _, test := range tests {
 		t.Run(test.status, func(t *testing.T) {
@@ -292,16 +337,36 @@ func TestThreadIsolationReportsEachMissingGuarantee(t *testing.T) {
 		mutate func(*threadStartResult)
 		want   string
 	}{
-		{name: "identity", mutate: func(result *threadStartResult) { result.Thread.ID = "" }, want: "identity"},
-		{name: "ephemeral", mutate: func(result *threadStartResult) { result.Thread.Ephemeral = false }, want: "ephemeral"},
-		{name: "working directory", mutate: func(result *threadStartResult) { result.Thread.CWD = t.TempDir() }, want: "working directory"},
-		{name: "Git authority", mutate: func(result *threadStartResult) { result.Thread.GitInfo = struct{}{} }, want: "Git repository authority"},
-		{name: "workspace count", mutate: func(result *threadStartResult) { result.RuntimeWorkspaceRoots = nil }, want: "one isolated workspace root"},
-		{name: "workspace identity", mutate: func(result *threadStartResult) { result.RuntimeWorkspaceRoots[0] = t.TempDir() }, want: "workspace root differs"},
-		{name: "instructions", mutate: func(result *threadStartResult) { result.InstructionSources = []json.RawMessage{json.RawMessage(`{}`)} }, want: "instruction sources"},
-		{name: "approval", mutate: func(result *threadStartResult) { result.ApprovalPolicy = "on-request" }, want: "provider-side approval"},
-		{name: "sandbox", mutate: func(result *threadStartResult) { result.Sandbox.Type = "workspaceWrite" }, want: "not read-only"},
-		{name: "network", mutate: func(result *threadStartResult) { result.Sandbox.NetworkAccess = true }, want: "network access"},
+		{name: "identity",
+			mutate: func(result *threadStartResult) { result.Thread.ID = "" },
+			want:   "identity"},
+		{name: "ephemeral",
+			mutate: func(result *threadStartResult) { result.Thread.Ephemeral = false },
+			want:   "ephemeral"},
+		{name: "working directory",
+			mutate: func(result *threadStartResult) { result.Thread.CWD = t.TempDir() },
+			want:   "working directory"},
+		{name: "Git authority",
+			mutate: func(result *threadStartResult) { result.Thread.GitInfo = struct{}{} },
+			want:   "Git repository authority"},
+		{name: "workspace count",
+			mutate: func(result *threadStartResult) { result.RuntimeWorkspaceRoots = nil },
+			want:   "one isolated workspace root"},
+		{name: "workspace identity",
+			mutate: func(result *threadStartResult) { result.RuntimeWorkspaceRoots[0] = t.TempDir() },
+			want:   "workspace root differs"},
+		{name: "instructions",
+			mutate: func(result *threadStartResult) { result.InstructionSources = []json.RawMessage{json.RawMessage(`{}`)} },
+			want:   "instruction sources"},
+		{name: "approval",
+			mutate: func(result *threadStartResult) { result.ApprovalPolicy = "on-request" },
+			want:   "provider-side approval"},
+		{name: "sandbox",
+			mutate: func(result *threadStartResult) { result.Sandbox.Type = "workspaceWrite" },
+			want:   "not read-only"},
+		{name: "network",
+			mutate: func(result *threadStartResult) { result.Sandbox.NetworkAccess = true },
+			want:   "network access"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			started := valid()

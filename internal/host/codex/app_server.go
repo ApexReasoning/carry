@@ -32,7 +32,8 @@ type appServerClient struct {
 func newAppServerClient(stdin io.Writer, stdout io.Reader) *appServerClient {
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 64*1024), maxProtocolLineBytes)
-	return &appServerClient{stdin: stdin, scanner: scanner}
+	return &appServerClient{stdin: stdin,
+		scanner: scanner}
 }
 
 type envelope struct {
@@ -185,14 +186,17 @@ func (client *appServerClient) sendRequest(id int, method string, params any) er
 		ID     int    `json:"id"`
 		Method string `json:"method"`
 		Params any    `json:"params"`
-	}{ID: id, Method: method, Params: params})
+	}{ID: id,
+		Method: method,
+		Params: params})
 }
 
 func (client *appServerClient) sendNotification(method string, params any) error {
 	return client.send(struct {
 		Method string `json:"method"`
 		Params any    `json:"params"`
-	}{Method: method, Params: params})
+	}{Method: method,
+		Params: params})
 }
 
 func (client *appServerClient) send(value any) error {

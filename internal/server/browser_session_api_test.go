@@ -152,7 +152,7 @@ func TestMachineRouteRejectsUserCredentialsEvenWithValidCertificate(t *testing.T
 		t.Run(test.name, func(t *testing.T) {
 			runStore := &recordingMachineRuns{}
 			member := testUserRoutes(t, authority)
-			machine, err := NewMachineRoutes(runStore, unavailableMachineConversations{}, unavailableMachineConnections{})
+			machine, err := NewMachineRoutes(runStore, unavailableMachineConversations{}, unavailableMachineConnections{}, unavailableMachineAgentReports{})
 			if err != nil {
 				t.Fatalf("compose Machine routes: %v", err)
 			}
@@ -203,7 +203,7 @@ func memberSurfaceTestAPI(
 	}
 	member.authentication = authentication
 	member.identity = identityRoutes
-	machine, err := NewMachineRoutes(&recordingMachineRuns{}, unavailableMachineConversations{}, unavailableMachineConnections{})
+	machine, err := NewMachineRoutes(&recordingMachineRuns{}, unavailableMachineConversations{}, unavailableMachineConnections{}, unavailableMachineAgentReports{})
 	if err != nil {
 		t.Fatalf("compose Machine routes: %v", err)
 	}

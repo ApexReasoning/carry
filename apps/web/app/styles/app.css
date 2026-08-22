@@ -1023,3 +1023,74 @@ textarea::placeholder {
     }
   }
 }
+
+.host-list,
+.agent-list {
+  display: grid;
+  gap: 0.9rem;
+  list-style: none;
+  margin: 1rem 0;
+  padding: 0;
+}
+
+.host-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-medium);
+  padding: 1rem;
+}
+
+.host-heading,
+.agent-row {
+  align-items: flex-start;
+  display: flex;
+  gap: 0.9rem;
+  justify-content: space-between;
+}
+
+.agent-list {
+  border-top: 1px solid var(--line);
+  margin-bottom: 0;
+  padding-top: 0.9rem;
+}
+
+.agent-row {
+  justify-content: flex-start;
+}
+
+.agent-avatar {
+  align-items: center;
+  border-radius: 50%;
+  color: white;
+  display: inline-flex;
+  flex: 0 0 2.5rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  height: 2.5rem;
+  justify-content: center;
+  letter-spacing: 0.04em;
+}
+
+.agent-avatar-0 {
+  background: #3b5ccc;
+}
+.agent-avatar-1 {
+  background: #8a4dc4;
+}
+.agent-avatar-2 {
+  background: #167b68;
+}
+.agent-avatar-3 {
+  background: #b55239;
+}
+.agent-avatar-4 {
+  background: #33778f;
+}
+.agent-avatar-5 {
+  background: #8a6430;
+}
+.agent-avatar-6 {
+  background: #a33f68;
+}
+.agent-avatar-7 {
+  background: #4f6d38;
+}

@@ -40,7 +40,7 @@ const (
 type Credential struct {
 	MachineID                string `json:"machine_id"`
 	SpaceID                  string `json:"space_id"`
-	ServerURL                string `json:"server_url"`
+	HostAPIOrigin            string `json:"host_api_origin"`
 	CACertificatePEM         string `json:"ca_certificate_pem,omitempty"`
 	CertificatePEM           string `json:"certificate_pem"`
 	PrivateKeyPEM            string `json:"private_key_pem"`
@@ -51,7 +51,7 @@ type Credential struct {
 // begin, poll, cancellation, and local installation can resume without minting
 // another Machine identity when a response is lost.
 type PendingConnection struct {
-	ServerURL        string    `json:"server_url"`
+	ExternalOrigin   string    `json:"external_origin"`
 	CACertificatePEM string    `json:"ca_certificate_pem,omitempty"`
 	RequestID        string    `json:"request_id"`
 	IdempotencyKey   string    `json:"idempotency_key"`
@@ -280,7 +280,7 @@ func loadJSON(path, directory, description string, destination any) error {
 }
 
 func validateCredential(credential Credential) error {
-	if !validServerURL(credential.ServerURL) || uuid.Validate(credential.MachineID) != nil || uuid.Validate(credential.SpaceID) != nil ||
+	if !validCanonicalHTTPSOrigin(credential.HostAPIOrigin) || uuid.Validate(credential.MachineID) != nil || uuid.Validate(credential.SpaceID) != nil ||
 		strings.TrimSpace(credential.CertificatePEM) == "" || strings.TrimSpace(credential.PrivateKeyPEM) == "" ||
 		(credential.DisconnectIdempotencyKey != "" && uuid.Validate(credential.DisconnectIdempotencyKey) != nil) {
 		return errors.New("Machine credential content is invalid")
@@ -303,8 +303,8 @@ func validateCredential(credential Credential) error {
 }
 
 func validatePending(pending PendingConnection) error {
-	if !validServerURL(pending.ServerURL) {
-		return errors.New("pending Machine server URL is invalid")
+	if !validCanonicalHTTPSOrigin(pending.ExternalOrigin) {
+		return errors.New("pending Machine external origin is invalid")
 	}
 	if uuid.Validate(pending.RequestID) != nil {
 		return errors.New("pending Machine request identity is invalid")
@@ -361,7 +361,7 @@ func validatePending(pending PendingConnection) error {
 		return errors.New("pending Machine public key is not Ed25519")
 	}
 	proofMessage := machine.ConnectionKeyProofMessage(
-		pending.ServerURL,
+		pending.ExternalOrigin,
 		pending.RequestID,
 		pending.DisplayName,
 		pending.PublicKeyDER,
@@ -371,7 +371,7 @@ func validatePending(pending PendingConnection) error {
 	if !ed25519.Verify(key, proofMessage, pending.KeyProof) {
 		return errors.New("pending Machine key proof is invalid")
 	}
-	proof, err := SignConnectionProof(pending.PrivateKeyPEM, pending.ServerURL, pending.RequestID, pending.DisplayName, pending.PublicKeyDER, pending.UserCode, pending.PollSecret)
+	proof, err := SignConnectionProof(pending.PrivateKeyPEM, pending.ExternalOrigin, pending.RequestID, pending.DisplayName, pending.PublicKeyDER, pending.UserCode, pending.PollSecret)
 	if err != nil {
 		return err
 	}
@@ -381,7 +381,7 @@ func validatePending(pending PendingConnection) error {
 	return nil
 }
 
-func validServerURL(value string) bool {
+func validCanonicalHTTPSOrigin(value string) bool {
 	parsed, err := url.Parse(value)
 	return err == nil && parsed.Scheme == "https" && parsed.Host != "" && parsed.User == nil && parsed.Path == "" && parsed.RawQuery == "" && parsed.Fragment == ""
 }

@@ -33,18 +33,20 @@ browser ──member session──► Carry Server ──┐
 | Agent | Agent 身份：ID、所属 Space、Space 内唯一归一化名字、确定性头像（新身份的人类 owner 来自浏览器批准该 Host 的成员）、唯一 Host 绑定、Active/Removed、创建时间 | 进程在场、模型目录、Work 真相、发现内容改写身份 |
 | Conversation | 成员与一个确定 Agent 的消息及其准确受众、Web 表单形成的 target-Agent 结构化请求、Conversation 固定的 Agent（与可选模型） | provider 续接句柄、共享 Work 权威、Work 创建结果 |
 | Work | 责任、人类负责人、Agent 负责人及其交接事实、生命周期、有序计划项、产出项及其与计划项的关联、需要人的事项、未来与周期继续 | 进程 lease、provider 内部状态、Inbox 视图 |
-| Machine | 逻辑 Host 身份、浏览器批准的接入与批准成员、证书谱系、Pi/Codex 的完整 present/absent 报告及其数据库时间 | 成员身份、Agent 身份、Work 成功、物理机器唯一性 |
+| Machine | 逻辑 Host 身份、浏览器批准的接入与批准成员、证书谱系、已识别 adapter occurrence 的有界完整 present/absent 报告及其数据库时间 | 成员身份、Agent 身份、Work 成功、物理机器唯一性 |
 | Run | 一次有界 Agent 执行：目标 Agent、claim、attempt、lease、fence、用户可见输出、因果来源 | Work 关闭、人类接受 |
 
-派生而非存储：在线由 lease 推出，最近活跃由在场与 Run 事实推出，参与中的 Work 由查询推出；Inbox 查询 Work 的需要人事项，以及当前 Agent 负责人 Removed 或不再在场的 Open/Paused Work。owner unavailable 由已有 Work、Agent 与 Machine 事实直接推出，不要求失联 Agent 再写一项，也不获得 owner、表或字段。
+派生而非存储：Agent 在线由 Active lifecycle、Machine 最新完整报告中的 present 与数据库 freshness 推出，最近活跃由在场与 Run 事实推出，当前 Run 写权仍由 lease/fence 推出，参与中的 Work 由查询推出；Inbox 查询 Work 的需要人事项，以及当前 Agent 负责人 Removed 或不再在场的 Open/Paused Work。owner unavailable 由已有 Work、Agent 与 Machine 事实直接推出，不要求失联 Agent 再写一项，也不获得 owner、表或字段。
 
-Agent 身份与 Agent 进程在场是两件事：Host 掉线只改变 Machine 拥有的在场事实，不改变 Agent 拥有的身份事实。第一版一个逻辑 Machine 至多有一个默认 Pi occurrence 和一个默认 Codex occurrence；`(Machine, concrete kind)` 只用于调和这两个静态组合，不形成 slot、profile 或 registry。新 Agent 的人类 owner 只从锁内读取 Machine 已拥有的浏览器批准成员，并同时证明该 Membership 仍 Active；报告不接受 Space、owner、Agent ID、名字、头像或 lifecycle。重复发现只更新完整的 Pi/Codex present/absent 在场，永不改写已有 Agent 的 owner、名字或 Active/Removed。Online 是 `Active + latest complete report says present + database freshness` 的查询；明确 absent 立即离线，Last active 取数据库最近一次确认 present 的时间。
+Agent 身份与 Agent 进程在场是两件事：Host 掉线只改变 Machine 拥有的在场事实，不改变 Agent 拥有的身份事实。第一版一个逻辑 Machine 明确组合 Pi 与 Codex adapter，它们各自可以发现 default occurrence，也可以在未安装时返回空结果；只有发现的 occurrence 创建身份，后续完整报告遗漏已创建 occurrence 时只令其离线。持久调和键从一开始就是 `(Machine, adapter key, adapter-local occurrence key)`，使后续受信任的 native family 或一个 family 的多个稳定 occurrence 不需要改 schema 或公开报告结构。它不形成用户可见 slot、profile 或 registry。Occurrence key 由具体 adapter 从非模型的本机安装事实得到，不是显示名、persona、provider session 或授权。新 Agent 的人类 owner 只从锁内读取 Machine 已拥有的浏览器批准成员，并同时证明该 Membership 仍 Active；这个 Active 证明只裁决新身份的 owner 分配，批准成员后来离开不妨碍准确 Machine claim 为仍 Active 的既有 Agent 调和在场，但该 Host 不能再创建新 occurrence。报告不接受 Space、owner、Agent ID、名字、头像或 lifecycle。重复发现只更新这一有界组合的完整 present/absent 在场，永不改写已有 Agent 的 owner、名字或 Active/Removed。每份报告带一次性 report ID 和它最后观察到的 PostgreSQL revision；PostgreSQL 锁住 Machine 后裁决准确重放、损坏 identity、stale base 与下一个 revision，并只用数据库时间发布 winner。Unknown 重试同一 ID/base/body；stale 重新观察，不用 Host wall clock 或到达顺序冒充因果。Online 是 `Active + latest complete report says present + database freshness` 的查询；明确 absent 立即离线，Last active 取数据库最近一次确认 present 的时间。
 
-PostgreSQL 在某 Machine 第一次产生 Agent 时分配一个不可变的 Space 内 Machine naming ordinal；两个具体 kind 共用它，形成 `Pi`/`Codex`、`Pi 2`/`Codex 2` 等固定名字。名字和归一化键由 Agent owner 生成，Host 无命名输入，也没有冲突建议协议；Removed 名字保持占用。Agent ID、名字、Machine binding 与人类 owner 是不同事实。
+Agent owner 只认可一张不可变的内部 adapter descriptor 表：稳定 key、canonical name base、允许的 occurrence 上限；它不包含 factory、路径、凭据、模型、工具、优先级、fallback 或动态 registration。PostgreSQL 在 Space 锁内按 family 独立分配不可复用 ordinal；该 family 的第一个 Agent 使用 canonical base，之后使用数字后缀。名字和归一化键由 Agent owner 生成，Host 无命名输入，也没有冲突建议协议；Removed 名字保持占用。Agent ID、adapter/occurrence binding、名字、Machine binding 与人类 owner 是不同事实。
 
-复制完整 Machine 本地状态等同复制同一个逻辑 Host 权威：两个物理进程调和到同一对 Agent，最新提交的完整报告拥有当前在场，Carry 不声称物理 clone 检测。丢失本地状态或重装后重新批准会创建新 Machine 和新 Agent，永不按 hostname、显示名、Pi/Codex 本地 ID、配置路径或内容合并；旧、新 Host 均保留，旧 Host 由当前 Machine revoke 旅程显式撤销。Machine remote/self revoke 与它绑定的 Active Agent 在同一 PostgreSQL 裁决中转为 Removed；强制 Membership removal 同样先转移目标 Active Agent lifecycle，再撤销 Membership。Node 28/29 仍拥有完整 Work 交接、Run 后果与离场 UX，不延迟 Node 15 引入身份时必须成立的引用/lifecycle 不变量。
+复制完整 Machine 本地状态等同复制同一个逻辑 Host 权威：两个物理进程调和到同一组 Agent，最新提交的完整报告拥有当前在场，Carry 不声称物理 clone 检测。丢失本地状态或重装后重新批准会创建新 Machine 和新 Agent，永不按 hostname、显示名、adapter 本地 ID、配置路径或内容合并；旧、新 Host 均保留，旧 Host 由当前 Machine revoke 旅程显式撤销。Machine remote/self revoke 与它绑定的 Active Agent 在同一 PostgreSQL 裁决中转为 Removed；强制 Membership removal 同样先转移目标 Active Agent lifecycle，再撤销 Membership。Node 28/29 仍拥有完整 Work 交接、Run 后果与离场 UX，不延迟 Node 15 引入身份时必须成立的引用/lifecycle 不变量。
 
-Pi 和 Codex 是具体进程 adapter，没有 provider/model/runtime registry；可选模型只在具体 Agent 能可靠报告当前取值时呈现，发现失败时使用 provider 默认值。
+`carry setup` 的 public begin/poll/cancel 与浏览器 verification URL 使用 canonical external origin；批准后 Server 返回独立的 canonical Host API origin，安装凭据只把它用于 Machine mTLS。两者可以相同但不得由客户端互相推导；Server 配置分别拥有 `CARRY_EXTERNAL_ORIGIN` 与 `CARRY_HOST_API_ORIGIN`。这不是新的 authority owner，而是把 Browser 与 Machine 两个既有 transport audience 保持准确。
+
+Pi、Codex 和未来 DeepSeek Harness 等是 Host 明确构造的具体进程 adapter。一个有界 adapter set 只负责 construction-time duplicate rejection、完整 observation 与按准确 key/occurrence 查找；它没有运行时注册、任意代码发现、profile、priority 或 fallback，不是 provider/model/runtime registry。可选模型只在具体 Agent 能可靠报告当前取值时呈现，发现失败时使用 adapter 默认值。
 
 provider 侧的会话续接句柄是拥有该 Agent 的 Host 的本地私有状态，持久化在本机。没有公开 Session API，没有通用 Session owner 或表。句柄丢失时用有界的 Carry 侧历史新开一个 provider session：效率下降，Conversation 与 Work 真相不变。
 
@@ -148,11 +150,11 @@ Agent 与外部内容只能在当前 Work 合同允许的范围内提议改变�
 ```text
 cmd/carry-server → internal/server → owner packages → internal/postgres
 cmd/carry        → internal/cli    → internal/host
-internal/host    → internal/host/pi | internal/host/codex，以及 Carry Server 的 Host API
+internal/host    → internal/host/<concrete-adapter>（V1 为 pi 与 codex），以及 Carry Server 的 Host API
 apps/web         → protocol/user/v1
 ```
 
-- `internal/agent` 是 Agent 身份 owner；具体进程 adapter 从 `internal/agent/pi|codex` 迁到 `internal/host/pi|codex`，只有 Host 组合可以使用它们，且不建立 registry；
+- `internal/agent` 是 Agent 身份 owner；具体进程 adapter 从 `internal/agent/pi|codex` 迁到 `internal/host/pi|codex`，后续 family 各有准确 concrete package，只有 Host composition root 可以显式构造；不使用 `init()`、反射、插件发现或动态 registry；
 - 一个 package 只为一个事实 owner、一个具体进程 adapter，或一个明确命名的 composition/transport 边界存在；`cmd`、`server`、`postgres`、`cli`、`host`、`e2e` 这类边界不得拥有产品策略；
 - owner package 不 import server、postgres、host、具体 adapter 或 Web；
 - `carry-server` 不 import Pi 或 Codex；
@@ -163,7 +165,7 @@ apps/web         → protocol/user/v1
 
 ## 8. 没有新批准旅程就禁止
 
-`Assignment`、`Coordinate`、`Plan`/`Step`/`Artifact` owner、通用 `Effect`/`Action`/`Capability`、Session owner、参与者 owner、通知 owner、调度 owner、workflow 引擎、provider/model/runtime registry；Server 主动推送执行；通用依赖工厂或参数袋；`common`、`utils`、`helpers`、`platform`、`integration`、`manager`、`resource`、`runtime`、`readmodel` package；Event Sourcing、CRDT、Kafka、Temporal、微服务；没有任何消费者收到过的路径的兼容 API。
+`Assignment`、`Coordinate`、`Plan`/`Step`/`Artifact` owner、通用 `Effect`/`Action`/`Capability`、Session owner、参与者 owner、通知 owner、调度 owner、workflow 引擎、动态 provider/model/runtime registry 或产品目录；Server 主动推送执行；通用依赖工厂或 provider-specific 参数袋；`common`、`utils`、`helpers`、`platform`、`integration`、`manager`、`resource`、`runtime`、`readmodel` package；Event Sourcing、CRDT、Kafka、Temporal、微服务；没有任何消费者收到过的路径的兼容 API。
 
 ## 9. 架构改动的证据
 

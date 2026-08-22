@@ -35,9 +35,17 @@ func TestPendingAndCredentialCleanupAreCrashRecoverable(t *testing.T) {
 		t.Fatal(err)
 	}
 	pending := PendingConnection{
-		ServerURL: "https://carry.example", RequestID: requestID, IdempotencyKey: uuid.NewString(), DisplayName: "Desk Mac",
-		UserCode: code, PollSecret: secret, PublicKeyDER: publicKeyDER, PrivateKeyPEM: string(privateKeyPEM), KeyProof: proof,
-		Fingerprint: machine.PublicKeyFingerprint(publicKeyDER), ExpiresAt: time.Now().Add(machine.ConnectionLifetime),
+		ExternalOrigin:  "https://carry.example",
+		RequestID:       requestID,
+		IdempotencyKey:  uuid.NewString(),
+		DisplayName:     "Desk Mac",
+		UserCode:        code,
+		PollSecret:      secret,
+		PublicKeyDER:    publicKeyDER,
+		PrivateKeyPEM:   string(privateKeyPEM),
+		KeyProof:        proof,
+		Fingerprint:     machine.PublicKeyFingerprint(publicKeyDER),
+		ExpiresAt:       time.Now().Add(machine.ConnectionLifetime),
 		IntervalSeconds: int(machine.ConnectionInitialInterval / time.Second),
 	}
 	if err := SavePending(directory, pending); err != nil {
@@ -63,7 +71,9 @@ func TestPendingAndCredentialCleanupAreCrashRecoverable(t *testing.T) {
 		t.Fatal(err)
 	}
 	credential := Credential{
-		MachineID: machineID, SpaceID: uuid.NewString(), ServerURL: "https://carry.example",
+		MachineID:        machineID,
+		SpaceID:          uuid.NewString(),
+		HostAPIOrigin:    "https://carry.example",
 		CACertificatePEM: string(bundle.CACertificatePEM), CertificatePEM: string(issued.CertificatePEM), PrivateKeyPEM: string(privateKeyPEM),
 		DisconnectIdempotencyKey: uuid.NewString(),
 	}
@@ -115,9 +125,17 @@ func TestPendingConnectionRejectsMismatchedPrivateKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	pending := PendingConnection{
-		ServerURL: "https://carry.example", RequestID: requestID, IdempotencyKey: uuid.NewString(), DisplayName: "Desk Mac",
-		UserCode: code, PollSecret: secret, PublicKeyDER: publicKeyDER, PrivateKeyPEM: string(otherPrivateKeyPEM), KeyProof: proof,
-		Fingerprint: machine.PublicKeyFingerprint(publicKeyDER), ExpiresAt: time.Now().Add(machine.ConnectionLifetime),
+		ExternalOrigin:  "https://carry.example",
+		RequestID:       requestID,
+		IdempotencyKey:  uuid.NewString(),
+		DisplayName:     "Desk Mac",
+		UserCode:        code,
+		PollSecret:      secret,
+		PublicKeyDER:    publicKeyDER,
+		PrivateKeyPEM:   string(otherPrivateKeyPEM),
+		KeyProof:        proof,
+		Fingerprint:     machine.PublicKeyFingerprint(publicKeyDER),
+		ExpiresAt:       time.Now().Add(machine.ConnectionLifetime),
 		IntervalSeconds: int(machine.ConnectionInitialInterval / time.Second),
 	}
 	if err := os.Mkdir(directory, 0o700); err != nil {

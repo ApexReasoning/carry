@@ -53,10 +53,10 @@ test("shows exact origin, name, full fingerprint, and only eligible Spaces befor
   render(<MachineConnectPage user={user} />);
 
   await person.type(
-    screen.getByLabelText("Code shown by carry host connect"),
+    screen.getByLabelText("Code shown by carry setup"),
     "bcdfghjklm",
   );
-  await person.click(screen.getByRole("button", { name: "Review Machine" }));
+  await person.click(screen.getByRole("button", { name: "Review Host" }));
 
   expect(await screen.findByText("https://carry.example")).toBeVisible();
   expect(screen.getByText("Desk Mac")).toBeVisible();
@@ -68,7 +68,7 @@ test("shows exact origin, name, full fingerprint, and only eligible Spaces befor
   ).not.toBeInTheDocument();
   expect(api.approveMachineConnection).not.toHaveBeenCalled();
 
-  await person.click(screen.getByRole("button", { name: "Connect Machine" }));
+  await person.click(screen.getByRole("button", { name: "Connect Host" }));
   await waitFor(() =>
     expect(api.approveMachineConnection).toHaveBeenCalledTimes(1),
   );
@@ -76,7 +76,7 @@ test("shows exact origin, name, full fingerprint, and only eligible Spaces befor
     "22222222-2222-4222-8222-222222222222",
   );
   expect(
-    await screen.findByRole("heading", { name: "Machine approved" }),
+    await screen.findByRole("heading", { name: "Host approved" }),
   ).toBeVisible();
 });
 
@@ -84,16 +84,16 @@ test("denial never invokes approval", async () => {
   const person = userEvent.setup();
   render(<MachineConnectPage user={user} />);
   await person.type(
-    screen.getByLabelText("Code shown by carry host connect"),
+    screen.getByLabelText("Code shown by carry setup"),
     "BCDF-GHJ-KLM",
   );
-  await person.click(screen.getByRole("button", { name: "Review Machine" }));
+  await person.click(screen.getByRole("button", { name: "Review Host" }));
   await person.click(await screen.findByRole("button", { name: "Deny" }));
   await waitFor(() =>
     expect(api.denyMachineConnection).toHaveBeenCalledTimes(1),
   );
   expect(api.approveMachineConnection).not.toHaveBeenCalled();
   expect(
-    await screen.findByRole("heading", { name: "Machine denied" }),
+    await screen.findByRole("heading", { name: "Host denied" }),
   ).toBeVisible();
 });

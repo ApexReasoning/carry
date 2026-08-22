@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ApexReasoning/carry/internal/agent"
 	"github.com/ApexReasoning/carry/internal/machine"
 	"github.com/ApexReasoning/carry/internal/postgres/dbsqlc"
 	"github.com/google/uuid"
@@ -362,10 +363,10 @@ func (s *Store) CancelMachineConnection(ctx context.Context, command machine.Can
 	return nil
 }
 
-func (s *Store) ListMachines(ctx context.Context, command machine.ListMachinesCommand) (machine.MachinePage, error) {
+func (s *Store) ListMachines(ctx context.Context, command machine.ListMachinesCommand) (machine.MachinePage, []agent.InventoryRecord, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return machine.MachinePage{}, fmt.Errorf("begin Machine inventory: %w", err)
+		return machine.MachinePage{}, nil, fmt.Errorf("begin Machine inventory: %w", err)
 	}
 	defer func() { _ = tx.Rollback(context.Background()) }()
 	queries := s.queries.WithTx(tx)
@@ -373,100 +374,125 @@ func (s *Store) ListMachines(ctx context.Context, command machine.ListMachinesCo
 		SessionID: command.BrowserSessionID, SpaceID: command.SpaceID,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
-		return machine.MachinePage{}, machine.ErrMachineUnavailable
+		return machine.MachinePage{}, nil, machine.ErrMachineUnavailable
 	}
 	if err != nil {
-		return machine.MachinePage{}, fmt.Errorf("load Machine inventory Membership: %w", err)
+		return machine.MachinePage{}, nil, fmt.Errorf("load Machine inventory Membership: %w", err)
 	}
 	after, err := nullablePostgresUUID(command.After)
 	if err != nil {
-		return machine.MachinePage{}, machine.ErrInvalidConnection
+		return machine.MachinePage{}, nil, machine.ErrInvalidConnection
 	}
 	rows, err := queries.ListSpaceMachines(ctx, dbsqlc.ListSpaceMachinesParams{SpaceID: command.SpaceID, AfterMachineID: after})
 	if err != nil {
-		return machine.MachinePage{}, fmt.Errorf("list Space Machines: %w", err)
+		return machine.MachinePage{}, nil, fmt.Errorf("list Space Machines: %w", err)
 	}
 	page := machine.MachinePage{Machines: make([]machine.MachineRecord, 0, min(len(rows), 50))}
+	machineIDs := make([]string, 0, min(len(rows), 50))
 	for index, row := range rows {
 		if index == 50 {
 			page.NextCursor = rows[49].MachineID
 			break
 		}
 		page.Machines = append(page.Machines, inventoryRecord(row, row.PublicKeyDer, membership.CanEnrollMachines))
+		machineIDs = append(machineIDs, row.MachineID)
+	}
+	agents, err := listInventoryAgents(ctx, queries, machineIDs)
+	if err != nil {
+		return machine.MachinePage{}, nil, fmt.Errorf("list Machine Agents: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return machine.MachinePage{}, fmt.Errorf("commit Machine inventory: %w", err)
+		return machine.MachinePage{}, nil, fmt.Errorf("commit Machine inventory: %w", err)
 	}
-	return page, nil
+	return page, agents, nil
 }
 
-func (s *Store) RevokeMachineFromBrowser(ctx context.Context, command machine.RevokeMachineCommand) (machine.MachineRecord, error) {
+func (s *Store) RevokeMachineFromBrowser(ctx context.Context, command machine.RevokeMachineCommand) (machine.MachineRecord, []agent.InventoryRecord, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return machine.MachineRecord{}, fmt.Errorf("begin Browser Machine revocation: %w", err)
+		return machine.MachineRecord{}, nil, fmt.Errorf("begin Browser Machine revocation: %w", err)
 	}
 	defer func() { _ = tx.Rollback(context.Background()) }()
 	queries := s.queries.WithTx(tx)
+
+	// Phase 1: lock the Browser, Space, current authority, and exact Machine.
 	session, err := queries.LockBrowserSessionForMachineConnection(ctx, command.BrowserSessionID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return machine.MachineRecord{}, machine.ErrMachineUnavailable
+		return machine.MachineRecord{}, nil, machine.ErrMachineUnavailable
 	}
 	if err != nil {
-		return machine.MachineRecord{}, fmt.Errorf("lock Browser Session for Machine revocation: %w", err)
+		return machine.MachineRecord{}, nil, fmt.Errorf("lock Browser Session for Machine revocation: %w", err)
 	}
 	userID := session.UserID
 	if _, err := queries.LockSpaceForMachineConnection(ctx, command.SpaceID); errors.Is(err, pgx.ErrNoRows) {
-		return machine.MachineRecord{}, machine.ErrMachineUnavailable
+		return machine.MachineRecord{}, nil, machine.ErrMachineUnavailable
 	} else if err != nil {
-		return machine.MachineRecord{}, fmt.Errorf("lock Space for Machine revocation: %w", err)
+		return machine.MachineRecord{}, nil, fmt.Errorf("lock Space for Machine revocation: %w", err)
 	}
-	membership, err := queries.LockMachineEnrollmentMembership(ctx, dbsqlc.LockMachineEnrollmentMembershipParams{SpaceID: command.SpaceID, UserID: userID})
+	membership, err := queries.LockMachineEnrollmentMembership(ctx, dbsqlc.LockMachineEnrollmentMembershipParams{
+		SpaceID: command.SpaceID,
+		UserID:  userID,
+	})
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !membership.CanEnrollMachines) {
-		return machine.MachineRecord{}, machine.ErrMachineAuthority
+		return machine.MachineRecord{}, nil, machine.ErrMachineAuthority
 	}
 	if err != nil {
-		return machine.MachineRecord{}, fmt.Errorf("lock Machine revocation Membership: %w", err)
+		return machine.MachineRecord{}, nil, fmt.Errorf("lock Machine revocation Membership: %w", err)
 	}
-	stored, err := queries.LockMachineForRevocation(ctx, dbsqlc.LockMachineForRevocationParams{MachineID: command.MachineID, SpaceID: command.SpaceID})
+	stored, err := queries.LockMachineForRevocation(ctx, dbsqlc.LockMachineForRevocationParams{
+		MachineID: command.MachineID,
+		SpaceID:   command.SpaceID,
+	})
 	if errors.Is(err, pgx.ErrNoRows) {
-		return machine.MachineRecord{}, machine.ErrMachineUnavailable
+		return machine.MachineRecord{}, nil, machine.ErrMachineUnavailable
 	}
 	if err != nil {
-		return machine.MachineRecord{}, fmt.Errorf("lock Machine for revocation: %w", err)
+		return machine.MachineRecord{}, nil, fmt.Errorf("lock Machine for revocation: %w", err)
 	}
+
+	// Phase 2: reject conflicting replay or apply the one terminal transition.
 	if stored.RevokedAt.Valid {
 		if stored.RevocationActorKind != nil && *stored.RevocationActorKind == "user" && uuidValue(stored.RevokedByUserID) == userID &&
 			stored.RevocationIdempotencyKey != nil && *stored.RevocationIdempotencyKey == command.IdempotencyKey &&
 			!bytes.Equal(stored.RevocationRequestDigest, command.RequestDigest[:]) {
-			return machine.MachineRecord{}, machine.ErrConnectionConflict
+			return machine.MachineRecord{}, nil, machine.ErrConnectionConflict
 		}
-		if err := tx.Commit(ctx); err != nil {
-			return machine.MachineRecord{}, fmt.Errorf("commit Machine revocation replay: %w", err)
+	} else {
+		actorUserID, parseErr := postgresUUID(userID)
+		if parseErr != nil {
+			return machine.MachineRecord{}, nil, fmt.Errorf("parse Machine revocation User identity: %w", parseErr)
 		}
-		return storedMachineRecord(stored), nil
+		key := command.IdempotencyKey
+		stored, err = queries.RevokeMachineByUser(ctx, dbsqlc.RevokeMachineByUserParams{
+			UserID:         actorUserID,
+			IdempotencyKey: &key,
+			RequestDigest:  command.RequestDigest[:],
+			MachineID:      command.MachineID,
+		})
+		if err != nil {
+			var postgresError *pgconn.PgError
+			if errors.As(err, &postgresError) && postgresError.Code == "23505" {
+				return machine.MachineRecord{}, nil, machine.ErrConnectionConflict
+			}
+			return machine.MachineRecord{}, nil, fmt.Errorf("revoke Machine from Browser: %w", err)
+		}
+		if _, err := queries.LockActiveAgentsForMachineRemoval(ctx, command.MachineID); err != nil {
+			return machine.MachineRecord{}, nil, fmt.Errorf("lock Browser-revoked Machine Agents: %w", err)
+		}
+		if err := queries.RemoveActiveAgentsForMachine(ctx, command.MachineID); err != nil {
+			return machine.MachineRecord{}, nil, fmt.Errorf("remove Browser-revoked Machine Agents: %w", err)
+		}
 	}
-	actorUserID, err := postgresUUID(userID)
+
+	// Phase 3: project the exact removed identities and commit one response truth.
+	agents, err := listInventoryAgents(ctx, queries, []string{command.MachineID})
 	if err != nil {
-		return machine.MachineRecord{}, fmt.Errorf("parse Machine revocation User identity: %w", err)
-	}
-	key := command.IdempotencyKey
-	stored, err = queries.RevokeMachineByUser(ctx, dbsqlc.RevokeMachineByUserParams{
-		UserID:         actorUserID,
-		IdempotencyKey: &key,
-		RequestDigest:  command.RequestDigest[:],
-		MachineID:      command.MachineID,
-	})
-	if err != nil {
-		var postgresError *pgconn.PgError
-		if errors.As(err, &postgresError) && postgresError.Code == "23505" {
-			return machine.MachineRecord{}, machine.ErrConnectionConflict
-		}
-		return machine.MachineRecord{}, fmt.Errorf("revoke Machine from Browser: %w", err)
+		return machine.MachineRecord{}, nil, fmt.Errorf("list Browser-revoked Machine Agents: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return machine.MachineRecord{}, fmt.Errorf("commit Browser Machine revocation: %w", err)
+		return machine.MachineRecord{}, nil, fmt.Errorf("commit Browser Machine revocation: %w", err)
 	}
-	return storedMachineRecord(stored), nil
+	return storedMachineRecord(stored), agents, nil
 }
 
 func (s *Store) RevokeMachineFromHost(ctx context.Context, command machine.SelfRevokeMachineCommand) (machine.MachineRecord, error) {
@@ -476,6 +502,8 @@ func (s *Store) RevokeMachineFromHost(ctx context.Context, command machine.SelfR
 	}
 	defer func() { _ = tx.Rollback(context.Background()) }()
 	queries := s.queries.WithTx(tx)
+
+	// Phase 1: lock and authenticate the exact Machine.
 	stored, err := queries.LockMachineByIDForSelfRevocation(ctx, command.MachineID)
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && stored.CertificateSerial != command.CertificateSerial) {
 		return machine.MachineRecord{}, machine.ErrMachineUnavailable
@@ -483,24 +511,33 @@ func (s *Store) RevokeMachineFromHost(ctx context.Context, command machine.SelfR
 	if err != nil {
 		return machine.MachineRecord{}, fmt.Errorf("lock Machine self revocation: %w", err)
 	}
+
+	// Phase 2: reject conflicting replay or apply the terminal Machine and Agent transition.
 	if stored.RevokedAt.Valid {
 		if stored.RevocationActorKind != nil && *stored.RevocationActorKind == "machine" &&
 			stored.RevocationIdempotencyKey != nil && *stored.RevocationIdempotencyKey == command.IdempotencyKey &&
 			!bytes.Equal(stored.RevocationRequestDigest, command.RequestDigest[:]) {
 			return machine.MachineRecord{}, machine.ErrConnectionConflict
 		}
-		if err := tx.Commit(ctx); err != nil {
-			return machine.MachineRecord{}, fmt.Errorf("commit self Machine revocation replay: %w", err)
+	} else {
+		key := command.IdempotencyKey
+		stored, err = queries.RevokeMachineBySelf(ctx, dbsqlc.RevokeMachineBySelfParams{
+			IdempotencyKey: &key,
+			RequestDigest:  command.RequestDigest[:],
+			MachineID:      command.MachineID,
+		})
+		if err != nil {
+			return machine.MachineRecord{}, fmt.Errorf("revoke Machine from Host: %w", err)
 		}
-		return storedMachineRecord(stored), nil
+		if _, err := queries.LockActiveAgentsForMachineRemoval(ctx, command.MachineID); err != nil {
+			return machine.MachineRecord{}, fmt.Errorf("lock self-revoked Machine Agents: %w", err)
+		}
+		if err := queries.RemoveActiveAgentsForMachine(ctx, command.MachineID); err != nil {
+			return machine.MachineRecord{}, fmt.Errorf("remove self-revoked Machine Agents: %w", err)
+		}
 	}
-	key := command.IdempotencyKey
-	stored, err = queries.RevokeMachineBySelf(ctx, dbsqlc.RevokeMachineBySelfParams{
-		IdempotencyKey: &key, RequestDigest: command.RequestDigest[:], MachineID: command.MachineID,
-	})
-	if err != nil {
-		return machine.MachineRecord{}, fmt.Errorf("revoke Machine from Host: %w", err)
-	}
+
+	// Phase 3: commit the terminal Machine and Agent lifecycle truth.
 	if err := tx.Commit(ctx); err != nil {
 		return machine.MachineRecord{}, fmt.Errorf("commit self Machine revocation: %w", err)
 	}

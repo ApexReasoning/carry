@@ -7,17 +7,18 @@ import (
 	"path/filepath"
 	"testing"
 
+	hostdomain "github.com/ApexReasoning/carry/internal/host"
 	"github.com/ApexReasoning/carry/internal/machine/machinefile"
 )
 
-func TestHostCommandExposesOnlyConnectStartAndDisconnect(t *testing.T) {
+func TestHostCommandExposesOnlyStartAndDisconnect(t *testing.T) {
 	t.Parallel()
-	command := NewCommand(t.TempDir(), &bytes.Buffer{}, nil, nil)
+	command := NewCommand(t.TempDir(), &bytes.Buffer{}, &bytes.Buffer{}, hostdomain.AdapterSet{})
 	got := make([]string, 0, len(command.Commands()))
 	for _, child := range command.Commands() {
 		got = append(got, child.Name())
 	}
-	want := []string{"connect", "disconnect", "start"}
+	want := []string{"disconnect", "start"}
 	if len(got) != len(want) {
 		t.Fatalf("Host commands = %v", got)
 	}
@@ -28,7 +29,7 @@ func TestHostCommandExposesOnlyConnectStartAndDisconnect(t *testing.T) {
 	}
 }
 
-func TestConnectPersistsFreshProofBeforeNetworkAndRecoversExactPending(t *testing.T) {
+func TestSetupPersistsFreshProofBeforeNetworkAndRecoversExactPending(t *testing.T) {
 	t.Parallel()
 	directory := filepath.Join(t.TempDir(), "config")
 	first, err := loadOrCreatePendingConnection(directory, "https://carry.example", "", "Desk Mac")

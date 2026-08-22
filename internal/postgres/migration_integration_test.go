@@ -49,6 +49,8 @@ func TestMigrateCreatesCurrentFactsAndRejectsUnearnedWorkLifecycle(t *testing.T)
 		"external_login_transactions",
 		"space_invitations",
 		"space_invitation_submissions",
+		"agents",
+		"agent_presence",
 	} {
 		var exists bool
 		if err := pool.QueryRow(ctx, `select to_regclass('public.' || $1) is not null`, table).Scan(&exists); err != nil {
@@ -93,6 +95,82 @@ func TestMigrateCreatesCurrentFactsAndRejectsUnearnedWorkLifecycle(t *testing.T)
 	}
 	if details.Work.Lifecycle != work.LifecycleOpen {
 		t.Fatalf("lifecycle = %q, want %q", details.Work.Lifecycle, work.LifecycleOpen)
+	}
+}
+
+func TestMigration19PreservesMachinesAndAddsGenericAgentFacts(t *testing.T) {
+	ctx := context.Background()
+	pool := openMigratedTestPool(t, ctx)
+	if _, err := pool.Exec(ctx, `drop schema public cascade; create schema public`); err != nil {
+		t.Fatal(err)
+	}
+	connection, err := pool.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := connection.Exec(ctx, `create table carry_schema_migrations(version text primary key, applied_at timestamptz not null default transaction_timestamp())`); err != nil {
+		connection.Release()
+		t.Fatal(err)
+	}
+	entries, err := migrationFiles.ReadDir("migrations")
+	if err != nil {
+		connection.Release()
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if entry.Name() >= "0019_durable_agent_identity.sql" {
+			continue
+		}
+		migration, readErr := migrationFiles.ReadFile("migrations/" + entry.Name())
+		if readErr != nil {
+			connection.Release()
+			t.Fatal(readErr)
+		}
+		if err := applyMigration(ctx, connection, entry.Name(), string(migration)); err != nil {
+			connection.Release()
+			t.Fatalf("apply %s: %v", entry.Name(), err)
+		}
+	}
+	connection.Release()
+	const userID = "10000000-0000-4000-8000-000000000019"
+	const spaceID = "20000000-0000-4000-8000-000000000019"
+	const machineID = "30000000-0000-4000-8000-000000000019"
+	if _, err := pool.Exec(ctx, `insert into carry_users(user_id,display_name) values($1,'Agent Upgrade Owner')`, userID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `insert into spaces(space_id,name,slug) values($1,'Agent Upgrade Space','agent-upgrade-space')`, spaceID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `insert into space_memberships(space_id,user_id,can_manage_members,can_enroll_machines) values($1,$2,true,true)`, spaceID, userID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+		insert into machines(machine_id,space_id,display_name,public_key_der,certificate_pem,certificate_serial,enrolled_by_user_id)
+		values($1,$2,'Preserved Host',decode('01','hex'),decode('02','hex'),'upgrade-agent-serial',$3)
+	`, machineID, spaceID, userID); err != nil {
+		t.Fatal(err)
+	}
+	if err := Migrate(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	var revision int64
+	var reportedAt, reportID, digest *string
+	var unsupported, setup []string
+	if err := pool.QueryRow(ctx, `
+		select agent_report_revision,agent_reported_at::text,last_agent_report_id::text,
+			encode(last_agent_report_digest,'hex'),last_agent_report_unsupported_keys,last_agent_report_setup_required_keys
+		from machines where machine_id=$1
+	`, machineID).Scan(&revision, &reportedAt, &reportID, &digest, &unsupported, &setup); err != nil {
+		t.Fatal(err)
+	}
+	if revision != 0 || reportedAt != nil || reportID != nil || digest != nil || len(unsupported) != 0 || len(setup) != 0 {
+		t.Fatalf("upgraded Machine report shape = %d %v %v %v %#v %#v", revision, reportedAt, reportID, digest, unsupported, setup)
+	}
+	for _, table := range []string{"agents", "agent_presence"} {
+		var exists bool
+		if err := pool.QueryRow(ctx, `select to_regclass('public.' || $1) is not null`, table).Scan(&exists); err != nil || !exists {
+			t.Fatalf("migration 19 table %s exists=%t err=%v", table, exists, err)
+		}
 	}
 }
 
@@ -270,7 +348,7 @@ func TestMigratePreservesPreNode12MachinesAndMarksHistoricalRevokerUnknown(t *te
 		t.Fatal(err)
 	}
 	connections := testMachineConnections(t, store)
-	page, err := connections.List(ctx, sessionID, member.SpaceID, "")
+	page, _, err := connections.List(ctx, sessionID, member.SpaceID, "")
 	if err != nil || len(page.Machines) != 2 {
 		t.Fatalf("upgraded Machine inventory = %#v, %v", page, err)
 	}

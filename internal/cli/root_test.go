@@ -5,6 +5,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	hostdomain "github.com/ApexReasoning/carry/internal/host"
 )
 
 func TestRunBuildsFreshCommandTree(t *testing.T) {
@@ -16,12 +18,13 @@ func TestRunBuildsFreshCommandTree(t *testing.T) {
 		exitCode := Run(
 			context.Background(), nil, "test-version", t.TempDir(),
 			Streams{Input: strings.NewReader(""), Output: &output, ErrorOutput: &errorOutput},
-			nil, nil,
+			hostdomain.AdapterSet{},
 		)
 		if exitCode != 0 {
 			t.Fatalf("exit code = %d, stderr = %q", exitCode, errorOutput.String())
 		}
 		if !strings.Contains(output.String(), "Carry keeps team Work moving") ||
+			!strings.Contains(output.String(), "setup") ||
 			!strings.Contains(output.String(), "host") {
 			t.Fatalf("root help = %q", output.String())
 		}
@@ -45,7 +48,7 @@ func TestRunPrintsHelpAndVersionFlag(t *testing.T) {
 			exitCode := Run(
 				context.Background(), test.arguments, "test-version", t.TempDir(),
 				Streams{Input: strings.NewReader(""), Output: &output, ErrorOutput: &errorOutput},
-				nil, nil,
+				hostdomain.AdapterSet{},
 			)
 			if exitCode != 0 {
 				t.Fatalf("exit code = %d, stderr = %q", exitCode, errorOutput.String())
@@ -54,6 +57,22 @@ func TestRunPrintsHelpAndVersionFlag(t *testing.T) {
 				t.Fatalf("output %q does not contain %q", output.String(), test.contains)
 			}
 		})
+	}
+}
+
+func TestRunRejectsRemovedHostConnectCommand(t *testing.T) {
+	t.Parallel()
+	var output bytes.Buffer
+	var errorOutput bytes.Buffer
+	exitCode := Run(
+		context.Background(), []string{"host", "connect"}, "test-version", t.TempDir(),
+		Streams{Input: strings.NewReader(""),
+			Output:      &output,
+			ErrorOutput: &errorOutput},
+		hostdomain.AdapterSet{},
+	)
+	if exitCode != 1 || !strings.Contains(errorOutput.String(), `unknown command "connect"`) {
+		t.Fatalf("removed host connect = %d, %q", exitCode, errorOutput.String())
 	}
 }
 
@@ -66,7 +85,7 @@ func TestRunRejectsUnknownAndRemovedVersionCommands(t *testing.T) {
 		exitCode := Run(
 			context.Background(), []string{command}, "test-version", t.TempDir(),
 			Streams{Input: strings.NewReader(""), Output: &output, ErrorOutput: &errorOutput},
-			nil, nil,
+			hostdomain.AdapterSet{},
 		)
 		if exitCode != 1 {
 			t.Fatalf("%s exit code = %d, want 1", command, exitCode)

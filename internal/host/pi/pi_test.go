@@ -12,6 +12,44 @@ import (
 	"github.com/ApexReasoning/carry/internal/host"
 )
 
+func TestAdapterObservesOnlyDiscoveredPiDefault(t *testing.T) {
+	adapter := New()
+	if adapter.Key() != "pi" {
+		t.Fatalf("Pi adapter key = %q", adapter.Key())
+	}
+
+	t.Setenv("PATH", t.TempDir())
+	occurrences, err := adapter.Observe(context.Background())
+	if err != nil || len(occurrences) != 0 {
+		t.Fatalf("uninstalled Pi observation = %#v, error = %v", occurrences, err)
+	}
+
+	unhealthy := writePiFixture(t, `
+if [ "${1:-}" = "--version" ]; then
+  printf '%s\n' '0.83.0'
+  exit 0
+fi
+`)
+	t.Setenv("PATH", filepath.Dir(unhealthy))
+	occurrences, err = adapter.Observe(context.Background())
+	if err != nil || len(occurrences) != 1 || occurrences[0].Key != "default" ||
+		occurrences[0].Present || occurrences[0].Executor != nil {
+		t.Fatalf("unhealthy Pi observation = %#v, error = %v", occurrences, err)
+	}
+
+	healthy := writePiFixture(t, `
+if [ "${1:-}" = "--version" ]; then
+  printf '%s\n' '0.84.2'
+  exit 0
+fi
+`)
+	t.Setenv("PATH", filepath.Dir(healthy))
+	occurrences, err = adapter.Observe(context.Background())
+	if err != nil || len(occurrences) != 1 || !occurrences[0].Present || occurrences[0].Executor != adapter {
+		t.Fatalf("healthy Pi observation = %#v, error = %v", occurrences, err)
+	}
+}
+
 func TestPromptWriteFailureKeepsOutcomeUnknown(t *testing.T) {
 	t.Parallel()
 
@@ -68,7 +106,8 @@ printf '%s\n' \
 `)
 	usePiFixture(t, binary)
 	candidate, err := New().Reply(context.Background(), host.ConversationReplyRequest{
-		Messages: []conversation.ContextMessage{{Author: conversation.AuthorMember, Text: "What are my options?"}},
+		Messages: []conversation.ContextMessage{{Author: conversation.AuthorMember,
+			Text: "What are my options?"}},
 	})
 	if err != nil {
 		t.Fatalf("reply through Pi RPC: %v", err)
@@ -86,7 +125,8 @@ printf '%s\n' '{"id":"carry-prompt","type":"response","command":"prompt","succes
 `)
 	usePiFixture(t, binary)
 	_, err := New().Reply(context.Background(), host.ConversationReplyRequest{
-		Messages: []conversation.ContextMessage{{Author: conversation.AuthorMember, Text: "Private question"}},
+		Messages: []conversation.ContextMessage{{Author: conversation.AuthorMember,
+			Text: "Private question"}},
 	})
 	if err == nil || strings.Contains(err.Error(), "PRIVATE CONVERSATION MUST NOT LEAK") {
 		t.Fatalf("Pi private failure exposed stderr: %v", err)
@@ -101,7 +141,8 @@ printf '%s\n' '{"id":"carry-prompt","type":"response","command":"prompt","succes
 `)
 	usePiFixture(t, binary)
 	_, err := New().Reply(context.Background(), host.ConversationReplyRequest{
-		Messages: []conversation.ContextMessage{{Author: conversation.AuthorMember, Text: "Private question"}},
+		Messages: []conversation.ContextMessage{{Author: conversation.AuthorMember,
+			Text: "Private question"}},
 	})
 	if !errors.Is(err, host.ErrAgentFailed) {
 		t.Fatalf("Pi private protocol error category = %v", err)

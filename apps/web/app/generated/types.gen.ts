@@ -177,6 +177,17 @@ export type ConnectedMachine = {
   replay_until: string;
 };
 
+export type AgentRecord = {
+  agent_id: string;
+  name: string;
+  avatar_index: number;
+  owner_user_id: string;
+  owner_name: string;
+  state: "active" | "removed";
+  online: boolean;
+  last_active_at: string | null;
+};
+
 export type MachineRecord = {
   machine_id: string;
   space_id: string;
@@ -192,6 +203,7 @@ export type MachineRecord = {
   revoked_by_name?: string;
   revoked_at?: string;
   can_revoke: boolean;
+  agents: Array<AgentRecord>;
 };
 
 export type MachinePage = {

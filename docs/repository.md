@@ -62,7 +62,7 @@ internal/
 ```text
 internal/
 ├── identity/ space/ agent/ conversation/ work/ machine/ run/
-├── host/{pi,codex}/         具体进程 adapter，只由 Host 组合使用
+├── host/{pi,codex}/         V1 具体进程 adapter；后续 family 各有准确 package，只由 Host composition root 显式构造
 ├── cli/                     浅层 operator 接入表面 + Agent 本机表面
 ├── postgres/
 └── server/
@@ -71,13 +71,13 @@ internal/
 两处结构性迁移，由拥有它们的节点执行，不提前部分完成：
 
 - `internal/agent/` 由具体 adapter 的家变成 Agent 身份 owner（节点 15）；
-- `internal/agent/pi|codex` 迁到 `internal/host/pi|codex`（节点 15），旧路径在同一节点删除，且不建立 registry。
+- `internal/agent/pi|codex` 迁到 `internal/host/pi|codex`（节点 15），旧路径在同一节点删除；Host 只建立一个 construction-time、duplicate-rejecting 的有界 adapter set，不建立 `init()`/反射/任意代码发现/dynamic registry。
 
 `internal/cli/login`、`internal/cli/credentialfile`、`internal/cli/userapi`、`internal/cli/work` 及其 Identity、Server、PostgreSQL、OpenAPI、Web 垂直路径承载的是作废的人用 CLI 产品，由节点 18 在 Agent 本机创建路径成立后整体删除（见 `docs/implementation.md` §7）。
 
 `internal/server/` 只是入站 HTTP/Host transport、worker 组合与路由组合：多步策略回到现有 owner，不在 server 里建第二个 service 层。不同 actor 的同名操作各有自己的 handler。
 
-禁止新增 `internal/common`、`internal/utils`、`internal/platform`、`internal/integration`、`internal/registry`。
+禁止新增 `internal/common`、`internal/utils`、`internal/platform`、`internal/integration`、`internal/registry`。Agent owner 的不可变 adapter recognition vocabulary 留在 `internal/agent`，Host 的显式 adapter composition 留在 `internal/host`；二者都不得变成独立 registry package、运行时注册系统或产品目录。
 
 ### `apps/web/`
 

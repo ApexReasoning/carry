@@ -25,6 +25,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ApexReasoning/carry/internal/agent"
 	"github.com/ApexReasoning/carry/internal/identity"
 	"github.com/ApexReasoning/carry/internal/machine"
 	carrypostgres "github.com/ApexReasoning/carry/internal/postgres"
@@ -876,7 +877,11 @@ func composeExternalLoginTestAPI(
 	if err != nil {
 		t.Fatalf("create Machine connection credentials: %v", err)
 	}
-	connections, err := machine.NewConnections(store, connectionRoot, authority, origin.String())
+	hostAPIOrigin, err := machine.ParseHostAPIOrigin(origin.String())
+	if err != nil {
+		t.Fatalf("parse Host API origin: %v", err)
+	}
+	connections, err := machine.NewConnections(store, connectionRoot, authority, origin.String(), hostAPIOrigin)
 	if err != nil {
 		t.Fatalf("compose Machine connections: %v", err)
 	}
@@ -898,7 +903,11 @@ func composeExternalLoginTestAPI(
 	if err != nil {
 		t.Fatalf("compose User routes: %v", err)
 	}
-	hostRoutes, err := carryserver.NewMachineRoutes(store, store, connections)
+	agentPresence, err := machine.NewAgentPresence(store, agent.NativeVocabulary())
+	if err != nil {
+		t.Fatalf("compose Agent presence: %v", err)
+	}
+	hostRoutes, err := carryserver.NewMachineRoutes(store, store, connections, agentPresence)
 	if err != nil {
 		t.Fatalf("compose Machine routes: %v", err)
 	}

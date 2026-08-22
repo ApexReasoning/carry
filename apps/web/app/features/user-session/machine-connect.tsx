@@ -46,7 +46,7 @@ export function MachineConnectPage({ user }: { user: User }) {
   async function decide(kind: "approve" | "deny") {
     if (!preview) return;
     if (kind === "approve" && !spaceID) {
-      setError("Choose a Space where you may connect Machines.");
+      setError("Choose a Space where you may connect Hosts.");
       return;
     }
     const command =
@@ -74,13 +74,11 @@ export function MachineConnectPage({ user }: { user: User }) {
         <p className="brand-mark">
           Carry<span className="brand-dot">.</span>
         </p>
-        <h1>
-          {complete === "approved" ? "Machine approved" : "Machine denied"}
-        </h1>
+        <h1>{complete === "approved" ? "Host approved" : "Host denied"}</h1>
         <p className="center-state-copy">
           {complete === "approved"
-            ? "Return to the terminal. Carry will issue only the certificate for the key you reviewed."
-            : "Return to the terminal. No Machine certificate will be issued."}
+            ? "Return to the terminal. The same carry setup command will install this Host and start Agent reporting."
+            : "Return to the terminal. No Host certificate will be issued."}
         </p>
       </main>
     );
@@ -91,7 +89,7 @@ export function MachineConnectPage({ user }: { user: User }) {
       <p className="brand-mark">
         Carry<span className="brand-dot">.</span>
       </p>
-      <h1>Connect a Machine</h1>
+      <h1>Connect a Host</h1>
       {!preview ? (
         <form
           onSubmit={(event) => {
@@ -100,7 +98,7 @@ export function MachineConnectPage({ user }: { user: User }) {
           }}
         >
           <label>
-            Code shown by carry host connect
+            Code shown by carry setup
             <input
               value={code}
               onChange={(event) => setCode(event.target.value)}
@@ -110,7 +108,7 @@ export function MachineConnectPage({ user }: { user: User }) {
             />
           </label>
           <button type="submit" disabled={busy || code.trim() === ""}>
-            {busy ? "Checking…" : "Review Machine"}
+            {busy ? "Checking…" : "Review Host"}
           </button>
         </form>
       ) : (
@@ -121,7 +119,7 @@ export function MachineConnectPage({ user }: { user: User }) {
             <dd>{preview.server}</dd>
             <dt>Code</dt>
             <dd>{preview.user_code}</dd>
-            <dt>Machine name</dt>
+            <dt>Host name</dt>
             <dd>{preview.display_name}</dd>
             <dt>Public key</dt>
             <dd className="machine-fingerprint">{preview.fingerprint}</dd>
@@ -144,8 +142,8 @@ export function MachineConnectPage({ user }: { user: User }) {
             </select>
           </label>
           <p>
-            This Machine may execute Work for the selected Space. The full key,
-            server, name, and code must match the terminal.
+            This Host may report Agents and execute Work for the selected Space.
+            The full key, server, name, and code must match the terminal.
           </p>
           <div className="settings-actions">
             <button
@@ -161,7 +159,7 @@ export function MachineConnectPage({ user }: { user: User }) {
               disabled={busy || !spaceID}
               onClick={() => void decide("approve")}
             >
-              {busy ? "Saving decision…" : "Connect Machine"}
+              {busy ? "Saving decision…" : "Connect Host"}
             </button>
           </div>
         </section>

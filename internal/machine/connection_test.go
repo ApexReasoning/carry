@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ApexReasoning/carry/internal/agent"
 	"github.com/google/uuid"
 )
 
@@ -35,11 +36,11 @@ func (*connectionPersistenceStub) PollMachineConnection(context.Context, PollCon
 func (*connectionPersistenceStub) CancelMachineConnection(context.Context, CancelConnectionCommand) error {
 	return errors.New("unexpected cancellation")
 }
-func (*connectionPersistenceStub) ListMachines(context.Context, ListMachinesCommand) (MachinePage, error) {
-	return MachinePage{}, errors.New("unexpected list")
+func (*connectionPersistenceStub) ListMachines(context.Context, ListMachinesCommand) (MachinePage, []agent.InventoryRecord, error) {
+	return MachinePage{}, nil, errors.New("unexpected list")
 }
-func (*connectionPersistenceStub) RevokeMachineFromBrowser(context.Context, RevokeMachineCommand) (MachineRecord, error) {
-	return MachineRecord{}, errors.New("unexpected Browser revocation")
+func (*connectionPersistenceStub) RevokeMachineFromBrowser(context.Context, RevokeMachineCommand) (MachineRecord, []agent.InventoryRecord, error) {
+	return MachineRecord{}, nil, errors.New("unexpected Browser revocation")
 }
 func (*connectionPersistenceStub) RevokeMachineFromHost(context.Context, SelfRevokeMachineCommand) (MachineRecord, error) {
 	return MachineRecord{}, errors.New("unexpected Host revocation")
@@ -78,7 +79,11 @@ func TestBeginMachineConnectionRequiresExactOriginAndKeyProof(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	connections, err := NewConnections(persistence, credentials, authority, origin)
+	hostAPIOrigin, err := ParseHostAPIOrigin("https://api.carry.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	connections, err := NewConnections(persistence, credentials, authority, origin, hostAPIOrigin)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +96,7 @@ func TestBeginMachineConnectionRequiresExactOriginAndKeyProof(t *testing.T) {
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
-	if begun.UserCode != code || begun.PollSecret != secret || begun.VerificationPath != "/machine-connect" || begun.Fingerprint != PublicKeyFingerprint(publicKeyDER) {
+	if begun.UserCode != code || begun.PollSecret != secret || begun.VerificationURL != origin+"/machine-connect" || begun.Fingerprint != PublicKeyFingerprint(publicKeyDER) {
 		t.Fatalf("begun connection = %#v", begun)
 	}
 	if persistence.beginCommand.CodeDigest == persistence.beginCommand.PollDigest || persistence.beginCommand.CodeDigest == persistence.beginCommand.SourceDigest {
@@ -106,6 +111,19 @@ func TestBeginMachineConnectionRequiresExactOriginAndKeyProof(t *testing.T) {
 	request.KeyProof[0] ^= 1
 	if _, err := connections.Begin(t.Context(), request); !errors.Is(err, ErrInvalidConnection) {
 		t.Fatalf("changed proof error = %v", err)
+	}
+}
+
+func TestHostAPIOriginRequiresCanonicalHTTPSAuthority(t *testing.T) {
+	t.Parallel()
+	origin, err := ParseHostAPIOrigin("https://api.carry.example:8443")
+	if err != nil || origin.String() != "https://api.carry.example:8443" {
+		t.Fatalf("Host API origin = %#v, %v", origin, err)
+	}
+	for _, invalid := range []string{"", "http://api.carry.example", "https://api.carry.example/", " https://api.carry.example", "https://api.carry.example/path", "https://user@api.carry.example"} {
+		if _, err := ParseHostAPIOrigin(invalid); err == nil {
+			t.Errorf("invalid Host API origin %q was accepted", invalid)
+		}
 	}
 }
 

@@ -242,7 +242,7 @@ export function App() {
                     type="button"
                     onClick={() => setSettingsPanel("machines")}
                   >
-                    Machines
+                    Hosts
                   </button>
                   <button
                     className="ghost-button"

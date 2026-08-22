@@ -97,11 +97,11 @@ func TestMachineConnectionDatabaseOwnsCadenceSingleWinnerReplayInventoryAndRevoc
 	if err := pool.QueryRow(ctx, `select count(*) from machines where space_id=$1`, member.SpaceID).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("Machine count = %d, %v", count, err)
 	}
-	page, err := connections.List(ctx, sessionID, member.SpaceID, "")
+	page, _, err := connections.List(ctx, sessionID, member.SpaceID, "")
 	if err != nil || len(page.Machines) != 1 || page.Machines[0].Fingerprint != begun.Fingerprint || page.Machines[0].State != "Active" {
 		t.Fatalf("inventory = %#v, %v", page, err)
 	}
-	revoked, err := connections.RevokeFromBrowser(ctx, sessionID, member.SpaceID, winner.MachineID, uuid.NewString())
+	revoked, _, err := connections.RevokeFromBrowser(ctx, sessionID, member.SpaceID, winner.MachineID, uuid.NewString())
 	if err != nil || revoked.State != "Revoked" || revoked.RevocationActor != "user" || revoked.RevokedByUserID != member.UserID {
 		t.Fatalf("Browser revocation = %#v, %v", revoked, err)
 	}
@@ -297,7 +297,7 @@ func TestMachineRemoteAndSelfRevocationHaveOneDatabaseWinner(t *testing.T) {
 	}
 	outcomes := make(chan error, 2)
 	go func() {
-		_, err := fixture.connections.RevokeFromBrowser(fixture.ctx, fixture.sessionID, fixture.member.SpaceID, connected.MachineID, uuid.NewString())
+		_, _, err := fixture.connections.RevokeFromBrowser(fixture.ctx, fixture.sessionID, fixture.member.SpaceID, connected.MachineID, uuid.NewString())
 		outcomes <- err
 	}()
 	go func() {
@@ -324,11 +324,11 @@ func TestMachineRemoteAndSelfRevocationHaveOneDatabaseWinner(t *testing.T) {
 		t.Fatal(err)
 	}
 	key := uuid.NewString()
-	revoked, err := fixture.connections.RevokeFromBrowser(fixture.ctx, fixture.sessionID, fixture.member.SpaceID, first.MachineID, key)
+	revoked, _, err := fixture.connections.RevokeFromBrowser(fixture.ctx, fixture.sessionID, fixture.member.SpaceID, first.MachineID, key)
 	if err != nil {
 		t.Fatal(err)
 	}
-	replayed, err := fixture.connections.RevokeFromBrowser(fixture.ctx, fixture.sessionID, fixture.member.SpaceID, first.MachineID, key)
+	replayed, _, err := fixture.connections.RevokeFromBrowser(fixture.ctx, fixture.sessionID, fixture.member.SpaceID, first.MachineID, key)
 	if err != nil || replayed.RevokedAt == nil || revoked.RevokedAt == nil || !replayed.RevokedAt.Equal(*revoked.RevokedAt) {
 		t.Fatalf("revocation replay = %#v / %#v / %v", revoked, replayed, err)
 	}
@@ -339,7 +339,7 @@ func TestMachineRemoteAndSelfRevocationHaveOneDatabaseWinner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := fixture.connections.RevokeFromBrowser(fixture.ctx, fixture.sessionID, fixture.member.SpaceID, second.MachineID, key); !errors.Is(err, machine.ErrConnectionConflict) {
+	if _, _, err := fixture.connections.RevokeFromBrowser(fixture.ctx, fixture.sessionID, fixture.member.SpaceID, second.MachineID, key); !errors.Is(err, machine.ErrConnectionConflict) {
 		t.Fatalf("reused revocation idempotency key = %v", err)
 	}
 }
@@ -411,7 +411,11 @@ func testMachineConnections(t *testing.T, store *Store) *machine.Connections {
 	if err != nil {
 		t.Fatal(err)
 	}
-	connections, err := machine.NewConnections(store, root, authority, "https://carry.example")
+	hostAPIOrigin, err := machine.ParseHostAPIOrigin("https://api.carry.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	connections, err := machine.NewConnections(store, root, authority, "https://carry.example", hostAPIOrigin)
 	if err != nil {
 		t.Fatal(err)
 	}

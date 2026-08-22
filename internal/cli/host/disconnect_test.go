@@ -34,7 +34,9 @@ func TestDisconnectRetainsExactCredentialWhenServerIsUnreachable(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := machinefile.Save(directory, machinefile.Credential{
-		MachineID: machineID, SpaceID: uuid.NewString(), ServerURL: "https://127.0.0.1:1",
+		MachineID:        machineID,
+		SpaceID:          uuid.NewString(),
+		HostAPIOrigin:    "https://127.0.0.1:1",
 		CACertificatePEM: string(bundle.CACertificatePEM), CertificatePEM: string(issued.CertificatePEM),
 		PrivateKeyPEM: string(privateKeyPEM),
 	}); err != nil {

@@ -28,20 +28,21 @@ type connectionClient struct {
 }
 
 type begunConnection struct {
-	RequestID        string    `json:"request_id"`
-	DisplayName      string    `json:"display_name"`
-	UserCode         string    `json:"user_code"`
-	PollSecret       string    `json:"poll_secret"`
-	Fingerprint      string    `json:"fingerprint"`
-	VerificationPath string    `json:"verification_path"`
-	ExpiresAt        time.Time `json:"expires_at"`
-	IntervalSeconds  int       `json:"interval_seconds"`
+	RequestID       string    `json:"request_id"`
+	DisplayName     string    `json:"display_name"`
+	UserCode        string    `json:"user_code"`
+	PollSecret      string    `json:"poll_secret"`
+	Fingerprint     string    `json:"fingerprint"`
+	VerificationURL string    `json:"verification_url"`
+	ExpiresAt       time.Time `json:"expires_at"`
+	IntervalSeconds int       `json:"interval_seconds"`
 }
 
 type connectedMachine struct {
 	MachineID      string    `json:"machine_id"`
 	SpaceID        string    `json:"space_id"`
 	DisplayName    string    `json:"display_name"`
+	HostAPIOrigin  string    `json:"host_api_origin"`
 	CertificatePEM string    `json:"certificate_pem"`
 	RedeemedAt     time.Time `json:"redeemed_at"`
 	ReplayUntil    time.Time `json:"replay_until"`
@@ -108,8 +109,8 @@ func (client *connectionClient) begin(ctx context.Context, pending machinefile.P
 	if result.Fingerprint != pending.Fingerprint {
 		return begunConnection{}, errors.New("Carry server changed the Machine fingerprint")
 	}
-	if result.VerificationPath != "/machine-connect" {
-		return begunConnection{}, errors.New("Carry server returned an invalid Machine verification path")
+	if result.VerificationURL != client.origin.String()+"/machine-connect" {
+		return begunConnection{}, errors.New("Carry server returned an invalid Machine verification URL")
 	}
 	minimumInterval := int(machine.ConnectionInitialInterval / time.Second)
 	if result.IntervalSeconds < minimumInterval {
@@ -130,7 +131,7 @@ func (client *connectionClient) poll(ctx context.Context, pollSecret string) (co
 	if err := client.send(ctx, "/v1/machine-connections/status", "", pollSecret, nil, &result, false); err != nil {
 		return connectedMachine{}, err
 	}
-	if result.MachineID == "" || result.SpaceID == "" || result.DisplayName == "" || result.CertificatePEM == "" || result.ReplayUntil.IsZero() {
+	if result.MachineID == "" || result.SpaceID == "" || result.DisplayName == "" || result.HostAPIOrigin == "" || result.CertificatePEM == "" || result.ReplayUntil.IsZero() {
 		return connectedMachine{}, errors.New("Carry server returned an invalid Machine certificate")
 	}
 	return result, nil

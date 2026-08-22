@@ -351,7 +351,7 @@ func emailTestAPIWithSources(
 	member.authentication = authentication
 	member.identity = identityRoutes
 	member.spaces = spaceRoutes
-	machine, err := NewMachineRoutes(&recordingMachineRuns{}, unavailableMachineConversations{}, unavailableMachineConnections{})
+	machine, err := NewMachineRoutes(&recordingMachineRuns{}, unavailableMachineConversations{}, unavailableMachineConnections{}, unavailableMachineAgentReports{})
 	if err != nil {
 		t.Fatalf("compose Machine routes: %v", err)
 	}
